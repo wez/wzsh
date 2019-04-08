@@ -316,6 +316,15 @@ impl<R: std::io::Read> Lexer<R> {
 
     pub fn next(&mut self) -> Result<Token, Error> {
         loop {
+            if self.token_text == b"\n" {
+                let pos = self.position;
+                let tok = Token::new(TokenKind::NewLine, pos);
+                self.position.col_number = 0;
+                self.position.line_number += 1;
+                self.token_text.clear();
+                return Ok(tok);
+            }
+
             let b = match self.next_byte() {
                 NextByte::Byte(b) => b,
                 NextByte::Eof => {
@@ -385,17 +394,13 @@ impl<R: std::io::Read> Lexer<R> {
                 // TODO: $ and backtick
                 b'\n' => {
                     self.token_text.pop();
-                    if self.token_text.is_empty() {
-                        let pos = self.position;
-                        let tok = Token::new(TokenKind::NewLine, pos);
-                        self.position.col_number = 0;
-                        self.position.line_number += 1;
-                        return Ok(tok);
+                    if !self.token_text.is_empty() {
+                        let token = self.delimit_current();
+                        self.token_text.push(b);
+                        return Ok(token);
                     }
-                    let token = self.delimit_current();
-                    self.position.col_number = 0;
-                    self.position.line_number += 1;
-                    return Ok(token);
+                    self.token_text.push(b);
+                    continue;
                 }
                 b' ' | b'\t' | b'\r' => {
                     self.token_text.pop();
