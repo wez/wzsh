@@ -3,6 +3,9 @@
 
 use lazy_static::lazy_static;
 
+pub mod alias;
+use alias::Aliases;
+
 #[derive(Debug)]
 pub struct Error {
     pub position: TokenPosition,
@@ -248,6 +251,31 @@ pub struct Token {
 impl Token {
     pub fn new(kind: TokenKind, position: TokenPosition) -> Self {
         Self { kind, position }
+    }
+
+    pub fn apply_command_word_rules(&mut self, aliases: Option<&Aliases>) {
+        // From Section 2.10.2 Shell Grammar rules, the command word has
+        // some special processing.
+
+        // Reserved word?
+        if let TokenKind::Word(ref word) = self.kind {
+            if let MatchResult::Match(reserved, _) = RESERVED_WORDS.matches(word, true) {
+                self.kind = TokenKind::ReservedWord(reserved);
+            }
+        }
+
+        // Perform alias expansion
+        if let Some(aliases) = aliases {
+            while let TokenKind::Word(ref word) = self.kind {
+                if let Some(expanded) = aliases.lookup(&word) {
+                    let recursive = expanded.ends_with(b" ");
+                    self.kind = TokenKind::Word(expanded.to_vec());
+                    if !recursive {
+                        break;
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -788,4 +816,54 @@ mod test_lex {
         );
     }
 
+    #[test]
+    fn command_word() {
+        let (mut tokens, err) = lex("echo hello");
+        assert_eq!(err, None);
+
+        tokens[0].apply_command_word_rules(None);
+        assert_eq!(
+            tokens[0],
+            Token {
+                kind: TokenKind::Word(b"echo".to_vec()),
+                position: TokenPosition {
+                    line_number: 0,
+                    col_number: 0
+                }
+            }
+        );
+
+        let (mut tokens, err) = lex("if true");
+        assert_eq!(err, None);
+
+        tokens[0].apply_command_word_rules(None);
+        assert_eq!(
+            tokens[0],
+            Token {
+                kind: TokenKind::ReservedWord(ReservedWord::If),
+                position: TokenPosition {
+                    line_number: 0,
+                    col_number: 0
+                }
+            }
+        );
+
+        let mut aliases = Aliases::new();
+        aliases.alias(b"ls", b"ls -l");
+
+        let (mut tokens, err) = lex("ls");
+        assert_eq!(err, None);
+
+        tokens[0].apply_command_word_rules(Some(&aliases));
+        assert_eq!(
+            tokens[0],
+            Token {
+                kind: TokenKind::Word(b"ls -l".to_vec()),
+                position: TokenPosition {
+                    line_number: 0,
+                    col_number: 0
+                }
+            }
+        );
+    }
 }
