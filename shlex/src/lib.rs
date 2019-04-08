@@ -4,7 +4,7 @@
 use lazy_static::lazy_static;
 
 pub mod alias;
-use alias::Aliases;
+pub use alias::Aliases;
 
 #[derive(Debug)]
 pub struct Error {

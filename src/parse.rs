@@ -1,5 +1,5 @@
 //! Shell parser
-use shlex::{Error, Lexer, Operator, Token, TokenKind, TokenPosition};
+use shlex::{Aliases, Error, Lexer, Operator, Token, TokenKind, TokenPosition};
 
 pub struct Parser<R: std::io::Read> {
     lexer: Lexer<R>,
@@ -11,22 +11,25 @@ impl<R: std::io::Read> Parser<R> {
         Self { lexer }
     }
 
-    pub fn parse(&mut self) -> Result<Vec<Node>, Error> {
+    pub fn parse(&mut self, aliases: Option<&Aliases>) -> Result<Vec<Node>, Error> {
         let mut results = vec![];
-        while let Some(cmd) = self.simple_command()? {
+        while let Some(cmd) = self.simple_command(aliases)? {
             results.push(Node::SimpleCommand(cmd));
         }
         Ok(results)
     }
 
-    fn simple_command(&mut self) -> Result<Option<SimpleCommand>, Error> {
+    fn simple_command(
+        &mut self,
+        aliases: Option<&Aliases>,
+    ) -> Result<Option<SimpleCommand>, Error> {
         let mut assignments_done = false;
         let mut assignments = vec![];
         let mut words = vec![];
         let mut asynchronous = false;
 
         loop {
-            let token = self.lexer.next()?;
+            let mut token = self.lexer.next()?;
             eprintln!("token is {:?}", token);
             match token.kind {
                 TokenKind::Eof => break,
@@ -40,9 +43,12 @@ impl<R: std::io::Read> Parser<R> {
                 TokenKind::Word(ref word) => {
                     if !assignments_done && word.contains(&b'=') {
                         assignments.push(token);
+                    } else if words.is_empty() {
+                        // Command word
+                        assignments_done = true;
+                        token.apply_command_word_rules(aliases);
+                        words.push(token);
                     } else {
-                        assignments_done = false;
-                        // FIXME: if words.is_empty(), rules 7a, 7b
                         words.push(token);
                     }
                 }
@@ -114,14 +120,14 @@ pub struct SimpleCommand {
 mod test {
     use super::*;
 
-    fn parse(text: &str) -> Result<Vec<Node>, Error> {
+    fn parse(text: &str, aliases: Option<&Aliases>) -> Result<Vec<Node>, Error> {
         let mut parser = Parser::new("test", text.as_bytes());
-        parser.parse()
+        parser.parse(aliases)
     }
 
     #[test]
     fn test_parse() {
-        let nodes = parse("ls -l foo").unwrap();
+        let nodes = parse("ls -l foo", None).unwrap();
         assert_eq!(
             nodes,
             vec![Node::SimpleCommand(SimpleCommand {
@@ -158,7 +164,7 @@ mod test {
 
     #[test]
     fn test_parse_two_lines() {
-        let nodes = parse("false\ntrue").unwrap();
+        let nodes = parse("false\ntrue", None).unwrap();
         assert_eq!(
             nodes,
             vec![
@@ -189,6 +195,38 @@ mod test {
                     },]
                 })
             ]
+        );
+    }
+
+    #[test]
+    fn test_parse_with_alias() {
+        let mut aliases = Aliases::new();
+        aliases.alias(b"ls", b"ls -l");
+        let nodes = parse("ls foo", Some(&aliases)).unwrap();
+        assert_eq!(
+            nodes,
+            vec![Node::SimpleCommand(SimpleCommand {
+                assignments: vec![],
+                file_redirects: vec![],
+                fd_dups: vec![],
+                asynchronous: false,
+                words: vec![
+                    Token {
+                        kind: TokenKind::Word(b"ls -l".to_vec()),
+                        position: TokenPosition {
+                            line_number: 0,
+                            col_number: 0
+                        },
+                    },
+                    Token {
+                        kind: TokenKind::Word(b"foo".to_vec()),
+                        position: TokenPosition {
+                            line_number: 0,
+                            col_number: 3
+                        },
+                    }
+                ]
+            })]
         );
     }
 }
