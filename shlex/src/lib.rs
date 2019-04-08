@@ -344,7 +344,8 @@ impl<R: std::io::Read> Lexer<R> {
                 MatchResult::No => {
                     // Section 2.3.6; if the latest character is the start
                     // of a new operator, then delim the current token
-                    if !self.token_text.is_empty() {
+                    if !self.token_text.is_empty() && self.is_io_number(&self.token_text).is_none()
+                    {
                         match OPERATORS.matches(&[b], false) {
                             MatchResult::No => {}
                             _ => {
@@ -415,6 +416,26 @@ impl<R: std::io::Read> Lexer<R> {
         }
     }
 
+    fn is_io_number(&self, word: &[u8]) -> Option<IoNumber> {
+        let len = word.len();
+        if len < 2 {
+            return None;
+        }
+        let last = word[len - 1];
+        if last == b'<' || last == b'>' {
+            let num_str = String::from_utf8_lossy(&word[0..len - 1]);
+            if let Ok(num) = usize::from_str_radix(&num_str, 10) {
+                let number = if last == b'<' {
+                    IoNumber::Input(num)
+                } else {
+                    IoNumber::Output(num)
+                };
+                return Some(number);
+            }
+        }
+        None
+    }
+
     fn delimit_current(&mut self) -> Token {
         if let MatchResult::Match(oper, len) = OPERATORS.matches(self.token_text.as_slice(), true) {
             if len == self.token_text.len() {
@@ -428,6 +449,11 @@ impl<R: std::io::Read> Lexer<R> {
         let word = std::mem::replace(&mut self.token_text, vec![]);
         let pos = self.position;
         self.position.col_number += word.len();
+
+        if let Some(number) = self.is_io_number(&word) {
+            return Token::new(TokenKind::IoNumber(number), pos);
+        }
+
         Token::new(TokenKind::Word(word), pos)
     }
 
@@ -864,6 +890,23 @@ mod test_lex {
                     col_number: 0
                 }
             }
+        );
+    }
+
+    #[test]
+    fn io_redirect() {
+        assert_eq!(
+            lex("1<"),
+            (
+                vec![Token {
+                    kind: TokenKind::IoNumber(IoNumber::Input(1)),
+                    position: TokenPosition {
+                        line_number: 0,
+                        col_number: 0
+                    }
+                },],
+                None
+            )
         );
     }
 }
