@@ -135,21 +135,21 @@ mod test {
                 asynchronous: false,
                 words: vec![
                     Token {
-                        kind: TokenKind::Word(b"ls".to_vec()),
+                        kind: TokenKind::Word("ls".to_string()),
                         position: TokenPosition {
                             line_number: 0,
                             col_number: 0
                         },
                     },
                     Token {
-                        kind: TokenKind::Word(b"-l".to_vec()),
+                        kind: TokenKind::Word("-l".to_string()),
                         position: TokenPosition {
                             line_number: 0,
                             col_number: 3
                         },
                     },
                     Token {
-                        kind: TokenKind::Word(b"foo".to_vec()),
+                        kind: TokenKind::Word("foo".to_string()),
                         position: TokenPosition {
                             line_number: 0,
                             col_number: 6
@@ -172,7 +172,7 @@ mod test {
                     fd_dups: vec![],
                     asynchronous: false,
                     words: vec![Token {
-                        kind: TokenKind::Word(b"false".to_vec()),
+                        kind: TokenKind::Word("false".to_string()),
                         position: TokenPosition {
                             line_number: 0,
                             col_number: 0
@@ -185,7 +185,7 @@ mod test {
                     fd_dups: vec![],
                     asynchronous: false,
                     words: vec![Token {
-                        kind: TokenKind::Word(b"true".to_vec()),
+                        kind: TokenKind::Word("true".to_string()),
                         position: TokenPosition {
                             line_number: 1,
                             col_number: 0
@@ -199,7 +199,7 @@ mod test {
     #[test]
     fn test_parse_with_alias() {
         let mut aliases = Aliases::new();
-        aliases.alias(b"ls", b"ls -l");
+        aliases.alias("ls", "ls -l");
         let nodes = parse("ls foo", Some(&aliases)).unwrap();
         assert_eq!(
             nodes,
@@ -210,14 +210,14 @@ mod test {
                 asynchronous: false,
                 words: vec![
                     Token {
-                        kind: TokenKind::Word(b"ls -l".to_vec()),
+                        kind: TokenKind::Word("ls -l".to_string()),
                         position: TokenPosition {
                             line_number: 0,
                             col_number: 0
                         },
                     },
                     Token {
-                        kind: TokenKind::Word(b"foo".to_vec()),
+                        kind: TokenKind::Word("foo".to_string()),
                         position: TokenPosition {
                             line_number: 0,
                             col_number: 3

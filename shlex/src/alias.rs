@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone, Default)]
 pub struct Aliases {
-    map: HashMap<Vec<u8>, Vec<u8>>,
+    map: HashMap<String, String>,
 }
 
 impl Aliases {
@@ -10,15 +10,15 @@ impl Aliases {
         Default::default()
     }
 
-    pub fn alias(&mut self, name: &[u8], value: &[u8]) {
-        self.map.insert(name.to_vec(), value.to_vec());
+    pub fn alias(&mut self, name: &str, value: &str) {
+        self.map.insert(name.to_string(), value.to_string());
     }
 
-    pub fn unalias(&mut self, name: &[u8]) {
+    pub fn unalias(&mut self, name: &str) {
         self.map.remove(name);
     }
 
-    pub fn lookup(&self, name: &[u8]) -> Option<&[u8]> {
-        self.map.get(name).map(Vec::as_slice)
+    pub fn lookup(&self, name: &str) -> Option<&String> {
+        self.map.get(name)
     }
 }

@@ -1,8 +1,8 @@
 //! Shell lexer
 //! See https://pubs.opengroup.org/onlinepubs/009695399/utilities/xcu_chap02.html
 
-use std::io::{Read,BufReader};
 use lazy_static::lazy_static;
+use std::io::{BufRead, BufReader};
 
 pub mod alias;
 pub mod environment;
@@ -45,7 +45,7 @@ pub struct Lexer<R: std::io::Read> {
     source: String,
     stream: BufReader<R>,
     position: TokenPosition,
-    token_text: Vec<u8>,
+    token_text: String,
 }
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,7 +94,7 @@ pub enum Operator {
 
 #[derive(Debug)]
 struct MatchEntry<T: Copy> {
-    text: &'static [u8],
+    text: &'static str,
     value: T,
     ambiguous_unless_len_is: usize,
 }
@@ -112,7 +112,7 @@ enum MatchResult<T: Copy> {
 }
 
 impl<T: Copy> LiteralMatcher<T> {
-    fn new(literals: &[(&'static [u8], T)]) -> Self {
+    fn new(literals: &[(&'static str, T)]) -> Self {
         let mut literals: Vec<MatchEntry<T>> = literals
             .iter()
             .map(|(text, value)| MatchEntry {
@@ -147,7 +147,7 @@ impl<T: Copy> LiteralMatcher<T> {
         Self { literals }
     }
 
-    fn matches(&self, text: &[u8], is_final: bool) -> MatchResult<T> {
+    fn matches(&self, text: &str, is_final: bool) -> MatchResult<T> {
         for entry in &self.literals {
             let len = entry.text.len().min(text.len());
             if &text[0..len] == &entry.text[0..len] {
@@ -188,43 +188,43 @@ pub enum ReservedWord {
 lazy_static! {
     static ref OPERATORS: LiteralMatcher<Operator> = {
         LiteralMatcher::new(&[
-            (b"<<-", Operator::DoubleLessDash),
-            (b"<<", Operator::DoubleLess),
-            (b"<&", Operator::LessAnd),
-            (b"<>", Operator::LessGreat),
-            (b">>", Operator::DoubleGreat),
-            (b">|", Operator::Clobber),
-            (b">&", Operator::GreatAnd),
-            (b"&&", Operator::AndIf),
-            (b"||", Operator::OrIf),
-            (b";;", Operator::Semicolon),
-            (b"<", Operator::Less),
-            (b"&", Operator::Ampersand),
-            (b"|", Operator::Pipe),
-            (b";", Operator::Semicolon),
-            (b">", Operator::Great),
-            (b"(", Operator::LeftParen),
-            (b")", Operator::RightParen),
+            ("<<-", Operator::DoubleLessDash),
+            ("<<", Operator::DoubleLess),
+            ("<&", Operator::LessAnd),
+            ("<>", Operator::LessGreat),
+            (">>", Operator::DoubleGreat),
+            (">|", Operator::Clobber),
+            (">&", Operator::GreatAnd),
+            ("&&", Operator::AndIf),
+            ("||", Operator::OrIf),
+            (";;", Operator::Semicolon),
+            ("<", Operator::Less),
+            ("&", Operator::Ampersand),
+            ("|", Operator::Pipe),
+            (";", Operator::Semicolon),
+            (">", Operator::Great),
+            ("(", Operator::LeftParen),
+            (")", Operator::RightParen),
         ])
     };
     static ref RESERVED_WORDS: LiteralMatcher<ReservedWord> = {
         LiteralMatcher::new(&[
-            (b"if", ReservedWord::If),
-            (b"then", ReservedWord::Then),
-            (b"else", ReservedWord::Else),
-            (b"elif", ReservedWord::Elif),
-            (b"fi", ReservedWord::Fi),
-            (b"do", ReservedWord::Do),
-            (b"done", ReservedWord::Done),
-            (b"case", ReservedWord::Case),
-            (b"esac", ReservedWord::Esac),
-            (b"while", ReservedWord::While),
-            (b"until", ReservedWord::Until),
-            (b"for", ReservedWord::For),
-            (b"{", ReservedWord::LeftBrace),
-            (b"}", ReservedWord::RightBrace),
-            (b"!", ReservedWord::Bang),
-            (b"in", ReservedWord::In),
+            ("if", ReservedWord::If),
+            ("then", ReservedWord::Then),
+            ("else", ReservedWord::Else),
+            ("elif", ReservedWord::Elif),
+            ("fi", ReservedWord::Fi),
+            ("do", ReservedWord::Do),
+            ("done", ReservedWord::Done),
+            ("case", ReservedWord::Case),
+            ("esac", ReservedWord::Esac),
+            ("while", ReservedWord::While),
+            ("until", ReservedWord::Until),
+            ("for", ReservedWord::For),
+            ("{", ReservedWord::LeftBrace),
+            ("}", ReservedWord::RightBrace),
+            ("!", ReservedWord::Bang),
+            ("in", ReservedWord::In),
         ])
     };
 }
@@ -242,29 +242,29 @@ pub enum TokenKind {
     Eof,
     Operator(Operator),
     ReservedWord(ReservedWord),
-    Name(Vec<u8>),
-    Word(Vec<u8>),
+    Name(String),
+    Word(String),
     IoNumber(IoNumber),
     NewLine,
 }
 
 /// In the shell command language, a word consisting solely of underscores, digits, and alphabetics
 /// from the portable character set. The first character of a name is not a digit.
-pub fn is_name(name: &[u8]) -> bool {
-    for (i, c) in name.iter().enumerate() {
-        if *c >= b'0' && *c <= b'9' {
+pub fn is_name(name: &str) -> bool {
+    for (i, c) in name.chars().enumerate() {
+        if c >= '0' && c <= '9' {
             if i == 0 {
                 return false;
             }
             continue;
         }
-        if *c >= b'a' && *c <= b'z' {
+        if c >= 'a' && c <= 'z' {
             continue;
         }
-        if *c >= b'A' && *c <= b'Z' {
+        if c >= 'A' && c <= 'Z' {
             continue;
         }
-        if *c == b'_' {
+        if c == '_' {
             continue;
         }
         return false;
@@ -272,14 +272,12 @@ pub fn is_name(name: &[u8]) -> bool {
     return true;
 }
 
-pub fn parse_assignment_word(word: &[u8]) -> Option<(&[u8], &[u8])> {
-    let mut iter = word.splitn(2, |c| *c == b'=');
-    let key = iter.next();
-    let val = iter.next();
-    match (key, val) {
-        (Some(key), Some(val)) => {
+pub fn parse_assignment_word(word: &str) -> Option<(&str, &str)> {
+    match word.find('=') {
+        Some(idx) => {
+            let (key, val) = word.split_at(idx);
             if is_name(key) {
-                Some((key, val))
+                Some((key, &val[1..]))
             } else {
                 None
             }
@@ -289,7 +287,7 @@ pub fn parse_assignment_word(word: &[u8]) -> Option<(&[u8], &[u8])> {
 }
 
 impl TokenKind {
-    pub fn parse_assignment_word(&self) -> Option<(&[u8], &[u8])> {
+    pub fn parse_assignment_word(&self) -> Option<(&str, &str)> {
         match self {
             TokenKind::Word(word) => parse_assignment_word(word),
             _ => None,
@@ -323,8 +321,8 @@ impl Token {
         if let Some(aliases) = aliases {
             while let TokenKind::Word(ref word) = self.kind {
                 if let Some(expanded) = aliases.lookup(&word) {
-                    let recursive = expanded.ends_with(b" ");
-                    self.kind = TokenKind::Word(expanded.to_vec());
+                    let recursive = expanded.ends_with(" ");
+                    self.kind = TokenKind::Word(expanded.to_string());
                     if !recursive {
                         break;
                     }
@@ -334,8 +332,8 @@ impl Token {
     }
 }
 
-enum NextByte {
-    Byte(u8),
+enum Next {
+    Char(char),
     Eof,
     Error(std::io::Error),
 }
@@ -346,7 +344,7 @@ impl<R: std::io::Read> Lexer<R> {
             stream: BufReader::new(stream),
             source: source.to_owned(),
             position: Default::default(),
-            token_text: vec![],
+            token_text: String::new(),
         }
     }
 
@@ -354,16 +352,42 @@ impl<R: std::io::Read> Lexer<R> {
         &self.source
     }
 
-    fn next_byte(&mut self) -> NextByte {
-        let mut buf = [0u8; 1];
-        match self.stream.read(&mut buf) {
-            Ok(1) => NextByte::Byte(buf[0]),
-            Ok(_) => NextByte::Eof,
+    fn next_char(&mut self) -> Next {
+        match self.stream.fill_buf() {
+            Ok(buf) => {
+                if buf.is_empty() {
+                    Next::Eof
+                } else {
+                    let len = buf.len().min(4);
+                    let buf = &buf[0..len];
+                    match std::str::from_utf8(buf) {
+                        Ok(s) => {
+                            let c = s.chars().next().unwrap();
+                            self.stream.consume(c.len_utf8());
+                            Next::Char(c)
+                        }
+                        Err(e) => {
+                            let (good, _) = buf.split_at(e.valid_up_to());
+                            if !good.is_empty() {
+                                let c = std::str::from_utf8(good).unwrap().chars().next().unwrap();
+                                self.stream.consume(c.len_utf8());
+                                Next::Char(c)
+                            } else {
+                                // Presumably need more data
+                                Next::Error(std::io::Error::new(
+                                    std::io::ErrorKind::Other,
+                                    format!("unable to decode utf8 from {:?}", buf),
+                                ))
+                            }
+                        }
+                    }
+                }
+            }
             Err(e) => {
                 if e.kind() == std::io::ErrorKind::UnexpectedEof {
-                    NextByte::Eof
+                    Next::Eof
                 } else {
-                    NextByte::Error(e)
+                    Next::Error(e)
                 }
             }
         }
@@ -371,7 +395,7 @@ impl<R: std::io::Read> Lexer<R> {
 
     pub fn next(&mut self) -> Result<Token, Error> {
         loop {
-            if self.token_text == b"\n" {
+            if self.token_text == "\n" {
                 let pos = self.position;
                 let tok = Token::new(TokenKind::NewLine, pos);
                 self.position.col_number = 0;
@@ -380,22 +404,22 @@ impl<R: std::io::Read> Lexer<R> {
                 return Ok(tok);
             }
 
-            let b = match self.next_byte() {
-                NextByte::Byte(b) => b,
-                NextByte::Eof => {
+            let b = match self.next_char() {
+                Next::Char(b) => b,
+                Next::Eof => {
                     // Section 2.3.1
                     if self.token_text.is_empty() {
                         return Ok(Token::new(TokenKind::Eof, self.position));
                     }
                     return Ok(self.delimit_current());
                 }
-                NextByte::Error(e) => return Err(Error::from_io(e, self.position)),
+                Next::Error(e) => return Err(Error::from_io(e, self.position)),
             };
 
             self.token_text.push(b);
 
             // Section 2.3.2 + 2.3.3
-            match OPERATORS.matches(self.token_text.as_slice(), false) {
+            match OPERATORS.matches(&self.token_text, false) {
                 MatchResult::Match(oper, len) => {
                     let pos = self.position;
                     self.position.col_number += len;
@@ -410,7 +434,8 @@ impl<R: std::io::Read> Lexer<R> {
                     // of a new operator, then delim the current token
                     if !self.token_text.is_empty() && self.is_io_number(&self.token_text).is_none()
                     {
-                        match OPERATORS.matches(&[b], false) {
+                        let len = self.token_text.len();
+                        match OPERATORS.matches(&self.token_text[len - 1..len], false) {
                             MatchResult::No => {}
                             _ => {
                                 self.token_text.pop();
@@ -424,18 +449,18 @@ impl<R: std::io::Read> Lexer<R> {
             }
 
             match b {
-                b'\\' => {
-                    let b = match self.next_byte() {
-                        NextByte::Byte(b) => b,
-                        NextByte::Eof => {
+                '\\' => {
+                    let b = match self.next_char() {
+                        Next::Char(b) => b,
+                        Next::Eof => {
                             return Err(Error::with_message(
                                 "unexpected end of file while lexing backslash",
                                 self.position,
                             ));
                         }
-                        NextByte::Error(e) => return Err(Error::from_io(e, self.position)),
+                        Next::Error(e) => return Err(Error::from_io(e, self.position)),
                     };
-                    if b == b'\n' {
+                    if b == '\n' {
                         // Line continuation
                         self.token_text.pop();
                     } else {
@@ -444,10 +469,10 @@ impl<R: std::io::Read> Lexer<R> {
                     }
                     continue;
                 }
-                b'\'' => self.single_quoted()?,
-                b'"' => self.double_quoted()?,
+                '\'' => self.single_quoted()?,
+                '"' => self.double_quoted()?,
                 // TODO: $ and backtick
-                b'\n' => {
+                '\n' => {
                     self.token_text.pop();
                     if !self.token_text.is_empty() {
                         let token = self.delimit_current();
@@ -457,7 +482,7 @@ impl<R: std::io::Read> Lexer<R> {
                     self.token_text.push(b);
                     continue;
                 }
-                b' ' | b'\t' | b'\r' => {
+                ' ' | '\t' | '\r' => {
                     self.token_text.pop();
                     if self.token_text.is_empty() {
                         self.position.col_number += 1;
@@ -467,7 +492,7 @@ impl<R: std::io::Read> Lexer<R> {
                     self.position.col_number += 1;
                     return Ok(tok);
                 }
-                b'#' => {
+                '#' => {
                     self.token_text.pop();
                     self.comment()?;
                 }
@@ -476,14 +501,14 @@ impl<R: std::io::Read> Lexer<R> {
         }
     }
 
-    fn is_io_number(&self, word: &[u8]) -> Option<IoNumber> {
+    fn is_io_number(&self, word: &str) -> Option<IoNumber> {
         let len = word.len();
         if len < 2 {
             return None;
         }
-        let last = word[len - 1];
+        let last = word.as_bytes()[len - 1];
         if last == b'<' || last == b'>' {
-            let num_str = String::from_utf8_lossy(&word[0..len - 1]);
+            let num_str = &word[0..len - 1];
             if let Ok(num) = usize::from_str_radix(&num_str, 10) {
                 let number = if last == b'<' {
                     IoNumber::Input(num)
@@ -497,7 +522,7 @@ impl<R: std::io::Read> Lexer<R> {
     }
 
     fn delimit_current(&mut self) -> Token {
-        if let MatchResult::Match(oper, len) = OPERATORS.matches(self.token_text.as_slice(), true) {
+        if let MatchResult::Match(oper, len) = OPERATORS.matches(&self.token_text, true) {
             if len == self.token_text.len() {
                 let pos = self.position;
                 self.position.col_number += len;
@@ -506,7 +531,7 @@ impl<R: std::io::Read> Lexer<R> {
             }
         }
 
-        let word = std::mem::replace(&mut self.token_text, vec![]);
+        let word = std::mem::replace(&mut self.token_text, String::new());
         let pos = self.position;
         self.position.col_number += word.len();
 
@@ -519,18 +544,18 @@ impl<R: std::io::Read> Lexer<R> {
 
     fn comment(&mut self) -> Result<(), Error> {
         loop {
-            let b = match self.next_byte() {
-                NextByte::Byte(b) => b,
-                NextByte::Eof => {
+            let b = match self.next_char() {
+                Next::Char(b) => b,
+                Next::Eof => {
                     return Err(Error::with_message(
                         "unexpected end of file while lexing comment",
                         self.position,
                     ));
                 }
-                NextByte::Error(e) => return Err(Error::from_io(e, self.position)),
+                Next::Error(e) => return Err(Error::from_io(e, self.position)),
             };
 
-            if b == b'\n' {
+            if b == '\n' {
                 self.position.col_number = 0;
                 self.position.line_number += 1;
                 return Ok(());
@@ -541,25 +566,25 @@ impl<R: std::io::Read> Lexer<R> {
     fn single_quoted(&mut self) -> Result<(), Error> {
         let mut backslash = false;
         loop {
-            let b = match self.next_byte() {
-                NextByte::Byte(b) => b,
-                NextByte::Eof => {
+            let b = match self.next_char() {
+                Next::Char(b) => b,
+                Next::Eof => {
                     return Err(Error::with_message(
                         "unexpected end of file while lexing single quoted string",
                         self.position,
                     ));
                 }
-                NextByte::Error(e) => return Err(Error::from_io(e, self.position)),
+                Next::Error(e) => return Err(Error::from_io(e, self.position)),
             };
             self.token_text.push(b);
 
-            if b == b'\'' && !backslash {
+            if b == '\'' && !backslash {
                 return Ok(());
             }
 
             backslash = false;
 
-            if b == b'\\' {
+            if b == '\\' {
                 backslash = true;
             }
         }
@@ -568,25 +593,25 @@ impl<R: std::io::Read> Lexer<R> {
     fn double_quoted(&mut self) -> Result<(), Error> {
         let mut backslash = false;
         loop {
-            let b = match self.next_byte() {
-                NextByte::Byte(b) => b,
-                NextByte::Eof => {
+            let b = match self.next_char() {
+                Next::Char(b) => b,
+                Next::Eof => {
                     return Err(Error::with_message(
                         "unexpected end of file while lexing double quoted string",
                         self.position,
                     ));
                 }
-                NextByte::Error(e) => return Err(Error::from_io(e, self.position)),
+                Next::Error(e) => return Err(Error::from_io(e, self.position)),
             };
             self.token_text.push(b);
 
-            if b == b'"' && !backslash {
+            if b == '"' && !backslash {
                 return Ok(());
             }
 
             backslash = false;
 
-            if b == b'\\' {
+            if b == '\\' {
                 backslash = true;
             }
         }
@@ -599,29 +624,29 @@ mod test_oper {
 
     #[test]
     fn oper() {
-        assert_eq!(OPERATORS.matches(b"w", false), MatchResult::No);
-        assert_eq!(OPERATORS.matches(b"w", true), MatchResult::No);
-        assert_eq!(OPERATORS.matches(b"&", false), MatchResult::Ambiguous(2));
+        assert_eq!(OPERATORS.matches("w", false), MatchResult::No);
+        assert_eq!(OPERATORS.matches("w", true), MatchResult::No);
+        assert_eq!(OPERATORS.matches("&", false), MatchResult::Ambiguous(2));
         assert_eq!(
-            OPERATORS.matches(b"&", true),
+            OPERATORS.matches("&", true),
             MatchResult::Match(Operator::Ampersand, 1)
         );
         assert_eq!(
-            OPERATORS.matches(b"&&", false),
+            OPERATORS.matches("&&", false),
             MatchResult::Match(Operator::AndIf, 2)
         );
         assert_eq!(
-            OPERATORS.matches(b"&&", true),
+            OPERATORS.matches("&&", true),
             MatchResult::Match(Operator::AndIf, 2)
         );
-        assert_eq!(OPERATORS.matches(b"<", false), MatchResult::Ambiguous(3));
-        assert_eq!(OPERATORS.matches(b"<<", false), MatchResult::Ambiguous(3));
+        assert_eq!(OPERATORS.matches("<", false), MatchResult::Ambiguous(3));
+        assert_eq!(OPERATORS.matches("<<", false), MatchResult::Ambiguous(3));
         assert_eq!(
-            OPERATORS.matches(b"<<", true),
+            OPERATORS.matches("<<", true),
             MatchResult::Match(Operator::DoubleLess, 2)
         );
         assert_eq!(
-            OPERATORS.matches(b"<<-", false),
+            OPERATORS.matches("<<-", false),
             MatchResult::Match(Operator::DoubleLessDash, 3)
         );
     }
@@ -705,7 +730,7 @@ mod test_lex {
                         }
                     },
                     Token {
-                        kind: TokenKind::Word(vec![b'a']),
+                        kind: TokenKind::Word("a".to_string()),
                         position: TokenPosition {
                             line_number: 1,
                             col_number: 0
@@ -724,7 +749,7 @@ mod test_lex {
             (
                 vec![
                     Token {
-                        kind: TokenKind::Word(b"true".to_vec()),
+                        kind: TokenKind::Word("true".to_string()),
                         position: TokenPosition {
                             line_number: 0,
                             col_number: 0
@@ -738,7 +763,7 @@ mod test_lex {
                         }
                     },
                     Token {
-                        kind: TokenKind::Word(b"false".to_vec()),
+                        kind: TokenKind::Word("false".to_string()),
                         position: TokenPosition {
                             line_number: 0,
                             col_number: 8
@@ -753,7 +778,7 @@ mod test_lex {
             (
                 vec![
                     Token {
-                        kind: TokenKind::Word(b"true".to_vec()),
+                        kind: TokenKind::Word("true".to_string()),
                         position: TokenPosition {
                             line_number: 0,
                             col_number: 0
@@ -767,7 +792,7 @@ mod test_lex {
                         }
                     },
                     Token {
-                        kind: TokenKind::Word(b"false".to_vec()),
+                        kind: TokenKind::Word("false".to_string()),
                         position: TokenPosition {
                             line_number: 0,
                             col_number: 6
@@ -785,7 +810,7 @@ mod test_lex {
             lex("'hello'"),
             (
                 vec![Token {
-                    kind: TokenKind::Word(b"'hello'".to_vec()),
+                    kind: TokenKind::Word("'hello'".to_string()),
                     position: TokenPosition {
                         line_number: 0,
                         col_number: 0
@@ -798,7 +823,7 @@ mod test_lex {
             lex("'hel\\'lo'"),
             (
                 vec![Token {
-                    kind: TokenKind::Word(b"'hel\\'lo'".to_vec()),
+                    kind: TokenKind::Word("'hel\\'lo'".to_string()),
                     position: TokenPosition {
                         line_number: 0,
                         col_number: 0
@@ -811,7 +836,7 @@ mod test_lex {
             lex("hello'world'"),
             (
                 vec![Token {
-                    kind: TokenKind::Word(b"hello'world'".to_vec()),
+                    kind: TokenKind::Word("hello'world'".to_string()),
                     position: TokenPosition {
                         line_number: 0,
                         col_number: 0
@@ -828,7 +853,7 @@ mod test_lex {
             lex("\"hello\""),
             (
                 vec![Token {
-                    kind: TokenKind::Word(b"\"hello\"".to_vec()),
+                    kind: TokenKind::Word("\"hello\"".to_string()),
                     position: TokenPosition {
                         line_number: 0,
                         col_number: 0
@@ -841,7 +866,7 @@ mod test_lex {
             lex("\"hel\\'lo\""),
             (
                 vec![Token {
-                    kind: TokenKind::Word(b"\"hel\\'lo\"".to_vec()),
+                    kind: TokenKind::Word("\"hel\\'lo\"".to_string()),
                     position: TokenPosition {
                         line_number: 0,
                         col_number: 0
@@ -854,7 +879,7 @@ mod test_lex {
             lex("hello\"world\""),
             (
                 vec![Token {
-                    kind: TokenKind::Word(b"hello\"world\"".to_vec()),
+                    kind: TokenKind::Word("hello\"world\"".to_string()),
                     position: TokenPosition {
                         line_number: 0,
                         col_number: 0
@@ -878,7 +903,7 @@ mod test_lex {
             lex("\\\\"),
             (
                 vec![Token {
-                    kind: TokenKind::Word(b"\\\\".to_vec()),
+                    kind: TokenKind::Word("\\\\".to_string()),
                     position: TokenPosition {
                         line_number: 0,
                         col_number: 0
@@ -891,7 +916,7 @@ mod test_lex {
             lex("\\\na"),
             (
                 vec![Token {
-                    kind: TokenKind::Word(b"a".to_vec()),
+                    kind: TokenKind::Word("a".to_string()),
                     position: TokenPosition {
                         line_number: 0,
                         col_number: 0
@@ -911,7 +936,7 @@ mod test_lex {
         assert_eq!(
             tokens[0],
             Token {
-                kind: TokenKind::Word(b"echo".to_vec()),
+                kind: TokenKind::Word("echo".to_string()),
                 position: TokenPosition {
                     line_number: 0,
                     col_number: 0
@@ -935,7 +960,7 @@ mod test_lex {
         );
 
         let mut aliases = Aliases::new();
-        aliases.alias(b"ls", b"ls -l");
+        aliases.alias("ls", "ls -l");
 
         let (mut tokens, err) = lex("ls");
         assert_eq!(err, None);
@@ -944,7 +969,7 @@ mod test_lex {
         assert_eq!(
             tokens[0],
             Token {
-                kind: TokenKind::Word(b"ls -l".to_vec()),
+                kind: TokenKind::Word("ls -l".to_string()),
                 position: TokenPosition {
                     line_number: 0,
                     col_number: 0
@@ -972,28 +997,22 @@ mod test_lex {
 
     #[test]
     fn name() {
-        assert!(is_name(b"foo"));
-        assert!(!is_name(b"1foo"));
-        assert!(is_name(b"foo1"));
-        assert!(is_name(b"foo_1"));
-        assert!(is_name(b"_foo_1"));
+        assert!(is_name("foo"));
+        assert!(!is_name("1foo"));
+        assert!(is_name("foo1"));
+        assert!(is_name("foo_1"));
+        assert!(is_name("_foo_1"));
     }
 
     #[test]
     fn assignment_word() {
-        let tok = TokenKind::Word(b"foo".to_vec());
+        let tok = TokenKind::Word("foo".to_string());
         assert_eq!(tok.parse_assignment_word(), None);
 
-        let tok = TokenKind::Word(b"foo=bar".to_vec());
-        assert_eq!(
-            tok.parse_assignment_word(),
-            Some((b"foo".to_vec().as_slice(), b"bar".to_vec().as_slice()))
-        );
+        let tok = TokenKind::Word("foo=bar".to_string());
+        assert_eq!(tok.parse_assignment_word(), Some(("foo", "bar")));
 
-        let tok = TokenKind::Word(b"foo=bar=baz".to_vec());
-        assert_eq!(
-            tok.parse_assignment_word(),
-            Some((b"foo".to_vec().as_slice(), b"bar=baz".to_vec().as_slice()))
-        );
+        let tok = TokenKind::Word("foo=bar=baz".to_string());
+        assert_eq!(tok.parse_assignment_word(), Some(("foo", "bar=baz")));
     }
 }

@@ -125,6 +125,7 @@ mod test {
         assert_eq!(format!("{:?}", s), "\"foo\"");
     }
 
+    #[test]
     fn format_os_string_compat() {
         let os: ShellString = OsStr::new("foo").into();
         assert_eq!(format!("{}", os), "foo");
