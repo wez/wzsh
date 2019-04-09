@@ -1,6 +1,7 @@
 //! Shell lexer
 //! See https://pubs.opengroup.org/onlinepubs/009695399/utilities/xcu_chap02.html
 
+use std::io::{Read,BufReader};
 use lazy_static::lazy_static;
 
 pub mod alias;
@@ -42,7 +43,7 @@ impl std::fmt::Display for Error {
 
 pub struct Lexer<R: std::io::Read> {
     source: String,
-    stream: R,
+    stream: BufReader<R>,
     position: TokenPosition,
     token_text: Vec<u8>,
 }
@@ -342,7 +343,7 @@ enum NextByte {
 impl<R: std::io::Read> Lexer<R> {
     pub fn new(source: &str, stream: R) -> Self {
         Self {
-            stream,
+            stream: BufReader::new(stream),
             source: source.to_owned(),
             position: Default::default(),
             token_text: vec![],
