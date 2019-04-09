@@ -23,7 +23,6 @@ impl<R: std::io::Read> Parser<R> {
         &mut self,
         aliases: Option<&Aliases>,
     ) -> Result<Option<SimpleCommand>, Error> {
-        let mut assignments_done = false;
         let mut assignments = vec![];
         let mut words = vec![];
         let mut asynchronous = false;
@@ -40,12 +39,11 @@ impl<R: std::io::Read> Parser<R> {
                 TokenKind::Operator(Operator::Semicolon) | TokenKind::NewLine => {
                     break;
                 }
-                TokenKind::Word(ref word) => {
-                    if !assignments_done && word.contains(&b'=') {
+                TokenKind::Word(_) => {
+                    if words.is_empty() && token.kind.parse_assignment_word().is_some() {
                         assignments.push(token);
                     } else if words.is_empty() {
                         // Command word
-                        assignments_done = true;
                         token.apply_command_word_rules(aliases);
                         words.push(token);
                     } else {

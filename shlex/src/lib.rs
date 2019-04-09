@@ -5,8 +5,10 @@ use lazy_static::lazy_static;
 
 pub mod alias;
 pub mod environment;
+pub mod expander;
 pub use alias::Aliases;
 pub use environment::Environment;
+pub use expander::Expander;
 
 #[derive(Debug)]
 pub struct Error {
@@ -242,6 +244,55 @@ pub enum TokenKind {
     Word(Vec<u8>),
     IoNumber(IoNumber),
     NewLine,
+}
+
+/// In the shell command language, a word consisting solely of underscores, digits, and alphabetics
+/// from the portable character set. The first character of a name is not a digit.
+pub fn is_name(name: &[u8]) -> bool {
+    for (i, c) in name.iter().enumerate() {
+        if *c >= b'0' && *c <= b'9' {
+            if i == 0 {
+                return false;
+            }
+            continue;
+        }
+        if *c >= b'a' && *c <= b'z' {
+            continue;
+        }
+        if *c >= b'A' && *c <= b'Z' {
+            continue;
+        }
+        if *c == b'_' {
+            continue;
+        }
+        return false;
+    }
+    return true;
+}
+
+pub fn parse_assignment_word(word: &[u8]) -> Option<(&[u8], &[u8])> {
+    let mut iter = word.splitn(2, |c| *c == b'=');
+    let key = iter.next();
+    let val = iter.next();
+    match (key, val) {
+        (Some(key), Some(val)) => {
+            if is_name(key) {
+                Some((key, val))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+impl TokenKind {
+    pub fn parse_assignment_word(&self) -> Option<(&[u8], &[u8])> {
+        match self {
+            TokenKind::Word(word) => parse_assignment_word(word),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -914,6 +965,33 @@ mod test_lex {
                 },],
                 None
             )
+        );
+    }
+
+    #[test]
+    fn name() {
+        assert!(is_name(b"foo"));
+        assert!(!is_name(b"1foo"));
+        assert!(is_name(b"foo1"));
+        assert!(is_name(b"foo_1"));
+        assert!(is_name(b"_foo_1"));
+    }
+
+    #[test]
+    fn assignment_word() {
+        let tok = TokenKind::Word(b"foo".to_vec());
+        assert_eq!(tok.parse_assignment_word(), None);
+
+        let tok = TokenKind::Word(b"foo=bar".to_vec());
+        assert_eq!(
+            tok.parse_assignment_word(),
+            Some((b"foo".to_vec().as_slice(), b"bar".to_vec().as_slice()))
+        );
+
+        let tok = TokenKind::Word(b"foo=bar=baz".to_vec());
+        assert_eq!(
+            tok.parse_assignment_word(),
+            Some((b"foo".to_vec().as_slice(), b"bar=baz".to_vec().as_slice()))
         );
     }
 }
