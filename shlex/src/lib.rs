@@ -6,6 +6,7 @@ use lazy_static::lazy_static;
 pub mod alias;
 pub mod environment;
 pub mod expander;
+pub mod string;
 pub use alias::Aliases;
 pub use environment::Environment;
 pub use expander::Expander;
