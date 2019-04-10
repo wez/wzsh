@@ -40,8 +40,6 @@ pub enum LexErrorKind {
     EofDuringDoubleQuotedString,
     #[fail(display = "EOF while lexing parameter expansion")]
     EofDuringParameterExpansion,
-    #[fail(display = "Invalid UTF-8 sequence while reading program text")]
-    InvalidUtf8InProgramText,
     #[fail(display = "IO Error")]
     IoError,
 }

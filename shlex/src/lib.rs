@@ -3,7 +3,6 @@
 
 use failure::{Error, Fallible};
 use lazy_static::lazy_static;
-use std::io::ErrorKind as IoErrorKind;
 use std::io::{BufRead, BufReader};
 
 pub mod alias;
@@ -20,6 +19,8 @@ pub use expander::Expander;
 pub struct Lexer<R: std::io::Read> {
     source: String,
     stream: BufReader<R>,
+    stream_buffer: String,
+    stream_buffer_pos: usize,
     position: TokenPosition,
     token_text: String,
 }
@@ -316,6 +317,8 @@ impl<R: std::io::Read> Lexer<R> {
     pub fn new(source: &str, stream: R) -> Self {
         Self {
             stream: BufReader::new(stream),
+            stream_buffer: String::new(),
+            stream_buffer_pos: 0,
             source: source.to_owned(),
             position: Default::default(),
             token_text: String::new(),
@@ -327,39 +330,25 @@ impl<R: std::io::Read> Lexer<R> {
     }
 
     fn next_char(&mut self) -> Next {
-        match self.stream.fill_buf() {
-            Ok(buf) => {
-                if buf.is_empty() {
-                    Next::Eof
-                } else {
-                    let len = buf.len().min(4);
-                    let buf = &buf[0..len];
-                    match std::str::from_utf8(buf) {
-                        Ok(s) => {
-                            let c = s.chars().next().unwrap();
-                            self.stream.consume(c.len_utf8());
-                            Next::Char(c)
-                        }
-                        Err(e) => {
-                            let (good, _) = buf.split_at(e.valid_up_to());
-                            if !good.is_empty() {
-                                let c = std::str::from_utf8(good).unwrap().chars().next().unwrap();
-                                self.stream.consume(c.len_utf8());
-                                Next::Char(c)
-                            } else {
-                                // Presumably need more data
-                                Next::Error(LexErrorKind::InvalidUtf8InProgramText.into())
-                            }
-                        }
-                    }
-                }
+        if self.stream_buffer.is_empty() || self.stream_buffer_pos >= self.stream_buffer.len() {
+            self.stream_buffer.clear();
+            match self.stream.read_line(&mut self.stream_buffer) {
+                Ok(0) => return Next::Eof,
+                Err(e) => return Next::Error(e.into()),
+                _ => self.stream_buffer_pos = 0,
             }
-            Err(e) => {
-                if e.kind() == IoErrorKind::UnexpectedEof {
-                    Next::Eof
-                } else {
-                    Next::Error(e.into())
-                }
+        }
+        match (&self.stream_buffer[self.stream_buffer_pos..])
+            .chars()
+            .next()
+        {
+            Some(c) => {
+                self.stream_buffer_pos += c.len_utf8();
+                Next::Char(c)
+            }
+            None => {
+                self.stream_buffer.clear();
+                self.next_char()
             }
         }
     }
@@ -644,6 +633,7 @@ impl<R: std::io::Read> Lexer<R> {
 #[cfg(test)]
 mod test_oper {
     use super::*;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn oper() {
@@ -678,6 +668,7 @@ mod test_oper {
 #[cfg(test)]
 mod test_lex {
     use super::*;
+    use pretty_assertions::assert_eq;
 
     fn lex(text: &str) -> (Vec<Token>, Option<String>) {
         let mut lexer = Lexer::new("test", text.as_bytes());
