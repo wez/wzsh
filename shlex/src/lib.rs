@@ -3,6 +3,8 @@
 
 use failure::{Error, Fallible};
 use lazy_static::lazy_static;
+use regex::{self, Regex};
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 
 pub mod alias;
@@ -64,75 +66,43 @@ pub enum Operator {
 }
 
 #[derive(Debug)]
-struct MatchEntry<T: Copy> {
-    text: &'static str,
-    value: T,
-    ambiguous_unless_len_is: usize,
-}
-
-#[derive(Debug)]
 struct LiteralMatcher<T: Copy> {
-    literals: Vec<MatchEntry<T>>,
+    re: Regex,
+    map: HashMap<&'static str, T>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MatchResult<T: Copy> {
     Match(T, usize),
-    Ambiguous(usize),
     No,
 }
 
 impl<T: Copy> LiteralMatcher<T> {
     fn new(literals: &[(&'static str, T)]) -> Self {
-        let mut literals: Vec<MatchEntry<T>> = literals
-            .iter()
-            .map(|(text, value)| MatchEntry {
-                text,
-                value: *value,
-                ambiguous_unless_len_is: 0,
-            })
-            .collect();
-
-        // Sort by length of token descending
-        literals.sort_by(|a, b| b.text.len().cmp(&a.text.len()));
-
-        // Compute disambiguation information
-        let num_literals = literals.len();
-        for i in 0..num_literals {
-            let lit = &literals[i].text;
-            let mut longest = lit.len();
-            for j in 0..num_literals {
-                if i == j {
-                    continue;
-                }
-
-                if literals[j].text.starts_with(lit) {
-                    let len = literals[j].text.len();
-                    longest = longest.max(len);
-                }
+        let mut pattern = String::new();
+        let mut map = HashMap::new();
+        pattern.push_str("^(");
+        for (idx, lit) in literals.iter().enumerate() {
+            if idx > 0 {
+                pattern.push('|');
             }
-
-            literals[i].ambiguous_unless_len_is = longest;
+            pattern.push_str(&regex::escape(lit.0));
+            map.insert(lit.0, lit.1);
         }
+        pattern.push_str(")$");
 
-        Self { literals }
+        Self {
+            re: Regex::new(&pattern).unwrap(),
+            map,
+        }
     }
 
-    fn matches(&self, text: &str, is_final: bool) -> MatchResult<T> {
-        for entry in &self.literals {
-            let len = entry.text.len().min(text.len());
-            if &text[0..len] == &entry.text[0..len] {
-                if entry.ambiguous_unless_len_is == len {
-                    return MatchResult::Match(entry.value, entry.text.len());
-                }
-                if !is_final {
-                    return MatchResult::Ambiguous(entry.ambiguous_unless_len_is);
-                } else if entry.text.len() <= text.len() {
-                    return MatchResult::Match(entry.value, entry.text.len());
-                }
-            }
+    fn matches(&self, text: &str) -> MatchResult<T> {
+        if let Some(m) = self.re.find(text) {
+            MatchResult::Match(*self.map.get(m.as_str()).unwrap(), m.as_str().len())
+        } else {
+            MatchResult::No
         }
-        MatchResult::No
     }
 }
 
@@ -287,7 +257,7 @@ impl Token {
 
         // Reserved word?
         if let TokenKind::Word(ref word) = self.kind {
-            if let MatchResult::Match(reserved, _) = RESERVED_WORDS.matches(word, true) {
+            if let MatchResult::Match(reserved, _) = RESERVED_WORDS.matches(word) {
                 self.kind = TokenKind::ReservedWord(reserved);
             }
         }
@@ -353,17 +323,14 @@ impl<R: std::io::Read> Lexer<R> {
         }
     }
 
+    fn unget(&mut self, c: char) {
+        let len = c.len_utf8();
+        assert!(len < self.stream_buffer_pos);
+        self.stream_buffer_pos -= len;
+    }
+
     pub fn next(&mut self) -> Fallible<Token> {
         loop {
-            if self.token_text == "\n" {
-                let pos = self.position;
-                let tok = Token::new(TokenKind::NewLine, pos);
-                self.position.col_number = 0;
-                self.position.line_number += 1;
-                self.token_text.clear();
-                return Ok(tok);
-            }
-
             let b = match self.next_char() {
                 Next::Char(b) => b,
                 Next::Eof => {
@@ -378,29 +345,39 @@ impl<R: std::io::Read> Lexer<R> {
 
             self.token_text.push(b);
 
-            // Section 2.3.2 + 2.3.3
-            match OPERATORS.matches(&self.token_text, false) {
-                MatchResult::Match(oper, len) => {
-                    let pos = self.position;
-                    self.position.col_number += len;
-                    for _ in 0..len {
-                        self.token_text.remove(0);
-                    }
-                    return Ok(Token::new(TokenKind::Operator(oper), pos));
+            match OPERATORS.matches(&self.token_text) {
+                MatchResult::Match(..) => {
+                    // Section 2.3.2
+                    continue;
                 }
-                MatchResult::Ambiguous(_) => {}
                 MatchResult::No => {
+                    // Section 2.3.3
+                    // Together with the prior text, this most recent character doesn't
+                    // form an operator, so look at the text without it; if that is one
+                    // then we delimit a token
+                    if self.token_text.len() > 1 {
+                        if let MatchResult::Match(oper, len) =
+                            OPERATORS.matches(&self.token_text[0..self.token_text.len() - 1])
+                        {
+                            let pos = self.position;
+                            self.position.col_number += len;
+                            self.token_text.clear();
+                            self.unget(b);
+                            return Ok(Token::new(TokenKind::Operator(oper), pos));
+                        }
+                    }
+
                     // Section 2.3.6; if the latest character is the start
                     // of a new operator, then delim the current token
                     if !self.token_text.is_empty() && self.is_io_number(&self.token_text).is_none()
                     {
                         let len = self.token_text.len();
-                        match OPERATORS.matches(&self.token_text[len - 1..len], false) {
+                        match OPERATORS.matches(&self.token_text[len - 1..len]) {
                             MatchResult::No => {}
                             _ => {
                                 self.token_text.pop();
                                 let tok = self.delimit_current();
-                                self.token_text.push(b);
+                                self.unget(b);
                                 return Ok(tok);
                             }
                         }
@@ -434,11 +411,15 @@ impl<R: std::io::Read> Lexer<R> {
                     self.token_text.pop();
                     if !self.token_text.is_empty() {
                         let token = self.delimit_current();
-                        self.token_text.push(b);
+                        self.unget(b);
                         return Ok(token);
                     }
-                    self.token_text.push(b);
-                    continue;
+                    let pos = self.position;
+                    let tok = Token::new(TokenKind::NewLine, pos);
+                    self.position.col_number = 0;
+                    self.position.line_number += 1;
+                    self.token_text.clear();
+                    return Ok(tok);
                 }
                 ' ' | '\t' | '\r' => {
                     self.token_text.pop();
@@ -480,7 +461,7 @@ impl<R: std::io::Read> Lexer<R> {
     }
 
     fn delimit_current(&mut self) -> Token {
-        if let MatchResult::Match(oper, len) = OPERATORS.matches(&self.token_text, true) {
+        if let MatchResult::Match(oper, len) = OPERATORS.matches(&self.token_text) {
             if len == self.token_text.len() {
                 let pos = self.position;
                 self.position.col_number += len;
@@ -637,29 +618,25 @@ mod test_oper {
 
     #[test]
     fn oper() {
-        assert_eq!(OPERATORS.matches("w", false), MatchResult::No);
-        assert_eq!(OPERATORS.matches("w", true), MatchResult::No);
-        assert_eq!(OPERATORS.matches("&", false), MatchResult::Ambiguous(2));
+        assert_eq!(OPERATORS.matches("w"), MatchResult::No);
         assert_eq!(
-            OPERATORS.matches("&", true),
+            OPERATORS.matches("&"),
             MatchResult::Match(Operator::Ampersand, 1)
         );
         assert_eq!(
-            OPERATORS.matches("&&", false),
+            OPERATORS.matches("&&"),
             MatchResult::Match(Operator::AndIf, 2)
         );
         assert_eq!(
-            OPERATORS.matches("&&", true),
-            MatchResult::Match(Operator::AndIf, 2)
+            OPERATORS.matches("<"),
+            MatchResult::Match(Operator::Less, 1)
         );
-        assert_eq!(OPERATORS.matches("<", false), MatchResult::Ambiguous(3));
-        assert_eq!(OPERATORS.matches("<<", false), MatchResult::Ambiguous(3));
         assert_eq!(
-            OPERATORS.matches("<<", true),
+            OPERATORS.matches("<<"),
             MatchResult::Match(Operator::DoubleLess, 2)
         );
         assert_eq!(
-            OPERATORS.matches("<<-", false),
+            OPERATORS.matches("<<-"),
             MatchResult::Match(Operator::DoubleLessDash, 3)
         );
     }
