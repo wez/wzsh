@@ -234,7 +234,7 @@ pub fn is_name_char(c: char) -> bool {
 
 /// In the shell command language, a word consisting solely of underscores, digits, and alphabetics
 /// from the portable character set. The first character of a name is not a digit.
-pub fn is_name(name: &str) -> bool {
+pub fn is_assignable_name(name: &str) -> bool {
     for (i, c) in name.chars().enumerate() {
         if !is_name_char(c) {
             return false;
@@ -250,7 +250,7 @@ pub fn parse_assignment_word(word: &str) -> Option<(&str, &str)> {
     match word.find('=') {
         Some(idx) => {
             let (key, val) = word.split_at(idx);
-            if is_name(key) {
+            if is_assignable_name(key) {
                 Some((key, &val[1..]))
             } else {
                 None
@@ -1020,11 +1020,11 @@ mod test_lex {
 
     #[test]
     fn name() {
-        assert!(is_name("foo"));
-        assert!(!is_name("1foo"));
-        assert!(is_name("foo1"));
-        assert!(is_name("foo_1"));
-        assert!(is_name("_foo_1"));
+        assert!(is_assignable_name("foo"));
+        assert!(!is_assignable_name("1foo"));
+        assert!(is_assignable_name("foo1"));
+        assert!(is_assignable_name("foo_1"));
+        assert!(is_assignable_name("_foo_1"));
     }
 
     #[test]
