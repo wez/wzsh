@@ -1,6 +1,7 @@
 use crate::environment::Environment;
 use crate::parse_assignment_word;
 use crate::string::ShellString;
+use failure::Fallible;
 use lazy_static::lazy_static;
 use regex::{Captures, Regex};
 
@@ -16,13 +17,13 @@ pub trait Expander {
         &self,
         user: Option<&str>,
         environment: &Environment,
-    ) -> Result<ShellString, ()>;
+    ) -> Fallible<ShellString>;
 
     fn expand_word(
         &self,
         word: &ShellString,
         environment: &Environment,
-    ) -> Result<Vec<ShellString>, ()> {
+    ) -> Fallible<Vec<ShellString>> {
         let mut res = vec![];
 
         let word = self.tilde_expand(word, environment)?;
@@ -33,11 +34,7 @@ pub trait Expander {
     }
 
     // Section 2.6.1
-    fn tilde_expand(
-        &self,
-        word: &ShellString,
-        environment: &Environment,
-    ) -> Result<ShellString, ()> {
+    fn tilde_expand(&self, word: &ShellString, environment: &Environment) -> Fallible<ShellString> {
         match word {
             ShellString::Os(_) => Ok(word.clone()),
             ShellString::String(s) => {
@@ -55,7 +52,7 @@ pub trait Expander {
         caps: &Captures,
         environment: &Environment,
         target: &mut String,
-    ) -> Result<(), ()> {
+    ) -> Fallible<()> {
         let name = match caps.get(2) {
             None => None,
             Some(cap) => Some(cap.as_str()),
@@ -86,7 +83,7 @@ pub trait Expander {
     }
 
     /// Single word tilde expansion can only occur at the start of the word
-    fn tilde_expand_single(&self, s: &str, environment: &Environment) -> Result<String, ()> {
+    fn tilde_expand_single(&self, s: &str, environment: &Environment) -> Fallible<String> {
         match TILDE_RE.captures(s) {
             Some(caps) => {
                 let all = caps.get(0).unwrap();
@@ -105,7 +102,7 @@ pub trait Expander {
 
     /// Assignment-word tilde expansion can occur either at the start of the value (after
     /// the `=` sign) or after an *unquoted* colon character
-    fn tilde_expand_assign(&self, s: &str, environment: &Environment) -> Result<String, ()> {
+    fn tilde_expand_assign(&self, s: &str, environment: &Environment) -> Fallible<String> {
         let mut expanded = String::new();
         let mut prev = None;
         for (idx, element) in s
@@ -127,6 +124,7 @@ pub trait Expander {
 #[cfg(test)]
 mod test {
     use super::*;
+    use failure::bail;
 
     struct MockExpander {}
     impl Expander for MockExpander {
@@ -134,12 +132,12 @@ mod test {
             &self,
             user: Option<&str>,
             _environment: &Environment,
-        ) -> Result<ShellString, ()> {
+        ) -> Fallible<ShellString> {
             match user {
                 Some("someone") => Ok("/home/someone".into()),
                 Some("wez") => Ok("/home/wez".into()),
                 None => Ok("/home/wez".into()),
-                _ => Err(()),
+                _ => bail!("no such user"),
             }
         }
     }
