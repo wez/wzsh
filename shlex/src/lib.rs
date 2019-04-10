@@ -7,6 +7,7 @@ use std::io::{BufRead, BufReader};
 pub mod alias;
 pub mod environment;
 pub mod expander;
+pub mod paramexp;
 pub mod string;
 pub use alias::Aliases;
 pub use environment::Environment;
@@ -248,26 +249,30 @@ pub enum TokenKind {
     NewLine,
 }
 
+pub fn is_name_char(c: char) -> bool {
+    if c >= '0' && c <= '9' {
+        true
+    } else if c >= 'a' && c <= 'z' {
+        true
+    } else if c >= 'A' && c <= 'Z' {
+        true
+    } else if c == '_' {
+        true
+    } else {
+        false
+    }
+}
+
 /// In the shell command language, a word consisting solely of underscores, digits, and alphabetics
 /// from the portable character set. The first character of a name is not a digit.
 pub fn is_name(name: &str) -> bool {
     for (i, c) in name.chars().enumerate() {
-        if c >= '0' && c <= '9' {
-            if i == 0 {
-                return false;
-            }
-            continue;
+        if !is_name_char(c) {
+            return false;
         }
-        if c >= 'a' && c <= 'z' {
-            continue;
+        if i == 0 && c >= '0' && c <= '9' {
+            return false;
         }
-        if c >= 'A' && c <= 'Z' {
-            continue;
-        }
-        if c == '_' {
-            continue;
-        }
-        return false;
     }
     return true;
 }
@@ -471,7 +476,8 @@ impl<R: std::io::Read> Lexer<R> {
                 }
                 '\'' => self.single_quoted()?,
                 '"' => self.double_quoted()?,
-                // TODO: $ and backtick
+                '$' => self.dollar()?,
+                '`' => self.accumulate_quoted('`')?,
                 '\n' => {
                     self.token_text.pop();
                     if !self.token_text.is_empty() {
@@ -613,6 +619,67 @@ impl<R: std::io::Read> Lexer<R> {
 
             if b == '\\' {
                 backslash = true;
+            }
+        }
+    }
+
+    fn dollar(&mut self) -> Result<(), Error> {
+        let b = match self.next_char() {
+            Next::Char(b) => b,
+            Next::Eof => {
+                return Err(Error::with_message(
+                    "unexpected end of file while lexing parameter expansion",
+                    self.position,
+                ));
+            }
+            Next::Error(e) => return Err(Error::from_io(e, self.position)),
+        };
+        self.token_text.push(b);
+        if b != '{' {
+            return Ok(());
+        }
+        self.accumulate_quoted('}')
+    }
+
+    fn accumulate_quoted(&mut self, expected: char) -> Result<(), Error> {
+        let mut close_stack = vec![expected];
+        let mut backslash = false;
+        loop {
+            let b = match self.next_char() {
+                Next::Char(b) => b,
+                Next::Eof => {
+                    return Err(Error::with_message(
+                        "unexpected end of file while lexing parameter expansion",
+                        self.position,
+                    ));
+                }
+                Next::Error(e) => return Err(Error::from_io(e, self.position)),
+            };
+            self.token_text.push(b);
+
+            if backslash {
+                backslash = false;
+                continue;
+            }
+            if b == '\\' {
+                backslash = true;
+                continue;
+            }
+
+            match b {
+                '{' => close_stack.push('}'),
+                '(' => close_stack.push(')'),
+                '[' => close_stack.push(']'),
+                _ => {
+                    if *close_stack.last().unwrap() == b {
+                        // Reached the end of this quoted section,
+                        // so pop it off
+                        close_stack.pop();
+                        if close_stack.is_empty() {
+                            return Ok(());
+                        }
+                    }
+                }
             }
         }
     }
@@ -1014,5 +1081,71 @@ mod test_lex {
 
         let tok = TokenKind::Word("foo=bar=baz".to_string());
         assert_eq!(tok.parse_assignment_word(), Some(("foo", "bar=baz")));
+    }
+
+    #[test]
+    fn dollar() {
+        assert_eq!(
+            lex("foo$hello"),
+            (
+                vec![Token {
+                    kind: TokenKind::Word("foo$hello".to_string()),
+                    position: TokenPosition {
+                        line_number: 0,
+                        col_number: 0
+                    }
+                }],
+                None
+            )
+        );
+        assert_eq!(
+            lex("${hello}there"),
+            (
+                vec![Token {
+                    kind: TokenKind::Word("${hello}there".to_string()),
+                    position: TokenPosition {
+                        line_number: 0,
+                        col_number: 0
+                    }
+                }],
+                None
+            )
+        );
+        assert_eq!(
+            lex("${he||o}there"),
+            (
+                vec![Token {
+                    kind: TokenKind::Word("${he||o}there".to_string()),
+                    position: TokenPosition {
+                        line_number: 0,
+                        col_number: 0
+                    }
+                }],
+                None
+            )
+        );
+        assert_eq!(
+            lex("${{e||}there"),
+            (
+                vec![],
+                Some(
+                    "unexpected end of file while lexing parameter expansion at line 0 column 0"
+                        .to_string()
+                ),
+            )
+        );
+        assert_eq!(
+            lex("${e||}}there"),
+            (
+                vec![Token {
+                    kind: TokenKind::Word("${e||}}there".to_string()),
+                    position: TokenPosition {
+                        line_number: 0,
+                        col_number: 0
+                    }
+                }],
+                None
+            )
+        );
     }
 }
