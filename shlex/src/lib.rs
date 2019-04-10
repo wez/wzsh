@@ -3,56 +3,24 @@
 
 use lazy_static::lazy_static;
 use std::io::{BufRead, BufReader};
+use std::io::{Error as IoError, ErrorKind as IoErrorKind};
 
 pub mod alias;
 pub mod environment;
+pub mod error;
 pub mod expander;
 pub mod paramexp;
 pub mod string;
 pub use alias::Aliases;
 pub use environment::Environment;
+pub use error::{LexError, TokenPosition};
 pub use expander::Expander;
-
-#[derive(Debug)]
-pub struct Error {
-    pub position: TokenPosition,
-    pub err: std::io::Error,
-}
-
-impl Error {
-    pub fn from_io(err: std::io::Error, position: TokenPosition) -> Self {
-        Self { err, position }
-    }
-
-    pub fn with_message(message: &str, position: TokenPosition) -> Self {
-        Self {
-            err: std::io::Error::new(std::io::ErrorKind::Other, message),
-            position,
-        }
-    }
-}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
-        write!(
-            fmt,
-            "{} at line {} column {}",
-            self.err, self.position.line_number, self.position.col_number
-        )
-    }
-}
 
 pub struct Lexer<R: std::io::Read> {
     source: String,
     stream: BufReader<R>,
     position: TokenPosition,
     token_text: String,
-}
-
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TokenPosition {
-    pub line_number: usize,
-    pub col_number: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Copy)]
@@ -340,7 +308,7 @@ impl Token {
 enum Next {
     Char(char),
     Eof,
-    Error(std::io::Error),
+    Error(IoError),
 }
 
 impl<R: std::io::Read> Lexer<R> {
@@ -379,8 +347,8 @@ impl<R: std::io::Read> Lexer<R> {
                                 Next::Char(c)
                             } else {
                                 // Presumably need more data
-                                Next::Error(std::io::Error::new(
-                                    std::io::ErrorKind::Other,
+                                Next::Error(IoError::new(
+                                    IoErrorKind::Other,
                                     format!("unable to decode utf8 from {:?}", buf),
                                 ))
                             }
@@ -389,7 +357,7 @@ impl<R: std::io::Read> Lexer<R> {
                 }
             }
             Err(e) => {
-                if e.kind() == std::io::ErrorKind::UnexpectedEof {
+                if e.kind() == IoErrorKind::UnexpectedEof {
                     Next::Eof
                 } else {
                     Next::Error(e)
@@ -398,7 +366,7 @@ impl<R: std::io::Read> Lexer<R> {
         }
     }
 
-    pub fn next(&mut self) -> Result<Token, Error> {
+    pub fn next(&mut self) -> Result<Token, LexError> {
         loop {
             if self.token_text == "\n" {
                 let pos = self.position;
@@ -418,7 +386,7 @@ impl<R: std::io::Read> Lexer<R> {
                     }
                     return Ok(self.delimit_current());
                 }
-                Next::Error(e) => return Err(Error::from_io(e, self.position)),
+                Next::Error(e) => return Err(LexError::from_io(e, self.position)),
             };
 
             self.token_text.push(b);
@@ -458,12 +426,12 @@ impl<R: std::io::Read> Lexer<R> {
                     let b = match self.next_char() {
                         Next::Char(b) => b,
                         Next::Eof => {
-                            return Err(Error::with_message(
+                            return Err(LexError::with_message(
                                 "unexpected end of file while lexing backslash",
                                 self.position,
                             ));
                         }
-                        Next::Error(e) => return Err(Error::from_io(e, self.position)),
+                        Next::Error(e) => return Err(LexError::from_io(e, self.position)),
                     };
                     if b == '\n' {
                         // Line continuation
@@ -548,17 +516,17 @@ impl<R: std::io::Read> Lexer<R> {
         Token::new(TokenKind::Word(word), pos)
     }
 
-    fn comment(&mut self) -> Result<(), Error> {
+    fn comment(&mut self) -> Result<(), LexError> {
         loop {
             let b = match self.next_char() {
                 Next::Char(b) => b,
                 Next::Eof => {
-                    return Err(Error::with_message(
+                    return Err(LexError::with_message(
                         "unexpected end of file while lexing comment",
                         self.position,
                     ));
                 }
-                Next::Error(e) => return Err(Error::from_io(e, self.position)),
+                Next::Error(e) => return Err(LexError::from_io(e, self.position)),
             };
 
             if b == '\n' {
@@ -569,18 +537,18 @@ impl<R: std::io::Read> Lexer<R> {
         }
     }
 
-    fn single_quoted(&mut self) -> Result<(), Error> {
+    fn single_quoted(&mut self) -> Result<(), LexError> {
         let mut backslash = false;
         loop {
             let b = match self.next_char() {
                 Next::Char(b) => b,
                 Next::Eof => {
-                    return Err(Error::with_message(
+                    return Err(LexError::with_message(
                         "unexpected end of file while lexing single quoted string",
                         self.position,
                     ));
                 }
-                Next::Error(e) => return Err(Error::from_io(e, self.position)),
+                Next::Error(e) => return Err(LexError::from_io(e, self.position)),
             };
             self.token_text.push(b);
 
@@ -596,18 +564,18 @@ impl<R: std::io::Read> Lexer<R> {
         }
     }
 
-    fn double_quoted(&mut self) -> Result<(), Error> {
+    fn double_quoted(&mut self) -> Result<(), LexError> {
         let mut backslash = false;
         loop {
             let b = match self.next_char() {
                 Next::Char(b) => b,
                 Next::Eof => {
-                    return Err(Error::with_message(
+                    return Err(LexError::with_message(
                         "unexpected end of file while lexing double quoted string",
                         self.position,
                     ));
                 }
-                Next::Error(e) => return Err(Error::from_io(e, self.position)),
+                Next::Error(e) => return Err(LexError::from_io(e, self.position)),
             };
             self.token_text.push(b);
 
@@ -623,16 +591,16 @@ impl<R: std::io::Read> Lexer<R> {
         }
     }
 
-    fn dollar(&mut self) -> Result<(), Error> {
+    fn dollar(&mut self) -> Result<(), LexError> {
         let b = match self.next_char() {
             Next::Char(b) => b,
             Next::Eof => {
-                return Err(Error::with_message(
+                return Err(LexError::with_message(
                     "unexpected end of file while lexing parameter expansion",
                     self.position,
                 ));
             }
-            Next::Error(e) => return Err(Error::from_io(e, self.position)),
+            Next::Error(e) => return Err(LexError::from_io(e, self.position)),
         };
         self.token_text.push(b);
         if b != '{' {
@@ -641,19 +609,19 @@ impl<R: std::io::Read> Lexer<R> {
         self.accumulate_quoted('}')
     }
 
-    fn accumulate_quoted(&mut self, expected: char) -> Result<(), Error> {
+    fn accumulate_quoted(&mut self, expected: char) -> Result<(), LexError> {
         let mut close_stack = vec![expected];
         let mut backslash = false;
         loop {
             let b = match self.next_char() {
                 Next::Char(b) => b,
                 Next::Eof => {
-                    return Err(Error::with_message(
+                    return Err(LexError::with_message(
                         "unexpected end of file while lexing parameter expansion",
                         self.position,
                     ));
                 }
-                Next::Error(e) => return Err(Error::from_io(e, self.position)),
+                Next::Error(e) => return Err(LexError::from_io(e, self.position)),
             };
             self.token_text.push(b);
 
