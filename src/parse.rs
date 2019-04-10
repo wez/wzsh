@@ -1,5 +1,12 @@
 //! Shell parser
-use shlex::{Aliases, LexError, Lexer, Operator, Token, TokenKind, TokenPosition};
+use failure::{Fail, Fallible};
+use shlex::{Aliases, Lexer, Operator, Token, TokenKind, TokenPosition};
+
+#[derive(Debug, Clone, Copy, Fail)]
+pub enum ParseErrorKind {
+    #[fail(display = "Unexpected token")]
+    UnexpectedToken,
+}
 
 pub struct Parser<R: std::io::Read> {
     lexer: Lexer<R>,
@@ -11,7 +18,7 @@ impl<R: std::io::Read> Parser<R> {
         Self { lexer }
     }
 
-    pub fn parse(&mut self, aliases: Option<&Aliases>) -> Result<Vec<Node>, LexError> {
+    pub fn parse(&mut self, aliases: Option<&Aliases>) -> Fallible<Vec<Node>> {
         let mut results = vec![];
         while let Some(cmd) = self.simple_command(aliases)? {
             results.push(Node::SimpleCommand(cmd));
@@ -19,10 +26,7 @@ impl<R: std::io::Read> Parser<R> {
         Ok(results)
     }
 
-    fn simple_command(
-        &mut self,
-        aliases: Option<&Aliases>,
-    ) -> Result<Option<SimpleCommand>, LexError> {
+    fn simple_command(&mut self, aliases: Option<&Aliases>) -> Fallible<Option<SimpleCommand>> {
         let mut assignments = vec![];
         let mut words = vec![];
         let mut asynchronous = false;
@@ -52,10 +56,9 @@ impl<R: std::io::Read> Parser<R> {
                 }
 
                 _ => {
-                    return Err(LexError::with_message(
-                        &format!("Unexpected token {:?}", token),
-                        token.position,
-                    ));
+                    return Err(ParseErrorKind::UnexpectedToken
+                        .context(token.position)
+                        .into());
                 }
             }
         }
@@ -118,7 +121,7 @@ pub struct SimpleCommand {
 mod test {
     use super::*;
 
-    fn parse(text: &str, aliases: Option<&Aliases>) -> Result<Vec<Node>, LexError> {
+    fn parse(text: &str, aliases: Option<&Aliases>) -> Fallible<Vec<Node>> {
         let mut parser = Parser::new("test", text.as_bytes());
         parser.parse(aliases)
     }

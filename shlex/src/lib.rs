@@ -1,9 +1,10 @@
 //! Shell lexer
 //! See https://pubs.opengroup.org/onlinepubs/009695399/utilities/xcu_chap02.html
 
+use failure::{Error, Fallible};
 use lazy_static::lazy_static;
+use std::io::ErrorKind as IoErrorKind;
 use std::io::{BufRead, BufReader};
-use std::io::{Error as IoError, ErrorKind as IoErrorKind};
 
 pub mod alias;
 pub mod environment;
@@ -13,7 +14,7 @@ pub mod paramexp;
 pub mod string;
 pub use alias::Aliases;
 pub use environment::Environment;
-pub use error::{LexError, TokenPosition};
+pub use error::{LexErrorKind, TokenPosition};
 pub use expander::Expander;
 
 pub struct Lexer<R: std::io::Read> {
@@ -308,7 +309,7 @@ impl Token {
 enum Next {
     Char(char),
     Eof,
-    Error(IoError),
+    Error(Error),
 }
 
 impl<R: std::io::Read> Lexer<R> {
@@ -347,10 +348,7 @@ impl<R: std::io::Read> Lexer<R> {
                                 Next::Char(c)
                             } else {
                                 // Presumably need more data
-                                Next::Error(IoError::new(
-                                    IoErrorKind::Other,
-                                    format!("unable to decode utf8 from {:?}", buf),
-                                ))
+                                Next::Error(LexErrorKind::InvalidUtf8InProgramText.into())
                             }
                         }
                     }
@@ -360,13 +358,13 @@ impl<R: std::io::Read> Lexer<R> {
                 if e.kind() == IoErrorKind::UnexpectedEof {
                     Next::Eof
                 } else {
-                    Next::Error(e)
+                    Next::Error(e.into())
                 }
             }
         }
     }
 
-    pub fn next(&mut self) -> Result<Token, LexError> {
+    pub fn next(&mut self) -> Fallible<Token> {
         loop {
             if self.token_text == "\n" {
                 let pos = self.position;
@@ -386,7 +384,7 @@ impl<R: std::io::Read> Lexer<R> {
                     }
                     return Ok(self.delimit_current());
                 }
-                Next::Error(e) => return Err(LexError::from_io(e, self.position)),
+                Next::Error(e) => return Err(e),
             };
 
             self.token_text.push(b);
@@ -426,12 +424,9 @@ impl<R: std::io::Read> Lexer<R> {
                     let b = match self.next_char() {
                         Next::Char(b) => b,
                         Next::Eof => {
-                            return Err(LexError::with_message(
-                                "unexpected end of file while lexing backslash",
-                                self.position,
-                            ));
+                            return Err(LexErrorKind::EofDuringBackslash.at(self.position).into());
                         }
-                        Next::Error(e) => return Err(LexError::from_io(e, self.position)),
+                        Next::Error(e) => return Err(e.context(self.position).into()),
                     };
                     if b == '\n' {
                         // Line continuation
@@ -516,17 +511,14 @@ impl<R: std::io::Read> Lexer<R> {
         Token::new(TokenKind::Word(word), pos)
     }
 
-    fn comment(&mut self) -> Result<(), LexError> {
+    fn comment(&mut self) -> Fallible<()> {
         loop {
             let b = match self.next_char() {
                 Next::Char(b) => b,
                 Next::Eof => {
-                    return Err(LexError::with_message(
-                        "unexpected end of file while lexing comment",
-                        self.position,
-                    ));
+                    return Err(LexErrorKind::EofDuringComment.at(self.position).into());
                 }
-                Next::Error(e) => return Err(LexError::from_io(e, self.position)),
+                Next::Error(e) => return Err(e.context(self.position).into()),
             };
 
             if b == '\n' {
@@ -537,18 +529,17 @@ impl<R: std::io::Read> Lexer<R> {
         }
     }
 
-    fn single_quoted(&mut self) -> Result<(), LexError> {
+    fn single_quoted(&mut self) -> Fallible<()> {
         let mut backslash = false;
         loop {
             let b = match self.next_char() {
                 Next::Char(b) => b,
                 Next::Eof => {
-                    return Err(LexError::with_message(
-                        "unexpected end of file while lexing single quoted string",
-                        self.position,
-                    ));
+                    return Err(LexErrorKind::EofDuringSingleQuotedString
+                        .at(self.position)
+                        .into());
                 }
-                Next::Error(e) => return Err(LexError::from_io(e, self.position)),
+                Next::Error(e) => return Err(e.context(self.position).into()),
             };
             self.token_text.push(b);
 
@@ -564,18 +555,17 @@ impl<R: std::io::Read> Lexer<R> {
         }
     }
 
-    fn double_quoted(&mut self) -> Result<(), LexError> {
+    fn double_quoted(&mut self) -> Fallible<()> {
         let mut backslash = false;
         loop {
             let b = match self.next_char() {
                 Next::Char(b) => b,
                 Next::Eof => {
-                    return Err(LexError::with_message(
-                        "unexpected end of file while lexing double quoted string",
-                        self.position,
-                    ));
+                    return Err(LexErrorKind::EofDuringDoubleQuotedString
+                        .at(self.position)
+                        .into());
                 }
-                Next::Error(e) => return Err(LexError::from_io(e, self.position)),
+                Next::Error(e) => return Err(e.context(self.position).into()),
             };
             self.token_text.push(b);
 
@@ -591,16 +581,15 @@ impl<R: std::io::Read> Lexer<R> {
         }
     }
 
-    fn dollar(&mut self) -> Result<(), LexError> {
+    fn dollar(&mut self) -> Fallible<()> {
         let b = match self.next_char() {
             Next::Char(b) => b,
             Next::Eof => {
-                return Err(LexError::with_message(
-                    "unexpected end of file while lexing parameter expansion",
-                    self.position,
-                ));
+                return Err(LexErrorKind::EofDuringParameterExpansion
+                    .at(self.position)
+                    .into());
             }
-            Next::Error(e) => return Err(LexError::from_io(e, self.position)),
+            Next::Error(e) => return Err(e.context(self.position).into()),
         };
         self.token_text.push(b);
         if b != '{' {
@@ -609,19 +598,18 @@ impl<R: std::io::Read> Lexer<R> {
         self.accumulate_quoted('}')
     }
 
-    fn accumulate_quoted(&mut self, expected: char) -> Result<(), LexError> {
+    fn accumulate_quoted(&mut self, expected: char) -> Fallible<()> {
         let mut close_stack = vec![expected];
         let mut backslash = false;
         loop {
             let b = match self.next_char() {
                 Next::Char(b) => b,
                 Next::Eof => {
-                    return Err(LexError::with_message(
-                        "unexpected end of file while lexing parameter expansion",
-                        self.position,
-                    ));
+                    return Err(LexErrorKind::EofDuringParameterExpansion
+                        .at(self.position)
+                        .into());
                 }
-                Next::Error(e) => return Err(LexError::from_io(e, self.position)),
+                Next::Error(e) => return Err(e.context(self.position).into()),
             };
             self.token_text.push(b);
 
@@ -931,7 +919,7 @@ mod test_lex {
             lex("\\"),
             (
                 vec![],
-                Some("unexpected end of file while lexing backslash at line 0 column 0".to_owned())
+                Some("EOF while lexing backslash escape at line 0 column 0".to_owned())
             )
         );
         assert_eq!(
@@ -1096,10 +1084,7 @@ mod test_lex {
             lex("${{e||}there"),
             (
                 vec![],
-                Some(
-                    "unexpected end of file while lexing parameter expansion at line 0 column 0"
-                        .to_string()
-                ),
+                Some("EOF while lexing parameter expansion at line 0 column 0".to_string()),
             )
         );
         assert_eq!(

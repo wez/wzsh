@@ -1,4 +1,4 @@
-use std::io::{Error as IoError, ErrorKind as IoErrorKind};
+use failure::Fail;
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TokenPosition {
@@ -6,31 +6,61 @@ pub struct TokenPosition {
     pub col_number: usize,
 }
 
-#[derive(Debug)]
-pub struct LexError {
-    pub position: TokenPosition,
-    pub err: IoError,
-}
-
-impl LexError {
-    pub fn from_io(err: IoError, position: TokenPosition) -> Self {
-        Self { err, position }
-    }
-
-    pub fn with_message(message: &str, position: TokenPosition) -> Self {
-        Self {
-            err: IoError::new(IoErrorKind::Other, message),
-            position,
-        }
-    }
-}
-
-impl std::fmt::Display for LexError {
+impl std::fmt::Display for TokenPosition {
     fn fmt(&self, fmt: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
         write!(
             fmt,
-            "{} at line {} column {}",
-            self.err, self.position.line_number, self.position.col_number
+            "at line {} column {}",
+            self.line_number, self.col_number
         )
+    }
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
+pub struct TokenPositionWithWithSource {
+    pub position: TokenPosition,
+    pub source: String,
+}
+
+impl std::fmt::Display for TokenPositionWithWithSource {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        write!(fmt, "in {} {}", self.source, self.position)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Fail)]
+pub enum LexErrorKind {
+    #[fail(display = "EOF while lexing backslash escape")]
+    EofDuringBackslash,
+    #[fail(display = "EOF while lexing comment")]
+    EofDuringComment,
+    #[fail(display = "EOF while lexing single quoted string")]
+    EofDuringSingleQuotedString,
+    #[fail(display = "EOF while lexing double quoted string")]
+    EofDuringDoubleQuotedString,
+    #[fail(display = "EOF while lexing parameter expansion")]
+    EofDuringParameterExpansion,
+    #[fail(display = "Invalid UTF-8 sequence while reading program text")]
+    InvalidUtf8InProgramText,
+    #[fail(display = "IO Error")]
+    IoError,
+}
+
+impl LexErrorKind {
+    pub fn at(self, position: TokenPosition) -> LexError {
+        LexError::new(self, position)
+    }
+}
+
+#[derive(Debug, Clone, Fail)]
+#[fail(display = "{} {}", kind, position)]
+pub struct LexError {
+    kind: LexErrorKind,
+    position: TokenPosition,
+}
+
+impl LexError {
+    pub fn new(kind: LexErrorKind, position: TokenPosition) -> Self {
+        Self { kind, position }
     }
 }

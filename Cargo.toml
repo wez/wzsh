@@ -6,5 +6,6 @@ edition = "2018"
 
 [dependencies]
 shlex = { path = "shlex" }
+failure = "0.1"
 
 [workspace]
