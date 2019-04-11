@@ -1,3 +1,4 @@
+use failure::{bail, Fallible};
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
 
@@ -16,16 +17,33 @@ impl Environment {
         environ
     }
 
-    pub fn set(&mut self, key: OsString, value: OsString) {
-        self.map.insert(key, value);
+    pub fn set<K: Into<OsString> + ?Sized, V: Into<OsString> + ?Sized>(
+        &mut self,
+        key: K,
+        value: V,
+    ) {
+        self.map.insert(key.into(), value.into());
     }
 
-    pub fn get(&self, key: &OsStr) -> Option<&OsString> {
-        self.map.get(key)
+    pub fn get<K: AsRef<OsStr>>(&self, key: K) -> Option<&OsString> {
+        self.map.get(key.as_ref())
     }
 
-    pub fn unset(&mut self, key: &OsStr) {
-        self.map.remove(key);
+    pub fn get_str<K: AsRef<OsStr> + std::fmt::Debug>(&self, key: K) -> Fallible<Option<&str>> {
+        match self.map.get(key.as_ref()) {
+            None => Ok(None),
+            Some(v) => match v.to_str() {
+                Some(s) => Ok(Some(s)),
+                None => bail!(
+                    "unable to convert environment value for {:?} to String",
+                    key
+                ),
+            },
+        }
+    }
+
+    pub fn unset<K: AsRef<OsStr>>(&mut self, key: K) {
+        self.map.remove(key.as_ref());
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&OsString, &OsString)> {
