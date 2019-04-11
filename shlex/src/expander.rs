@@ -32,12 +32,61 @@ pub trait Expander {
                 let mut expanded = String::new();
                 self.expand_word_into(&mut expanded, word, environment)?;
 
-                // TODO: field splitting
+                let mut fields = vec![];
+                self.split_fields(&expanded, environment, &mut fields)?;
+
                 // TODO: pathname expansion
 
-                Ok(vec![expanded.into()])
+                Ok(fields.into_iter().map(Into::into).collect())
             }
         }
+    }
+
+    fn split_fields(
+        &self,
+        text: &str,
+        env: &mut Environment,
+        target: &mut Vec<String>,
+    ) -> Fallible<()> {
+        let ifs = env.get_str("IFS")?.unwrap_or(" \t\n");
+        if ifs.is_empty() {
+            // No field splitting is needed
+            target.push(text.to_owned());
+            return Ok(());
+        }
+
+        let ifs_set: std::collections::HashSet<char> = ifs.chars().collect();
+        let mut in_quotes = false;
+        let mut start = None;
+
+        for (idx, c) in text.char_indices() {
+            if in_quotes {
+                if c == '"' {
+                    in_quotes = false;
+                }
+                continue;
+            }
+
+            if c == '"' {
+                in_quotes = true;
+            }
+
+            if ifs_set.contains(&c) {
+                // Delimit a field
+                let first = start.take().unwrap_or(idx);
+                if idx > first {
+                    target.push(text[first..idx].to_owned());
+                }
+            } else if start.is_none() {
+                start = Some(idx);
+            }
+        }
+
+        if let Some(start) = start {
+            target.push(text[start..].to_owned());
+        }
+
+        Ok(())
     }
 
     /// Performs tilde, parameteter, command and arithmetic expansion.
@@ -393,6 +442,25 @@ mod test {
     }
 
     #[test]
+    fn word_expand() -> Fallible<()> {
+        let expander = MockExpander {};
+        let mut env = mock_env();
+
+        env.set("MULTI", "multiple words");
+
+        assert_eq!(
+            expander.expand_word(&"hello there".into(), &mut env)?,
+            vec!["hello".to_owned().into(), "there".to_owned().into()]
+        );
+
+        assert_eq!(
+            expander.expand_word(&"hello$MULTI".into(), &mut env)?,
+            vec!["hellomultiple".to_owned().into(), "words".to_owned().into(),]
+        );
+        Ok(())
+    }
+
+    #[test]
     fn parameter_get() -> Fallible<()> {
         let expander = MockExpander {};
         let mut env = mock_env();
@@ -563,6 +631,47 @@ mod test {
             expander.parameter_expansion(&"${EMPTY+notest}".into(), &mut env)?,
             "notest".into()
         );
+        Ok(())
+    }
+
+    fn ifs(input: &str, ifs: Option<&str>) -> Fallible<Vec<String>> {
+        let mut env = Environment::new();
+        match ifs {
+            Some(ifs) => env.set("IFS", ifs),
+            None => env.unset("IFS"),
+        };
+        let mut target = Vec::new();
+        let expander = MockExpander {};
+        expander.split_fields(input, &mut env, &mut target)?;
+        Ok(target)
+    }
+
+    #[test]
+    fn field_split() -> Fallible<()> {
+        assert_eq!(ifs("", None)?, Vec::<String>::new());
+        assert_eq!(ifs("", Some(""))?, vec!["".to_owned()]);
+
+        assert_eq!(ifs("hello", None)?, vec!["hello".to_owned()]);
+        assert_eq!(
+            ifs("hello there\twoot\nyay", None)?,
+            vec![
+                "hello".to_owned(),
+                "there".to_owned(),
+                "woot".to_owned(),
+                "yay".to_owned()
+            ]
+        );
+
+        assert_eq!(
+            ifs("hello\"quo ted\" world", None)?,
+            vec!["hello\"quo ted\"".to_owned(), "world".to_owned()]
+        );
+
+        assert_eq!(
+            ifs("hello\"quoted\" world", None)?,
+            vec!["hello\"quoted\"".to_owned(), "world".to_owned()]
+        );
+
         Ok(())
     }
 }
