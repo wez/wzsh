@@ -198,7 +198,6 @@ pub trait Expander {
                 }
                 remainder = &remainder[dollar_pos..];
                 if let Some((expr, extra)) = ParamExpr::try_parse(remainder) {
-                    eprintln!("need to evaluate {:?}", expr);
                     match expr {
                         ParamExpr::Get { name } => {
                             if let Some(value) = environment.get_str(&name)? {

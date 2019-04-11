@@ -1,6 +1,7 @@
 //! Shell parser
-use failure::{Fail, Fallible};
-use shlex::{Aliases, Lexer, Operator, Token, TokenKind, TokenPosition};
+use failure::{bail, Fail, Fallible};
+use shlex::string::ShellString;
+use shlex::{Aliases, Environment, Expander, Lexer, Operator, Token, TokenKind};
 
 #[derive(Debug, Clone, Copy, Fail)]
 pub enum ParseErrorKind {
@@ -33,7 +34,6 @@ impl<R: std::io::Read> Parser<R> {
 
         loop {
             let mut token = self.lexer.next()?;
-            eprintln!("token is {:?}", token);
             match token.kind {
                 TokenKind::Eof => break,
                 TokenKind::Operator(Operator::Ampersand) => {
@@ -117,9 +117,31 @@ pub struct SimpleCommand {
     asynchronous: bool,
 }
 
+impl SimpleCommand {
+    pub fn expand_argv(
+        &self,
+        env: &mut Environment,
+        expander: &Expander,
+    ) -> Fallible<Vec<ShellString>> {
+        // FIXME: scoped assignments need to return a new env
+        let mut argv = vec![];
+        for word in &self.words {
+            match word.kind {
+                TokenKind::Word(ref s) | TokenKind::Name(ref s) => {
+                    let mut fields = expander.expand_word(&s.as_str().into(), env)?;
+                    argv.append(&mut fields);
+                }
+                _ => bail!("unhandled token kind {:?}", word),
+            }
+        }
+        Ok(argv)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
+    use shlex::TokenPosition;
 
     fn parse(text: &str, aliases: Option<&Aliases>) -> Fallible<Vec<Node>> {
         let mut parser = Parser::new("test", text.as_bytes());

@@ -5,7 +5,8 @@ authors = ["Wez Furlong"]
 edition = "2018"
 
 [dependencies]
-shlex = { path = "shlex" }
 failure = "0.1"
+rustyline = "3.0"
+shlex = { path = "shlex" }
 
 [workspace]

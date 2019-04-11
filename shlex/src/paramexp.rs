@@ -200,7 +200,6 @@ fn collect_word(remainder: &str) -> Option<(&str, &str)> {
                 if c == *close_stack.last().unwrap() {
                     close_stack.pop();
                     if close_stack.is_empty() {
-                        eprintln!("finishing stack with idx={} in str={}", idx, remainder);
                         // We've found the end of the word parameter
                         return Some((&remainder[0..idx], &remainder[idx + 1..]));
                     }
