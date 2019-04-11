@@ -32,6 +32,9 @@ pub trait Expander {
                 let mut expanded = String::new();
                 self.expand_word_into(&mut expanded, word, environment)?;
 
+                // TODO: field splitting
+                // TODO: pathname expansion
+
                 Ok(vec![expanded.into()])
             }
         }
@@ -47,6 +50,9 @@ pub trait Expander {
     ) -> Fallible<()> {
         let word = self.tilde_expand(&word.to_owned().into(), environment)?;
         let word = self.parameter_expansion(&word, environment)?;
+
+        // TODO: command expansion
+        // TODO: arithmetic expansion
 
         match word {
             ShellString::String(s) => target.push_str(&s),
