@@ -5,10 +5,11 @@ authors = ["Wez Furlong"]
 edition = "2018"
 
 [dependencies]
-lazy_static = "1.3"
-regex = "1"
 failure = "0.1"
 failure_derive = "0.1"
+glob = "0.3"
+lazy_static = "1.3"
+regex = "1"
 
 [dev-dependencies]
 pretty_assertions = "0.6"

@@ -35,11 +35,50 @@ pub trait Expander {
                 let mut fields = vec![];
                 self.split_fields(&expanded, environment, &mut fields)?;
 
-                // TODO: pathname expansion
+                // pathname expansion
+                let mut expanded = vec![];
+                for field in fields {
+                    self.maybe_glob_expand(&field, &mut expanded)?;
+                }
 
-                Ok(fields.into_iter().map(Into::into).collect())
+                Ok(expanded)
             }
         }
+    }
+
+    fn maybe_glob_expand(&self, text: &str, target: &mut Vec<ShellString>) -> Fallible<()> {
+        let mut backslash = false;
+        let mut do_glob = false;
+        for c in text.chars() {
+            if backslash {
+                backslash = false;
+                continue;
+            }
+            if c == '\\' {
+                backslash = true;
+                continue;
+            }
+            if c == '*' {
+                do_glob = true;
+                break;
+            }
+        }
+
+        if !do_glob {
+            target.push(text.into());
+            return Ok(());
+        }
+
+        for path in glob::glob(text)? {
+            match path {
+                Ok(path) => target.push(path.as_os_str().into()),
+                Err(e) => {
+                    eprintln!("wzsh: while globbing {}: {}", text, e);
+                }
+            }
+        }
+
+        Ok(())
     }
 
     fn split_fields(
@@ -456,6 +495,11 @@ mod test {
         assert_eq!(
             expander.expand_word(&"hello$MULTI".into(), &mut env)?,
             vec!["hellomultiple".to_owned().into(), "words".to_owned().into(),]
+        );
+
+        assert_eq!(
+            expander.expand_word(&"*.toml".into(), &mut env)?,
+            vec!["Cargo.toml".to_owned().into()]
         );
         Ok(())
     }
