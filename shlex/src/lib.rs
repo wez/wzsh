@@ -361,6 +361,8 @@ impl<R: std::io::Read> Lexer<R> {
                     if b == '\n' {
                         // Line continuation
                         self.token_text.pop();
+                        self.position.col_number = 0;
+                        self.position.line_number += 1;
                     } else {
                         // Else quoted character
                         self.token_text.push(b);
@@ -436,6 +438,8 @@ impl<R: std::io::Read> Lexer<R> {
 
         let word = std::mem::replace(&mut self.token_text, String::new());
         let pos = self.position;
+        // FIXME: in the line continuation case, this includes the width
+        // of the data from preceding lines which is incorrect
         self.position.col_number += word.len();
 
         if let Some(number) = self.is_io_number(&word) {
@@ -868,15 +872,28 @@ mod test_lex {
             )
         );
         assert_eq!(
-            lex("\\\na"),
+            lex("a\\\na b"),
             (
-                vec![Token {
-                    kind: TokenKind::Word("a".to_string()),
-                    position: TokenPosition {
-                        line_number: 0,
-                        col_number: 0
-                    }
-                },],
+                vec![
+                    Token {
+                        kind: TokenKind::Word("aa".to_string()),
+                        position: TokenPosition {
+                            line_number: 1,
+                            col_number: 0
+                        }
+                    },
+                    Token {
+                        kind: TokenKind::Word("b".to_string()),
+                        position: TokenPosition {
+                            line_number: 1,
+                            // FIXME: this should be 2, but because of the way
+                            // that we process line continuations, we see len("aa")
+                            // as the preceding width and then add one to get to
+                            // the column holding "b".
+                            col_number: 3
+                        }
+                    },
+                ],
                 None
             )
         );
