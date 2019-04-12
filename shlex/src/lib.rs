@@ -27,43 +27,71 @@ pub struct Lexer<R: std::io::Read> {
     token_text: String,
 }
 
+macro_rules! TokenEnum {
+    ($Enum:ident, $Matcher:ident, $(
+            $text:literal : $variant:ident
+        ),+) => {
+
 #[derive(Debug, Clone, PartialEq, Eq, Copy)]
-pub enum Operator {
-    /// `&&`
-    AndIf,
-    /// `||`
-    OrIf,
-    /// `;;`
-    DoubleSemicolon,
-    /// `<<`
-    DoubleLess,
-    /// `>>`
-    DoubleGreat,
-    /// `<&`
-    LessAnd,
-    /// `>&`
-    GreatAnd,
-    /// `<>`
-    LessGreat,
-    /// `<<-`
-    DoubleLessDash,
-    /// `>|`
-    Clobber,
-    /// `|`
-    Pipe,
-    /// `&`
-    Ampersand,
-    /// `(`
-    LeftParen,
-    /// `)`
-    RightParen,
-    /// `<`
-    Less,
-    /// `>`
-    Great,
-    /// `;`
-    Semicolon,
+pub enum $Enum {
+    $(
+        $variant
+    ),+
 }
+lazy_static! {
+    static ref $Matcher: LiteralMatcher<$Enum> = {
+        LiteralMatcher::new(&[
+            $(
+                ($text, $Enum::$variant)
+            ),+
+        ])
+    };
+}
+    }
+}
+
+TokenEnum!(
+    Operator,
+    OPERATORS,
+    "<<-": DoubleLessDash,
+    "<<": DoubleLess,
+    "<&": LessAnd,
+    "<>": LessGreat,
+    ">>": DoubleGreat,
+    ">|": Clobber,
+    ">&": GreatAnd,
+    "&&": AndIf,
+    "||": OrIf,
+    ";;": DoubleSemicolon,
+    "<": Less,
+    "&": Ampersand,
+    "|": Pipe,
+    ";": Semicolon,
+    ">": Great,
+    "(": LeftParen,
+    ")": RightParen
+);
+
+TokenEnum!(
+    ReservedWord,
+    RESERVED_WORDS,
+    "if": If,
+    "then": Then,
+    "else": Else,
+    "elif": Elif,
+    "fi": Fi,
+    "do": Do,
+    "done": Done,
+    "case": Case,
+    "esac": Esac,
+    "while": While,
+    "until": Until,
+    "for": For,
+    "{": LeftBrace,
+    "}": RightBrace,
+    "!": Bang,
+    "in": In
+);
 
 #[derive(Debug)]
 struct LiteralMatcher<T: Copy> {
@@ -104,70 +132,6 @@ impl<T: Copy> LiteralMatcher<T> {
             MatchResult::No
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReservedWord {
-    If,
-    Then,
-    Else,
-    Elif,
-    Fi,
-    Do,
-    Done,
-    Case,
-    Esac,
-    While,
-    Until,
-    For,
-    LeftBrace,
-    RightBrace,
-    Bang,
-    In,
-}
-
-lazy_static! {
-    static ref OPERATORS: LiteralMatcher<Operator> = {
-        LiteralMatcher::new(&[
-            ("<<-", Operator::DoubleLessDash),
-            ("<<", Operator::DoubleLess),
-            ("<&", Operator::LessAnd),
-            ("<>", Operator::LessGreat),
-            (">>", Operator::DoubleGreat),
-            (">|", Operator::Clobber),
-            (">&", Operator::GreatAnd),
-            ("&&", Operator::AndIf),
-            ("||", Operator::OrIf),
-            (";;", Operator::Semicolon),
-            ("<", Operator::Less),
-            ("&", Operator::Ampersand),
-            ("|", Operator::Pipe),
-            (";", Operator::Semicolon),
-            (">", Operator::Great),
-            ("(", Operator::LeftParen),
-            (")", Operator::RightParen),
-        ])
-    };
-    static ref RESERVED_WORDS: LiteralMatcher<ReservedWord> = {
-        LiteralMatcher::new(&[
-            ("if", ReservedWord::If),
-            ("then", ReservedWord::Then),
-            ("else", ReservedWord::Else),
-            ("elif", ReservedWord::Elif),
-            ("fi", ReservedWord::Fi),
-            ("do", ReservedWord::Do),
-            ("done", ReservedWord::Done),
-            ("case", ReservedWord::Case),
-            ("esac", ReservedWord::Esac),
-            ("while", ReservedWord::While),
-            ("until", ReservedWord::Until),
-            ("for", ReservedWord::For),
-            ("{", ReservedWord::LeftBrace),
-            ("}", ReservedWord::RightBrace),
-            ("!", ReservedWord::Bang),
-            ("in", ReservedWord::In),
-        ])
-    };
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
