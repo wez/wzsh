@@ -208,12 +208,13 @@ impl TokenKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token {
     pub kind: TokenKind,
-    pub position: TokenPosition,
+    pub start: TokenPosition,
+    pub end: TokenPosition,
 }
 
 impl Token {
-    pub fn new(kind: TokenKind, position: TokenPosition) -> Self {
-        Self { kind, position }
+    pub fn new(kind: TokenKind, start: TokenPosition, end: TokenPosition) -> Self {
+        Self { kind, start, end }
     }
 
     pub fn apply_command_word_rules(&mut self, aliases: Option<&Aliases>) {
@@ -322,7 +323,11 @@ impl<R: std::io::Read> Lexer<R> {
                 Next::Eof => {
                     // Section 2.3.1
                     if self.token_text.is_empty() {
-                        return Ok(Token::new(TokenKind::Eof, self.stream_position));
+                        return Ok(Token::new(
+                            TokenKind::Eof,
+                            self.stream_position,
+                            self.stream_position,
+                        ));
                     }
                     return Ok(self.delimit_current());
                 }
@@ -342,10 +347,14 @@ impl<R: std::io::Read> Lexer<R> {
                     // form an operator, so look at the text without it; if that is one
                     // then we delimit a token
                     if self.token_text.len() > 1 {
-                        if let MatchResult::Match(oper, _len) =
+                        if let MatchResult::Match(oper, len) =
                             OPERATORS.matches(&self.token_text[0..self.token_text.len() - 1])
                         {
-                            let tok = Token::new(TokenKind::Operator(oper), self.tokens[0].pos);
+                            let tok = Token::new(
+                                TokenKind::Operator(oper),
+                                self.tokens[0].pos,
+                                self.tokens[len - 1].pos,
+                            );
                             self.clear_tokens();
                             self.unget(b);
                             return Ok(tok);
@@ -393,7 +402,7 @@ impl<R: std::io::Read> Lexer<R> {
                         self.unget(b);
                         return Ok(token);
                     }
-                    let tok = Token::new(TokenKind::NewLine, b.pos);
+                    let tok = Token::new(TokenKind::NewLine, b.pos, b.pos);
                     self.clear_tokens();
                     return Ok(tok);
                 }
@@ -435,23 +444,25 @@ impl<R: std::io::Read> Lexer<R> {
     }
 
     fn delimit_current(&mut self) -> Token {
-        let pos = self.tokens[0].pos;
+        let start = self.tokens.first().unwrap().pos;
 
         if let MatchResult::Match(oper, len) = OPERATORS.matches(&self.token_text) {
             if len == self.token_text.len() {
+                let end = self.tokens[len - 1].pos;
                 self.clear_tokens();
-                return Token::new(TokenKind::Operator(oper), pos);
+                return Token::new(TokenKind::Operator(oper), start, end);
             }
         }
 
         let word = std::mem::replace(&mut self.token_text, String::new());
+        let end = self.tokens.last().unwrap().pos;
         self.clear_tokens();
 
         if let Some(number) = self.is_io_number(&word) {
-            return Token::new(TokenKind::IoNumber(number), pos);
+            return Token::new(TokenKind::IoNumber(number), start, end);
         }
 
-        Token::new(TokenKind::Word(word), pos)
+        Token::new(TokenKind::Word(word), start, end)
     }
 
     fn comment(&mut self) -> Fallible<()> {
@@ -629,14 +640,22 @@ mod test_lex {
                 vec![
                     Token {
                         kind: TokenKind::Operator(Operator::LeftParen),
-                        position: TokenPosition {
+                        start: TokenPosition {
+                            line_number: 0,
+                            col_number: 0
+                        },
+                        end: TokenPosition {
                             line_number: 0,
                             col_number: 0
                         }
                     },
                     Token {
                         kind: TokenKind::Operator(Operator::RightParen),
-                        position: TokenPosition {
+                        start: TokenPosition {
+                            line_number: 1,
+                            col_number: 0
+                        },
+                        end: TokenPosition {
                             line_number: 1,
                             col_number: 0
                         }
@@ -655,28 +674,44 @@ mod test_lex {
                 vec![
                     Token {
                         kind: TokenKind::Operator(Operator::LeftParen),
-                        position: TokenPosition {
+                        start: TokenPosition {
+                            line_number: 0,
+                            col_number: 0
+                        },
+                        end: TokenPosition {
                             line_number: 0,
                             col_number: 0
                         }
                     },
                     Token {
                         kind: TokenKind::Operator(Operator::RightParen),
-                        position: TokenPosition {
+                        start: TokenPosition {
+                            line_number: 0,
+                            col_number: 1
+                        },
+                        end: TokenPosition {
                             line_number: 0,
                             col_number: 1
                         }
                     },
                     Token {
                         kind: TokenKind::NewLine,
-                        position: TokenPosition {
+                        start: TokenPosition {
+                            line_number: 0,
+                            col_number: 2
+                        },
+                        end: TokenPosition {
                             line_number: 0,
                             col_number: 2
                         }
                     },
                     Token {
                         kind: TokenKind::Word("a".to_string()),
-                        position: TokenPosition {
+                        start: TokenPosition {
+                            line_number: 1,
+                            col_number: 0
+                        },
+                        end: TokenPosition {
                             line_number: 1,
                             col_number: 0
                         }
@@ -695,23 +730,35 @@ mod test_lex {
                 vec![
                     Token {
                         kind: TokenKind::Word("true".to_string()),
-                        position: TokenPosition {
+                        start: TokenPosition {
                             line_number: 0,
                             col_number: 0
+                        },
+                        end: TokenPosition {
+                            line_number: 0,
+                            col_number: 3
                         }
                     },
                     Token {
                         kind: TokenKind::Operator(Operator::AndIf),
-                        position: TokenPosition {
+                        start: TokenPosition {
                             line_number: 0,
                             col_number: 5
+                        },
+                        end: TokenPosition {
+                            line_number: 0,
+                            col_number: 6
                         }
                     },
                     Token {
                         kind: TokenKind::Word("false".to_string()),
-                        position: TokenPosition {
+                        start: TokenPosition {
                             line_number: 0,
                             col_number: 8
+                        },
+                        end: TokenPosition {
+                            line_number: 0,
+                            col_number: 12
                         }
                     },
                 ],
@@ -724,23 +771,35 @@ mod test_lex {
                 vec![
                     Token {
                         kind: TokenKind::Word("true".to_string()),
-                        position: TokenPosition {
+                        start: TokenPosition {
                             line_number: 0,
                             col_number: 0
+                        },
+                        end: TokenPosition {
+                            line_number: 0,
+                            col_number: 3
                         }
                     },
                     Token {
                         kind: TokenKind::Operator(Operator::AndIf),
-                        position: TokenPosition {
+                        start: TokenPosition {
                             line_number: 0,
                             col_number: 4
+                        },
+                        end: TokenPosition {
+                            line_number: 0,
+                            col_number: 5
                         }
                     },
                     Token {
                         kind: TokenKind::Word("false".to_string()),
-                        position: TokenPosition {
+                        start: TokenPosition {
                             line_number: 0,
                             col_number: 6
+                        },
+                        end: TokenPosition {
+                            line_number: 0,
+                            col_number: 10
                         }
                     },
                 ],
@@ -756,9 +815,13 @@ mod test_lex {
             (
                 vec![Token {
                     kind: TokenKind::Word("'hello'".to_string()),
-                    position: TokenPosition {
+                    start: TokenPosition {
                         line_number: 0,
                         col_number: 0
+                    },
+                    end: TokenPosition {
+                        line_number: 0,
+                        col_number: 6
                     }
                 }],
                 None
@@ -769,9 +832,13 @@ mod test_lex {
             (
                 vec![Token {
                     kind: TokenKind::Word("'hel\\'lo'".to_string()),
-                    position: TokenPosition {
+                    start: TokenPosition {
                         line_number: 0,
                         col_number: 0
+                    },
+                    end: TokenPosition {
+                        line_number: 0,
+                        col_number: 8
                     }
                 }],
                 None
@@ -782,9 +849,13 @@ mod test_lex {
             (
                 vec![Token {
                     kind: TokenKind::Word("hello'world'".to_string()),
-                    position: TokenPosition {
+                    start: TokenPosition {
                         line_number: 0,
                         col_number: 0
+                    },
+                    end: TokenPosition {
+                        line_number: 0,
+                        col_number: 11
                     }
                 }],
                 None
@@ -799,9 +870,13 @@ mod test_lex {
             (
                 vec![Token {
                     kind: TokenKind::Word("\"hello\"".to_string()),
-                    position: TokenPosition {
+                    start: TokenPosition {
                         line_number: 0,
                         col_number: 0
+                    },
+                    end: TokenPosition {
+                        line_number: 0,
+                        col_number: 6
                     }
                 }],
                 None
@@ -812,9 +887,13 @@ mod test_lex {
             (
                 vec![Token {
                     kind: TokenKind::Word("\"hel\\'lo\"".to_string()),
-                    position: TokenPosition {
+                    start: TokenPosition {
                         line_number: 0,
                         col_number: 0
+                    },
+                    end: TokenPosition {
+                        line_number: 0,
+                        col_number: 8
                     }
                 }],
                 None
@@ -825,9 +904,13 @@ mod test_lex {
             (
                 vec![Token {
                     kind: TokenKind::Word("hello\"world\"".to_string()),
-                    position: TokenPosition {
+                    start: TokenPosition {
                         line_number: 0,
                         col_number: 0
+                    },
+                    end: TokenPosition {
+                        line_number: 0,
+                        col_number: 11
                     }
                 }],
                 None
@@ -849,9 +932,13 @@ mod test_lex {
             (
                 vec![Token {
                     kind: TokenKind::Word("\\\\".to_string()),
-                    position: TokenPosition {
+                    start: TokenPosition {
                         line_number: 0,
                         col_number: 0
+                    },
+                    end: TokenPosition {
+                        line_number: 0,
+                        col_number: 1
                     }
                 },],
                 None
@@ -863,14 +950,22 @@ mod test_lex {
                 vec![
                     Token {
                         kind: TokenKind::Word("aa".to_string()),
-                        position: TokenPosition {
+                        start: TokenPosition {
                             line_number: 0,
+                            col_number: 0
+                        },
+                        end: TokenPosition {
+                            line_number: 1,
                             col_number: 0
                         }
                     },
                     Token {
                         kind: TokenKind::Word("b".to_string()),
-                        position: TokenPosition {
+                        start: TokenPosition {
+                            line_number: 1,
+                            col_number: 2
+                        },
+                        end: TokenPosition {
                             line_number: 1,
                             col_number: 2
                         }
@@ -891,9 +986,13 @@ mod test_lex {
             tokens[0],
             Token {
                 kind: TokenKind::Word("echo".to_string()),
-                position: TokenPosition {
+                start: TokenPosition {
                     line_number: 0,
                     col_number: 0
+                },
+                end: TokenPosition {
+                    line_number: 0,
+                    col_number: 3
                 }
             }
         );
@@ -906,9 +1005,13 @@ mod test_lex {
             tokens[0],
             Token {
                 kind: TokenKind::ReservedWord(ReservedWord::If),
-                position: TokenPosition {
+                start: TokenPosition {
                     line_number: 0,
                     col_number: 0
+                },
+                end: TokenPosition {
+                    line_number: 0,
+                    col_number: 1
                 }
             }
         );
@@ -924,9 +1027,13 @@ mod test_lex {
             tokens[0],
             Token {
                 kind: TokenKind::Word("ls -l".to_string()),
-                position: TokenPosition {
+                start: TokenPosition {
                     line_number: 0,
                     col_number: 0
+                },
+                end: TokenPosition {
+                    line_number: 0,
+                    col_number: 1
                 }
             }
         );
@@ -939,9 +1046,13 @@ mod test_lex {
             (
                 vec![Token {
                     kind: TokenKind::IoNumber(IoNumber::Input(1)),
-                    position: TokenPosition {
+                    start: TokenPosition {
                         line_number: 0,
                         col_number: 0
+                    },
+                    end: TokenPosition {
+                        line_number: 0,
+                        col_number: 1
                     }
                 },],
                 None
@@ -977,9 +1088,13 @@ mod test_lex {
             (
                 vec![Token {
                     kind: TokenKind::Word("foo$hello".to_string()),
-                    position: TokenPosition {
+                    start: TokenPosition {
                         line_number: 0,
                         col_number: 0
+                    },
+                    end: TokenPosition {
+                        line_number: 0,
+                        col_number: 8
                     }
                 }],
                 None
@@ -990,9 +1105,13 @@ mod test_lex {
             (
                 vec![Token {
                     kind: TokenKind::Word("${hello}there".to_string()),
-                    position: TokenPosition {
+                    start: TokenPosition {
                         line_number: 0,
                         col_number: 0
+                    },
+                    end: TokenPosition {
+                        line_number: 0,
+                        col_number: 12
                     }
                 }],
                 None
@@ -1003,9 +1122,13 @@ mod test_lex {
             (
                 vec![Token {
                     kind: TokenKind::Word("${he||o}there".to_string()),
-                    position: TokenPosition {
+                    start: TokenPosition {
                         line_number: 0,
                         col_number: 0
+                    },
+                    end: TokenPosition {
+                        line_number: 0,
+                        col_number: 12
                     }
                 }],
                 None
@@ -1023,9 +1146,13 @@ mod test_lex {
             (
                 vec![Token {
                     kind: TokenKind::Word("${e||}}there".to_string()),
-                    position: TokenPosition {
+                    start: TokenPosition {
                         line_number: 0,
                         col_number: 0
+                    },
+                    end: TokenPosition {
+                        line_number: 0,
+                        col_number: 11
                     }
                 }],
                 None

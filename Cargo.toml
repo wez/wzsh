@@ -9,4 +9,7 @@ failure = "0.1"
 rustyline = "3.0"
 shlex = { path = "shlex" }
 
+[dev-dependencies]
+pretty_assertions = "0.6"
+
 [workspace]

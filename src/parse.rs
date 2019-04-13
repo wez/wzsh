@@ -56,9 +56,7 @@ impl<R: std::io::Read> Parser<R> {
                 }
 
                 _ => {
-                    return Err(ParseErrorKind::UnexpectedToken
-                        .context(token.position)
-                        .into());
+                    return Err(ParseErrorKind::UnexpectedToken.context(token.start).into());
                 }
             }
         }
@@ -141,6 +139,7 @@ impl SimpleCommand {
 #[cfg(test)]
 mod test {
     use super::*;
+    use pretty_assertions::assert_eq;
     use shlex::TokenPosition;
 
     fn parse(text: &str, aliases: Option<&Aliases>) -> Fallible<Vec<Node>> {
@@ -161,23 +160,35 @@ mod test {
                 words: vec![
                     Token {
                         kind: TokenKind::Word("ls".to_string()),
-                        position: TokenPosition {
+                        start: TokenPosition {
                             line_number: 0,
                             col_number: 0
+                        },
+                        end: TokenPosition {
+                            line_number: 0,
+                            col_number: 1
                         },
                     },
                     Token {
                         kind: TokenKind::Word("-l".to_string()),
-                        position: TokenPosition {
+                        start: TokenPosition {
                             line_number: 0,
                             col_number: 3
+                        },
+                        end: TokenPosition {
+                            line_number: 0,
+                            col_number: 4
                         },
                     },
                     Token {
                         kind: TokenKind::Word("foo".to_string()),
-                        position: TokenPosition {
+                        start: TokenPosition {
                             line_number: 0,
                             col_number: 6
+                        },
+                        end: TokenPosition {
+                            line_number: 0,
+                            col_number: 8
                         },
                     }
                 ]
@@ -198,9 +209,13 @@ mod test {
                     asynchronous: false,
                     words: vec![Token {
                         kind: TokenKind::Word("false".to_string()),
-                        position: TokenPosition {
+                        start: TokenPosition {
                             line_number: 0,
                             col_number: 0
+                        },
+                        end: TokenPosition {
+                            line_number: 0,
+                            col_number: 4
                         },
                     },]
                 }),
@@ -211,9 +226,13 @@ mod test {
                     asynchronous: false,
                     words: vec![Token {
                         kind: TokenKind::Word("true".to_string()),
-                        position: TokenPosition {
+                        start: TokenPosition {
                             line_number: 1,
                             col_number: 0
+                        },
+                        end: TokenPosition {
+                            line_number: 1,
+                            col_number: 3
                         },
                     },]
                 })
@@ -236,16 +255,24 @@ mod test {
                 words: vec![
                     Token {
                         kind: TokenKind::Word("ls -l".to_string()),
-                        position: TokenPosition {
+                        start: TokenPosition {
                             line_number: 0,
                             col_number: 0
+                        },
+                        end: TokenPosition {
+                            line_number: 0,
+                            col_number: 1
                         },
                     },
                     Token {
                         kind: TokenKind::Word("foo".to_string()),
-                        position: TokenPosition {
+                        start: TokenPosition {
                             line_number: 0,
                             col_number: 3
+                        },
+                        end: TokenPosition {
+                            line_number: 0,
+                            col_number: 5
                         },
                     }
                 ]
