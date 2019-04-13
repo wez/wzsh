@@ -72,6 +72,27 @@ impl Highlighter for LineEditorHelper {
 
 impl Helper for LineEditorHelper {}
 
+fn eval(env: &mut Environment, expander: &ShellExpander, nodes: Vec<Node>) -> Fallible<()> {
+    for node in nodes {
+        match node {
+            Node::SimpleCommand(cmd) => {
+                let argv = cmd.expand_argv(env, expander)?;
+                if !argv.is_empty() {
+                    let mut cmd = Command::new(&argv[0]);
+                    for arg in argv.iter().skip(1) {
+                        cmd.arg(arg);
+                    }
+                    cmd.env_clear();
+                    cmd.envs(env.iter());
+                    let mut child = cmd.spawn()?;
+                    child.wait()?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn main() -> Result<(), Error> {
     let config = Config::builder().history_ignore_space(true).build();
 
@@ -85,40 +106,45 @@ fn main() -> Result<(), Error> {
     let expander = ShellExpander {};
     let aliases = None;
 
+    let mut input = String::new();
+
     loop {
-        let readline = rl.readline("$ ");
+        let readline = rl.readline(if input.is_empty() { "$ " } else { "..> " });
         match readline {
             Ok(line) => {
                 rl.add_history_entry(line.as_ref());
 
-                let mut parser = Parser::new("stdin", line.as_bytes());
-                for node in parser.parse(aliases)? {
-                    match node {
-                        Node::SimpleCommand(cmd) => {
-                            let argv = cmd.expand_argv(&mut env, &expander)?;
-                            if !argv.is_empty() {
-                                let mut cmd = Command::new(&argv[0]);
-                                for arg in argv.iter().skip(1) {
-                                    cmd.arg(arg);
-                                }
-                                cmd.env_clear();
-                                cmd.envs(env.iter());
-                                let mut child = cmd.spawn()?;
-                                child.wait()?;
-                            }
-                        }
+                input.push_str(&line);
+
+                let mut parser = Parser::new("stdin", input.as_bytes());
+                let nodes = match parser.parse(aliases) {
+                    Err(_) => {
+                        // If we get a parse error, it is probably because
+                        // something is incomplete.  Let's keep it buffered
+                        // up in the input vector and allow the user to
+                        // complete it on the next line, or press ctrl-c
+                        // to cancel and clear it.
+                        // eprintln!("{}", e);
+                        continue;
                     }
+                    Ok(nodes) => {
+                        input.clear();
+                        nodes
+                    }
+                };
+                if let Err(e) = eval(&mut env, &expander, nodes) {
+                    eprintln!("{}", e);
                 }
             }
             Err(ReadlineError::Interrupted) => {
-                // println!("CTRL-C");
+                input.clear();
                 continue;
             }
             Err(ReadlineError::Eof) => {
                 break;
             }
             Err(err) => {
-                println!("Error: {:?}", err);
+                println!("Error: {}", err);
                 break;
             }
         }
