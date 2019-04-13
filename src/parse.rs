@@ -19,12 +19,12 @@ impl<R: std::io::Read> Parser<R> {
         Self { lexer }
     }
 
-    pub fn parse(&mut self, aliases: Option<&Aliases>) -> Fallible<Vec<Node>> {
-        let mut results = vec![];
+    pub fn parse(&mut self, aliases: Option<&Aliases>) -> Fallible<CompoundList> {
+        let mut commands = vec![];
         while let Some(cmd) = self.simple_command(aliases)? {
-            results.push(Node::SimpleCommand(cmd));
+            commands.push(Command::SimpleCommand(cmd));
         }
-        Ok(results)
+        Ok(CompoundList { commands })
     }
 
     fn simple_command(&mut self, aliases: Option<&Aliases>) -> Fallible<Option<SimpleCommand>> {
@@ -76,8 +76,68 @@ impl<R: std::io::Read> Parser<R> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Node {
+pub enum Command {
     SimpleCommand(SimpleCommand),
+    CompoundCommand(CompoundCommand, Option<RedirectList>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RedirectList {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CompoundCommand {
+    BraceGroup(CompoundList),
+    Subshell(CompoundList),
+    ForEach(ForEach),
+    If(If),
+    UntilLoop(UntilLoop),
+    WhileLoop(WhileLoop),
+    // TODO: Case
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pipeline {
+    /// true if the pipeline starts with a bang
+    inverted: bool,
+    commands: Vec<Command>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompoundList {
+    commands: Vec<Command>,
+}
+
+impl IntoIterator for CompoundList {
+    type Item = Command;
+    type IntoIter = ::std::vec::IntoIter<Command>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.commands.into_iter()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct If {
+    condition: CompoundList,
+    true_part: CompoundList,
+    false_part: Option<CompoundList>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UntilLoop {
+    body: CompoundList,
+    condition: CompoundList,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WhileLoop {
+    condition: CompoundList,
+    body: CompoundList,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForEach {
+    wordlist: Vec<Token>,
+    body: CompoundList,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -142,7 +202,7 @@ mod test {
     use pretty_assertions::assert_eq;
     use shlex::TokenPosition;
 
-    fn parse(text: &str, aliases: Option<&Aliases>) -> Fallible<Vec<Node>> {
+    fn parse(text: &str, aliases: Option<&Aliases>) -> Fallible<CompoundList> {
         let mut parser = Parser::new("test", text.as_bytes());
         parser.parse(aliases)
     }
@@ -152,47 +212,49 @@ mod test {
         let nodes = parse("ls -l foo", None).unwrap();
         assert_eq!(
             nodes,
-            vec![Node::SimpleCommand(SimpleCommand {
-                assignments: vec![],
-                file_redirects: vec![],
-                fd_dups: vec![],
-                asynchronous: false,
-                words: vec![
-                    Token {
-                        kind: TokenKind::Word("ls".to_string()),
-                        start: TokenPosition {
-                            line_number: 0,
-                            col_number: 0
+            CompoundList {
+                commands: vec![Command::SimpleCommand(SimpleCommand {
+                    assignments: vec![],
+                    file_redirects: vec![],
+                    fd_dups: vec![],
+                    asynchronous: false,
+                    words: vec![
+                        Token {
+                            kind: TokenKind::Word("ls".to_string()),
+                            start: TokenPosition {
+                                line_number: 0,
+                                col_number: 0
+                            },
+                            end: TokenPosition {
+                                line_number: 0,
+                                col_number: 1
+                            },
                         },
-                        end: TokenPosition {
-                            line_number: 0,
-                            col_number: 1
+                        Token {
+                            kind: TokenKind::Word("-l".to_string()),
+                            start: TokenPosition {
+                                line_number: 0,
+                                col_number: 3
+                            },
+                            end: TokenPosition {
+                                line_number: 0,
+                                col_number: 4
+                            },
                         },
-                    },
-                    Token {
-                        kind: TokenKind::Word("-l".to_string()),
-                        start: TokenPosition {
-                            line_number: 0,
-                            col_number: 3
-                        },
-                        end: TokenPosition {
-                            line_number: 0,
-                            col_number: 4
-                        },
-                    },
-                    Token {
-                        kind: TokenKind::Word("foo".to_string()),
-                        start: TokenPosition {
-                            line_number: 0,
-                            col_number: 6
-                        },
-                        end: TokenPosition {
-                            line_number: 0,
-                            col_number: 8
-                        },
-                    }
-                ]
-            })]
+                        Token {
+                            kind: TokenKind::Word("foo".to_string()),
+                            start: TokenPosition {
+                                line_number: 0,
+                                col_number: 6
+                            },
+                            end: TokenPosition {
+                                line_number: 0,
+                                col_number: 8
+                            },
+                        }
+                    ]
+                })]
+            }
         );
     }
 
@@ -201,42 +263,44 @@ mod test {
         let nodes = parse("false\ntrue", None).unwrap();
         assert_eq!(
             nodes,
-            vec![
-                Node::SimpleCommand(SimpleCommand {
-                    assignments: vec![],
-                    file_redirects: vec![],
-                    fd_dups: vec![],
-                    asynchronous: false,
-                    words: vec![Token {
-                        kind: TokenKind::Word("false".to_string()),
-                        start: TokenPosition {
-                            line_number: 0,
-                            col_number: 0
-                        },
-                        end: TokenPosition {
-                            line_number: 0,
-                            col_number: 4
-                        },
-                    },]
-                }),
-                Node::SimpleCommand(SimpleCommand {
-                    assignments: vec![],
-                    file_redirects: vec![],
-                    fd_dups: vec![],
-                    asynchronous: false,
-                    words: vec![Token {
-                        kind: TokenKind::Word("true".to_string()),
-                        start: TokenPosition {
-                            line_number: 1,
-                            col_number: 0
-                        },
-                        end: TokenPosition {
-                            line_number: 1,
-                            col_number: 3
-                        },
-                    },]
-                })
-            ]
+            CompoundList {
+                commands: vec![
+                    Command::SimpleCommand(SimpleCommand {
+                        assignments: vec![],
+                        file_redirects: vec![],
+                        fd_dups: vec![],
+                        asynchronous: false,
+                        words: vec![Token {
+                            kind: TokenKind::Word("false".to_string()),
+                            start: TokenPosition {
+                                line_number: 0,
+                                col_number: 0
+                            },
+                            end: TokenPosition {
+                                line_number: 0,
+                                col_number: 4
+                            },
+                        },]
+                    }),
+                    Command::SimpleCommand(SimpleCommand {
+                        assignments: vec![],
+                        file_redirects: vec![],
+                        fd_dups: vec![],
+                        asynchronous: false,
+                        words: vec![Token {
+                            kind: TokenKind::Word("true".to_string()),
+                            start: TokenPosition {
+                                line_number: 1,
+                                col_number: 0
+                            },
+                            end: TokenPosition {
+                                line_number: 1,
+                                col_number: 3
+                            },
+                        },]
+                    })
+                ]
+            }
         );
     }
 
@@ -247,36 +311,38 @@ mod test {
         let nodes = parse("ls foo", Some(&aliases)).unwrap();
         assert_eq!(
             nodes,
-            vec![Node::SimpleCommand(SimpleCommand {
-                assignments: vec![],
-                file_redirects: vec![],
-                fd_dups: vec![],
-                asynchronous: false,
-                words: vec![
-                    Token {
-                        kind: TokenKind::Word("ls -l".to_string()),
-                        start: TokenPosition {
-                            line_number: 0,
-                            col_number: 0
+            CompoundList {
+                commands: vec![Command::SimpleCommand(SimpleCommand {
+                    assignments: vec![],
+                    file_redirects: vec![],
+                    fd_dups: vec![],
+                    asynchronous: false,
+                    words: vec![
+                        Token {
+                            kind: TokenKind::Word("ls -l".to_string()),
+                            start: TokenPosition {
+                                line_number: 0,
+                                col_number: 0
+                            },
+                            end: TokenPosition {
+                                line_number: 0,
+                                col_number: 1
+                            },
                         },
-                        end: TokenPosition {
-                            line_number: 0,
-                            col_number: 1
-                        },
-                    },
-                    Token {
-                        kind: TokenKind::Word("foo".to_string()),
-                        start: TokenPosition {
-                            line_number: 0,
-                            col_number: 3
-                        },
-                        end: TokenPosition {
-                            line_number: 0,
-                            col_number: 5
-                        },
-                    }
-                ]
-            })]
+                        Token {
+                            kind: TokenKind::Word("foo".to_string()),
+                            start: TokenPosition {
+                                line_number: 0,
+                                col_number: 3
+                            },
+                            end: TokenPosition {
+                                line_number: 0,
+                                col_number: 5
+                            },
+                        }
+                    ]
+                })]
+            }
         );
     }
 }

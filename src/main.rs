@@ -10,7 +10,7 @@ use std::process::Command;
 use shlex::string::ShellString;
 use shlex::{Environment, Expander};
 mod parse;
-use parse::{Node, Parser};
+use parse::{Command as ShellCommand, CompoundList, Parser};
 
 struct ShellExpander {}
 impl Expander for ShellExpander {
@@ -72,10 +72,10 @@ impl Highlighter for LineEditorHelper {
 
 impl Helper for LineEditorHelper {}
 
-fn eval(env: &mut Environment, expander: &ShellExpander, nodes: Vec<Node>) -> Fallible<()> {
-    for node in nodes {
-        match node {
-            Node::SimpleCommand(cmd) => {
+fn eval(env: &mut Environment, expander: &ShellExpander, list: CompoundList) -> Fallible<()> {
+    for command in list {
+        match command {
+            ShellCommand::SimpleCommand(cmd) => {
                 let argv = cmd.expand_argv(env, expander)?;
                 if !argv.is_empty() {
                     let mut cmd = Command::new(&argv[0]);
@@ -88,6 +88,7 @@ fn eval(env: &mut Environment, expander: &ShellExpander, nodes: Vec<Node>) -> Fa
                     child.wait()?;
                 }
             }
+            _ => bail!("eval doesn't know about {:?}", command),
         }
     }
     Ok(())
