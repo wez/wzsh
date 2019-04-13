@@ -45,20 +45,21 @@ pub enum LexErrorKind {
 }
 
 impl LexErrorKind {
-    pub fn at(self, position: TokenPosition) -> LexError {
-        LexError::new(self, position)
+    pub fn at(self, start: TokenPosition, end: TokenPosition) -> LexError {
+        LexError::new(self, start, end)
     }
 }
 
 #[derive(Debug, Clone, Fail)]
-#[fail(display = "{} {}", kind, position)]
+#[fail(display = "{} starting {} ending {}", kind, start, end)]
 pub struct LexError {
     kind: LexErrorKind,
-    position: TokenPosition,
+    start: TokenPosition,
+    end: TokenPosition,
 }
 
 impl LexError {
-    pub fn new(kind: LexErrorKind, position: TokenPosition) -> Self {
-        Self { kind, position }
+    pub fn new(kind: LexErrorKind, start: TokenPosition, end: TokenPosition) -> Self {
+        Self { kind, start, end }
     }
 }

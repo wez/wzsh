@@ -23,8 +23,9 @@ pub struct Lexer<R: std::io::Read> {
     stream: BufReader<R>,
     stream_buffer: String,
     stream_buffer_pos: usize,
-    position: TokenPosition,
+    stream_position: TokenPosition,
     token_text: String,
+    tokens: Vec<PositionedChar>,
 }
 
 macro_rules! TokenEnum {
@@ -241,8 +242,14 @@ impl Token {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct PositionedChar {
+    c: char,
+    pos: TokenPosition,
+}
+
 enum Next {
-    Char(char),
+    Char(PositionedChar),
     Eof,
     Error(Error),
 }
@@ -254,8 +261,9 @@ impl<R: std::io::Read> Lexer<R> {
             stream_buffer: String::new(),
             stream_buffer_pos: 0,
             source: source.to_owned(),
-            position: Default::default(),
+            stream_position: Default::default(),
             token_text: String::new(),
+            tokens: vec![],
         }
     }
 
@@ -265,11 +273,18 @@ impl<R: std::io::Read> Lexer<R> {
 
     fn next_char(&mut self) -> Next {
         if self.stream_buffer.is_empty() || self.stream_buffer_pos >= self.stream_buffer.len() {
+            let bump_line = !self.stream_buffer.is_empty();
             self.stream_buffer.clear();
             match self.stream.read_line(&mut self.stream_buffer) {
                 Ok(0) => return Next::Eof,
                 Err(e) => return Next::Error(e.into()),
-                _ => self.stream_buffer_pos = 0,
+                _ => {
+                    self.stream_buffer_pos = 0;
+                    self.stream_position.col_number = 0;
+                    if bump_line {
+                        self.stream_position.line_number += 1;
+                    }
+                }
             }
         }
         match (&self.stream_buffer[self.stream_buffer_pos..])
@@ -277,20 +292,27 @@ impl<R: std::io::Read> Lexer<R> {
             .next()
         {
             Some(c) => {
+                let result = Next::Char(PositionedChar {
+                    c,
+                    pos: self.stream_position,
+                });
                 self.stream_buffer_pos += c.len_utf8();
-                Next::Char(c)
+                self.stream_position.col_number += 1;
+                result
             }
             None => {
-                self.stream_buffer.clear();
+                self.stream_buffer_pos += 1;
                 self.next_char()
             }
         }
     }
 
-    fn unget(&mut self, c: char) {
-        let len = c.len_utf8();
+    fn unget(&mut self, c: PositionedChar) {
+        let len = c.c.len_utf8();
+        assert!(self.stream_buffer_pos > 0);
         assert!(len < self.stream_buffer_pos);
         self.stream_buffer_pos -= len;
+        self.stream_position.col_number -= 1;
     }
 
     pub fn next(&mut self) -> Fallible<Token> {
@@ -300,14 +322,14 @@ impl<R: std::io::Read> Lexer<R> {
                 Next::Eof => {
                     // Section 2.3.1
                     if self.token_text.is_empty() {
-                        return Ok(Token::new(TokenKind::Eof, self.position));
+                        return Ok(Token::new(TokenKind::Eof, self.stream_position));
                     }
                     return Ok(self.delimit_current());
                 }
                 Next::Error(e) => return Err(e),
             };
 
-            self.token_text.push(b);
+            self.accumulate(b);
 
             match OPERATORS.matches(&self.token_text) {
                 MatchResult::Match(..) => {
@@ -320,14 +342,13 @@ impl<R: std::io::Read> Lexer<R> {
                     // form an operator, so look at the text without it; if that is one
                     // then we delimit a token
                     if self.token_text.len() > 1 {
-                        if let MatchResult::Match(oper, len) =
+                        if let MatchResult::Match(oper, _len) =
                             OPERATORS.matches(&self.token_text[0..self.token_text.len() - 1])
                         {
-                            let pos = self.position;
-                            self.position.col_number += len;
-                            self.token_text.clear();
+                            let tok = Token::new(TokenKind::Operator(oper), self.tokens[0].pos);
+                            self.clear_tokens();
                             self.unget(b);
-                            return Ok(Token::new(TokenKind::Operator(oper), pos));
+                            return Ok(tok);
                         }
                     }
 
@@ -339,7 +360,7 @@ impl<R: std::io::Read> Lexer<R> {
                         match OPERATORS.matches(&self.token_text[len - 1..len]) {
                             MatchResult::No => {}
                             _ => {
-                                self.token_text.pop();
+                                self.pop();
                                 let tok = self.delimit_current();
                                 self.unget(b);
                                 return Ok(tok);
@@ -349,23 +370,15 @@ impl<R: std::io::Read> Lexer<R> {
                 }
             }
 
-            match b {
+            match b.c {
                 '\\' => {
-                    let b = match self.next_char() {
-                        Next::Char(b) => b,
-                        Next::Eof => {
-                            return Err(LexErrorKind::EofDuringBackslash.at(self.position).into());
-                        }
-                        Next::Error(e) => return Err(e.context(self.position).into()),
-                    };
-                    if b == '\n' {
+                    let b = self.next_char_or_err(LexErrorKind::EofDuringBackslash)?;
+                    if b.c == '\n' {
                         // Line continuation
-                        self.token_text.pop();
-                        self.position.col_number = 0;
-                        self.position.line_number += 1;
+                        self.pop();
                     } else {
                         // Else quoted character
-                        self.token_text.push(b);
+                        self.accumulate(b);
                     }
                     continue;
                 }
@@ -374,31 +387,26 @@ impl<R: std::io::Read> Lexer<R> {
                 '$' => self.dollar()?,
                 '`' => self.accumulate_quoted('`')?,
                 '\n' => {
-                    self.token_text.pop();
+                    self.pop();
                     if !self.token_text.is_empty() {
                         let token = self.delimit_current();
                         self.unget(b);
                         return Ok(token);
                     }
-                    let pos = self.position;
-                    let tok = Token::new(TokenKind::NewLine, pos);
-                    self.position.col_number = 0;
-                    self.position.line_number += 1;
-                    self.token_text.clear();
+                    let tok = Token::new(TokenKind::NewLine, b.pos);
+                    self.clear_tokens();
                     return Ok(tok);
                 }
                 ' ' | '\t' | '\r' => {
-                    self.token_text.pop();
+                    self.pop();
                     if self.token_text.is_empty() {
-                        self.position.col_number += 1;
                         continue;
                     }
                     let tok = self.delimit_current();
-                    self.position.col_number += 1;
                     return Ok(tok);
                 }
                 '#' => {
-                    self.token_text.pop();
+                    self.pop();
                     self.comment()?;
                 }
                 _ => {}
@@ -427,20 +435,17 @@ impl<R: std::io::Read> Lexer<R> {
     }
 
     fn delimit_current(&mut self) -> Token {
+        let pos = self.tokens[0].pos;
+
         if let MatchResult::Match(oper, len) = OPERATORS.matches(&self.token_text) {
             if len == self.token_text.len() {
-                let pos = self.position;
-                self.position.col_number += len;
-                self.token_text.clear();
+                self.clear_tokens();
                 return Token::new(TokenKind::Operator(oper), pos);
             }
         }
 
         let word = std::mem::replace(&mut self.token_text, String::new());
-        let pos = self.position;
-        // FIXME: in the line continuation case, this includes the width
-        // of the data from preceding lines which is incorrect
-        self.position.col_number += word.len();
+        self.clear_tokens();
 
         if let Some(number) = self.is_io_number(&word) {
             return Token::new(TokenKind::IoNumber(number), pos);
@@ -451,17 +456,9 @@ impl<R: std::io::Read> Lexer<R> {
 
     fn comment(&mut self) -> Fallible<()> {
         loop {
-            let b = match self.next_char() {
-                Next::Char(b) => b,
-                Next::Eof => {
-                    return Err(LexErrorKind::EofDuringComment.at(self.position).into());
-                }
-                Next::Error(e) => return Err(e.context(self.position).into()),
-            };
+            let b = self.next_char_or_err(LexErrorKind::EofDuringComment)?;
 
-            if b == '\n' {
-                self.position.col_number = 0;
-                self.position.line_number += 1;
+            if b.c == '\n' {
                 return Ok(());
             }
         }
@@ -470,24 +467,16 @@ impl<R: std::io::Read> Lexer<R> {
     fn single_quoted(&mut self) -> Fallible<()> {
         let mut backslash = false;
         loop {
-            let b = match self.next_char() {
-                Next::Char(b) => b,
-                Next::Eof => {
-                    return Err(LexErrorKind::EofDuringSingleQuotedString
-                        .at(self.position)
-                        .into());
-                }
-                Next::Error(e) => return Err(e.context(self.position).into()),
-            };
-            self.token_text.push(b);
+            let b = self.next_char_or_err(LexErrorKind::EofDuringSingleQuotedString)?;
+            self.accumulate(b);
 
-            if b == '\'' && !backslash {
+            if b.c == '\'' && !backslash {
                 return Ok(());
             }
 
             backslash = false;
 
-            if b == '\\' {
+            if b.c == '\\' {
                 backslash = true;
             }
         }
@@ -496,76 +485,73 @@ impl<R: std::io::Read> Lexer<R> {
     fn double_quoted(&mut self) -> Fallible<()> {
         let mut backslash = false;
         loop {
-            let b = match self.next_char() {
-                Next::Char(b) => b,
-                Next::Eof => {
-                    return Err(LexErrorKind::EofDuringDoubleQuotedString
-                        .at(self.position)
-                        .into());
-                }
-                Next::Error(e) => return Err(e.context(self.position).into()),
-            };
-            self.token_text.push(b);
+            let b = self.next_char_or_err(LexErrorKind::EofDuringDoubleQuotedString)?;
+            self.accumulate(b);
 
-            if b == '"' && !backslash {
+            if b.c == '"' && !backslash {
                 return Ok(());
             }
 
             backslash = false;
 
-            if b == '\\' {
+            if b.c == '\\' {
                 backslash = true;
             }
         }
     }
 
+    fn next_char_or_err(&mut self, err: LexErrorKind) -> Fallible<PositionedChar> {
+        match self.next_char() {
+            Next::Char(b) => Ok(b),
+            Next::Eof => Err(err.at(self.tokens[0].pos, self.stream_position).into()),
+            Next::Error(e) => Err(e.context(self.stream_position).into()),
+        }
+    }
+
     fn dollar(&mut self) -> Fallible<()> {
-        let b = match self.next_char() {
-            Next::Char(b) => b,
-            Next::Eof => {
-                return Err(LexErrorKind::EofDuringParameterExpansion
-                    .at(self.position)
-                    .into());
-            }
-            Next::Error(e) => return Err(e.context(self.position).into()),
-        };
-        self.token_text.push(b);
-        if b != '{' {
+        let b = self.next_char_or_err(LexErrorKind::EofDuringParameterExpansion)?;
+        self.accumulate(b);
+        if b.c != '{' {
             return Ok(());
         }
         self.accumulate_quoted('}')
+    }
+
+    fn clear_tokens(&mut self) {
+        self.tokens.clear();
+        self.token_text.clear();
+    }
+    fn accumulate(&mut self, c: PositionedChar) {
+        self.tokens.push(c);
+        self.token_text.push(c.c);
+    }
+    fn pop(&mut self) {
+        self.tokens.pop();
+        self.token_text.pop();
     }
 
     fn accumulate_quoted(&mut self, expected: char) -> Fallible<()> {
         let mut close_stack = vec![expected];
         let mut backslash = false;
         loop {
-            let b = match self.next_char() {
-                Next::Char(b) => b,
-                Next::Eof => {
-                    return Err(LexErrorKind::EofDuringParameterExpansion
-                        .at(self.position)
-                        .into());
-                }
-                Next::Error(e) => return Err(e.context(self.position).into()),
-            };
-            self.token_text.push(b);
+            let b = self.next_char_or_err(LexErrorKind::EofDuringParameterExpansion)?;
+            self.accumulate(b);
 
             if backslash {
                 backslash = false;
                 continue;
             }
-            if b == '\\' {
+            if b.c == '\\' {
                 backslash = true;
                 continue;
             }
 
-            match b {
+            match b.c {
                 '{' => close_stack.push('}'),
                 '(' => close_stack.push(')'),
                 '[' => close_stack.push(']'),
                 _ => {
-                    if *close_stack.last().unwrap() == b {
+                    if *close_stack.last().unwrap() == b.c {
                         // Reached the end of this quoted section,
                         // so pop it off
                         close_stack.pop();
@@ -855,7 +841,7 @@ mod test_lex {
             lex("\\"),
             (
                 vec![],
-                Some("EOF while lexing backslash escape at line 0 column 0".to_owned())
+                Some("EOF while lexing backslash escape starting at line 0 column 0 ending at line 0 column 1".to_owned())
             )
         );
         assert_eq!(
@@ -878,7 +864,7 @@ mod test_lex {
                     Token {
                         kind: TokenKind::Word("aa".to_string()),
                         position: TokenPosition {
-                            line_number: 1,
+                            line_number: 0,
                             col_number: 0
                         }
                     },
@@ -886,11 +872,7 @@ mod test_lex {
                         kind: TokenKind::Word("b".to_string()),
                         position: TokenPosition {
                             line_number: 1,
-                            // FIXME: this should be 2, but because of the way
-                            // that we process line continuations, we see len("aa")
-                            // as the preceding width and then add one to get to
-                            // the column holding "b".
-                            col_number: 3
+                            col_number: 2
                         }
                     },
                 ],
@@ -1033,7 +1015,7 @@ mod test_lex {
             lex("${{e||}there"),
             (
                 vec![],
-                Some("EOF while lexing parameter expansion at line 0 column 0".to_string()),
+                Some("EOF while lexing parameter expansion starting at line 0 column 0 ending at line 0 column 12".to_string()),
             )
         );
         assert_eq!(
