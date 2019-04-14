@@ -149,7 +149,7 @@ fn main() -> Result<(), Error> {
                 input.push_str(&line);
 
                 let mut parser = Parser::new("stdin", input.as_bytes());
-                let nodes = match parser.parse() {
+                let list = match parser.parse() {
                     Err(e) => {
                         if !is_recoverable_parse_error(&e) {
                             eprintln!("{}", e);
@@ -157,12 +157,12 @@ fn main() -> Result<(), Error> {
                         }
                         continue;
                     }
-                    Ok(nodes) => {
+                    Ok(list) => {
                         input.clear();
-                        nodes
+                        list
                     }
                 };
-                if let Err(e) = eval(&mut env, &expander, nodes, &aliases) {
+                if let Err(e) = eval(&mut env, &expander, list, &aliases) {
                     eprintln!("{}", e);
                 }
             }
