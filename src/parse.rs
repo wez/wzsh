@@ -343,6 +343,7 @@ impl<R: std::io::Read> Parser<R> {
             match token.kind {
                 TokenKind::Eof => break,
                 TokenKind::Operator(Operator::Ampersand)
+                | TokenKind::Operator(Operator::Pipe)
                 | TokenKind::Operator(Operator::Semicolon)
                 | TokenKind::NewLine
                 | TokenKind::Operator(Operator::AndIf)

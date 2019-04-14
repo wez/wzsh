@@ -11,7 +11,9 @@ use shlex::error::{LexError, TokenPosition};
 use shlex::string::ShellString;
 use shlex::{Aliases, Environment, Expander, LexErrorKind, TokenKind};
 mod parse;
-use parse::{CommandType, CompoundList, FileRedirection, ParseErrorKind, Parser, Redirection};
+use parse::{
+    CommandType, CompoundList, FileRedirection, ParseErrorKind, Parser, Redirection, SimpleCommand,
+};
 
 struct ShellExpander {}
 impl Expander for ShellExpander {
@@ -73,6 +75,93 @@ impl Highlighter for LineEditorHelper {
 
 impl Helper for LineEditorHelper {}
 
+fn build_command(
+    cmd: &SimpleCommand,
+    env: &mut Environment,
+    expander: &ShellExpander,
+    aliases: &Aliases,
+) -> Fallible<std::process::Command> {
+    let argv = cmd.expand_argv(env, expander, aliases)?;
+    ensure!(
+        !argv.is_empty(),
+        "we don't handle exporting redirection only commands yet"
+    );
+    let mut child_cmd = Command::new(&argv[0]);
+    for arg in argv.iter().skip(1) {
+        child_cmd.arg(arg);
+    }
+    child_cmd.env_clear();
+    child_cmd.envs(env.iter());
+    Ok(child_cmd)
+}
+
+fn apply_redirections(
+    child_cmd: &mut std::process::Command,
+    cmd: &SimpleCommand,
+    env: &mut Environment,
+    expander: &ShellExpander,
+) -> Fallible<()> {
+    for redir in &cmd.redirections {
+        match redir {
+            Redirection::File(FileRedirection {
+                fd_number,
+                file_name,
+                input,
+                output,
+                clobber,
+                append,
+            }) => {
+                ensure!(
+                    *fd_number < 3,
+                    "only stdin, stdout, stderr currently support for redirection"
+                );
+                let file_name = match &file_name.kind {
+                    TokenKind::Word(word) => {
+                        let word = ShellString::from(word.as_str());
+                        let file = expander.expand_word(&word, env)?;
+                        ensure!(
+                            file.len() == 1,
+                            "{:?} expanded to {:?}, expected just a single item",
+                            file_name,
+                            file
+                        );
+                        file.into_iter().next().unwrap()
+                    }
+                    _ => bail!("file_name is not a word token"),
+                };
+                let mut options = std::fs::OpenOptions::new();
+                options
+                    .read(*input)
+                    .write(*output)
+                    .append(*append)
+                    .truncate(*output && !*append)
+                    // TODO: if a noclobber option is set, and !*clobber,
+                    // then we should look at .create_new() instead
+                    .create(*output || *clobber);
+                let file = match options.open(file_name.as_ref()) {
+                    Ok(file) => file,
+                    Err(e) => {
+                        return Err(e
+                            .context(format!("opening '{}' using {:#?}", file_name, options))
+                            .into());
+                    }
+                };
+
+                match fd_number {
+                    0 => child_cmd.stdin(file),
+                    1 => child_cmd.stdout(file),
+                    2 => child_cmd.stderr(file),
+                    _ => bail!("unsupported fd number"),
+                };
+            }
+            Redirection::Fd(_) => {
+                bail!("fd redirection not hooked up to eval");
+            }
+        }
+    }
+    Ok(())
+}
+
 fn eval(
     env: &mut Environment,
     expander: &ShellExpander,
@@ -82,80 +171,12 @@ fn eval(
     for command in list {
         match command.command {
             CommandType::SimpleCommand(cmd) => {
-                let argv = cmd.expand_argv(env, expander, aliases)?;
-                if !argv.is_empty() {
-                    let mut child_cmd = Command::new(&argv[0]);
-                    for arg in argv.iter().skip(1) {
-                        child_cmd.arg(arg);
-                    }
-                    child_cmd.env_clear();
-                    child_cmd.envs(env.iter());
-
-                    for redir in &cmd.redirections {
-                        match redir {
-                            Redirection::File(FileRedirection {
-                                fd_number,
-                                file_name,
-                                input,
-                                output,
-                                clobber,
-                                append,
-                            }) => {
-                                ensure!(
-                                    *fd_number < 3,
-                                    "only stdin, stdout, stderr currently support for redirection"
-                                );
-                                let file_name = match &file_name.kind {
-                                    TokenKind::Word(word) => {
-                                        let word = ShellString::from(word.as_str());
-                                        let file = expander.expand_word(&word, env)?;
-                                        ensure!(
-                                            file.len() == 1,
-                                            "{:?} expanded to {:?}, expected just a single item",
-                                            file_name,
-                                            file
-                                        );
-                                        file.into_iter().next().unwrap()
-                                    }
-                                    _ => bail!("file_name is not a word token"),
-                                };
-                                let mut options = std::fs::OpenOptions::new();
-                                options
-                                    .read(*input)
-                                    .write(*output)
-                                    .append(*append)
-                                    .truncate(*output && !*append)
-                                    // TODO: if a noclobber option is set, and !*clobber,
-                                    // then we should look at .create_new() instead
-                                    .create(*output || *clobber);
-                                let file = match options.open(file_name.as_ref()) {
-                                    Ok(file) => file,
-                                    Err(e) => {
-                                        return Err(e
-                                            .context(format!(
-                                                "opening '{}' using {:#?}",
-                                                file_name, options
-                                            ))
-                                            .into());
-                                    }
-                                };
-
-                                match fd_number {
-                                    0 => child_cmd.stdin(file),
-                                    1 => child_cmd.stdout(file),
-                                    2 => child_cmd.stderr(file),
-                                    _ => bail!("unsupported fd number"),
-                                };
-                            }
-                            Redirection::Fd(_) => {
-                                bail!("fd redirection not hooked up to eval");
-                            }
-                        }
-                    }
-
-                    let mut child = child_cmd.spawn()?;
-                    child.wait()?;
-                }
+                let mut child_cmd = build_command(&cmd, env, expander, aliases)?;
+                apply_redirections(&mut child_cmd, &cmd, env, expander)?;
+                let mut child = child_cmd.spawn()?;
+                child.wait()?;
+            }
+            CommandType::Pipeline(pipeline) => {
             }
             _ => bail!("eval doesn't know about {:#?}", command),
         }
