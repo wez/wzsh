@@ -8,9 +8,9 @@ use std::borrow::Cow;
 use std::process::Command;
 
 use shlex::string::ShellString;
-use shlex::{Environment, Expander};
+use shlex::{Aliases, Environment, Expander};
 mod parse;
-use parse::{Command as ShellCommand, CompoundList, Parser};
+use parse::{CommandType, CompoundList, Parser};
 
 struct ShellExpander {}
 impl Expander for ShellExpander {
@@ -72,11 +72,16 @@ impl Highlighter for LineEditorHelper {
 
 impl Helper for LineEditorHelper {}
 
-fn eval(env: &mut Environment, expander: &ShellExpander, list: CompoundList) -> Fallible<()> {
+fn eval(
+    env: &mut Environment,
+    expander: &ShellExpander,
+    list: CompoundList,
+    aliases: &Aliases,
+) -> Fallible<()> {
     for command in list {
-        match command {
-            ShellCommand::SimpleCommand(cmd) => {
-                let argv = cmd.expand_argv(env, expander)?;
+        match command.command {
+            CommandType::SimpleCommand(cmd, ..) => {
+                let argv = cmd.expand_argv(env, expander, aliases)?;
                 if !argv.is_empty() {
                     let mut cmd = Command::new(&argv[0]);
                     for arg in argv.iter().skip(1) {
@@ -105,7 +110,7 @@ fn main() -> Result<(), Error> {
 
     let mut env = Environment::new();
     let expander = ShellExpander {};
-    let aliases = None;
+    let aliases = Aliases::new();
 
     let mut input = String::new();
 
@@ -118,14 +123,14 @@ fn main() -> Result<(), Error> {
                 input.push_str(&line);
 
                 let mut parser = Parser::new("stdin", input.as_bytes());
-                let nodes = match parser.parse(aliases) {
-                    Err(_) => {
+                let nodes = match parser.parse() {
+                    Err(e) => {
                         // If we get a parse error, it is probably because
                         // something is incomplete.  Let's keep it buffered
                         // up in the input vector and allow the user to
                         // complete it on the next line, or press ctrl-c
                         // to cancel and clear it.
-                        // eprintln!("{}", e);
+                        eprintln!("{:?}", e);
                         continue;
                     }
                     Ok(nodes) => {
@@ -133,7 +138,7 @@ fn main() -> Result<(), Error> {
                         nodes
                     }
                 };
-                if let Err(e) = eval(&mut env, &expander, nodes) {
+                if let Err(e) = eval(&mut env, &expander, nodes, &aliases) {
                     eprintln!("{}", e);
                 }
             }

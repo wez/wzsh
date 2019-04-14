@@ -1,7 +1,7 @@
 //! Shell parser
 use failure::{bail, Fail, Fallible};
 use shlex::string::ShellString;
-use shlex::{Aliases, Environment, Expander, Lexer, Operator, Token, TokenKind};
+use shlex::{Aliases, Environment, Expander, Lexer, Operator, ReservedWord, Token, TokenKind};
 
 #[derive(Debug, Clone, Copy, Fail)]
 pub enum ParseErrorKind {
@@ -11,36 +11,195 @@ pub enum ParseErrorKind {
 
 pub struct Parser<R: std::io::Read> {
     lexer: Lexer<R>,
+    lookahead: Option<Token>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Separator {
+    Sync,
+    Async,
 }
 
 impl<R: std::io::Read> Parser<R> {
     pub fn new(source: &str, stream: R) -> Self {
         let lexer = Lexer::new(source, stream);
-        Self { lexer }
+        Self {
+            lexer,
+            lookahead: None,
+        }
     }
 
-    pub fn parse(&mut self, aliases: Option<&Aliases>) -> Fallible<CompoundList> {
+    pub fn parse(&mut self) -> Fallible<CompoundList> {
         let mut commands = vec![];
-        while let Some(cmd) = self.simple_command(aliases)? {
-            commands.push(Command::SimpleCommand(cmd));
+
+        let mut cmd = match self.and_or()? {
+            Some(cmd) => cmd,
+            None => {
+                if self.next_token_is(TokenKind::Eof)? {
+                    return Ok(CompoundList { commands });
+                } else {
+                    bail!("expected and_or");
+                }
+            }
+        };
+
+        cmd.asynchronous = self.separator_is_async()?;
+        commands.push(cmd);
+
+        while let Some(mut cmd) = self.and_or()? {
+            cmd.asynchronous = self.separator_is_async()?;
+            commands.push(cmd);
         }
+
         Ok(CompoundList { commands })
     }
 
-    fn simple_command(&mut self, aliases: Option<&Aliases>) -> Fallible<Option<SimpleCommand>> {
+    fn separator_is_async(&mut self) -> Fallible<bool> {
+        Ok(self.separator()?.unwrap_or(Separator::Sync) == Separator::Async)
+    }
+
+    fn next_token(&mut self) -> Fallible<Token> {
+        if let Some(tok) = self.lookahead.take() {
+            Ok(tok)
+        } else {
+            self.lexer.next()
+        }
+    }
+
+    fn unget_token(&mut self, tok: Token) {
+        assert!(self.lookahead.is_none());
+        self.lookahead.replace(tok);
+    }
+
+    fn and_or(&mut self) -> Fallible<Option<Command>> {
+        if let Some(pipeline) = self.pipeline()? {
+            if self.next_token_is(TokenKind::Operator(Operator::AndIf))? {
+                bail!("andif not done");
+            } else if self.next_token_is(TokenKind::Operator(Operator::OrIf))? {
+                bail!("orif not done");
+            } else {
+                Ok(Some(pipeline.into()))
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn next_token_is_reserved_word(&mut self, word: ReservedWord) -> Fallible<bool> {
+        let t = self.next_token()?;
+        if t.is_reserved_word(word) {
+            Ok(true)
+        } else {
+            self.unget_token(t);
+            Ok(false)
+        }
+    }
+
+    fn next_token_is(&mut self, kind: TokenKind) -> Fallible<bool> {
+        let t = self.next_token()?;
+        if kind == t.kind {
+            Ok(true)
+        } else {
+            self.unget_token(t);
+            Ok(false)
+        }
+    }
+
+    fn pipeline(&mut self) -> Fallible<Option<Pipeline>> {
+        let inverted = self.next_token_is_reserved_word(ReservedWord::Bang)?;
+        let command = match self.command()? {
+            None => {
+                if inverted {
+                    bail!("expected command to follow !");
+                }
+                return Ok(None);
+            }
+            Some(cmd) => cmd,
+        };
+
+        let mut commands = vec![command];
+
+        while self.next_token_is(TokenKind::Operator(Operator::Pipe))? {
+            match self.command()? {
+                Some(cmd) => commands.push(cmd),
+                None => bail!("expected command to follow |"),
+            }
+        }
+
+        Ok(Some(Pipeline { inverted, commands }))
+    }
+
+    fn separator_op(&mut self) -> Fallible<Option<Separator>> {
+        let t = self.next_token()?;
+        match t.kind {
+            TokenKind::Operator(Operator::Semicolon) => Ok(Some(Separator::Sync)),
+            TokenKind::Operator(Operator::Ampersand) => Ok(Some(Separator::Async)),
+            _ => {
+                self.unget_token(t);
+                Ok(None)
+            }
+        }
+    }
+
+    fn newline_list(&mut self) -> Fallible<Option<()>> {
+        let mut saw_newline = false;
+        loop {
+            if self.next_token_is(TokenKind::NewLine)? {
+                saw_newline = true
+            } else if saw_newline {
+                return Ok(Some(()));
+            } else {
+                return Ok(None);
+            }
+        }
+    }
+
+    fn linebreak(&mut self) -> Fallible<Option<()>> {
+        self.newline_list()?;
+        Ok(Some(()))
+    }
+
+    fn separator(&mut self) -> Fallible<Option<Separator>> {
+        if let Some(sep) = self.separator_op()? {
+            self.linebreak()?;
+            Ok(Some(sep))
+        } else if let Some(_) = self.newline_list()? {
+            Ok(Some(Separator::Sync))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn command(&mut self) -> Fallible<Option<Command>> {
+        if let Some(command) = self.simple_command()? {
+            Ok(Some(Command {
+                command: CommandType::SimpleCommand(command),
+                asynchronous: false,
+                redirects: None,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn simple_command(&mut self) -> Fallible<Option<SimpleCommand>> {
         let mut assignments = vec![];
         let mut words = vec![];
         let mut asynchronous = false;
 
         loop {
-            let mut token = self.lexer.next()?;
+            let token = self.next_token()?;
             match token.kind {
                 TokenKind::Eof => break,
                 TokenKind::Operator(Operator::Ampersand) => {
                     asynchronous = true;
                     break;
                 }
-                TokenKind::Operator(Operator::Semicolon) | TokenKind::NewLine => {
+                TokenKind::Operator(Operator::Semicolon)
+                | TokenKind::NewLine
+                | TokenKind::Operator(Operator::AndIf)
+                | TokenKind::Operator(Operator::OrIf) => {
+                    self.unget_token(token);
                     break;
                 }
                 TokenKind::Word(_) => {
@@ -48,7 +207,7 @@ impl<R: std::io::Read> Parser<R> {
                         assignments.push(token);
                     } else if words.is_empty() {
                         // Command word
-                        token.apply_command_word_rules(aliases);
+                        // token.apply_command_word_rules(aliases);
                         words.push(token);
                     } else {
                         words.push(token);
@@ -76,16 +235,40 @@ impl<R: std::io::Read> Parser<R> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Command {
-    SimpleCommand(SimpleCommand),
-    CompoundCommand(CompoundCommand, Option<RedirectList>),
+pub struct Command {
+    pub asynchronous: bool,
+    pub command: CommandType,
+    pub redirects: Option<RedirectList>,
+}
+
+impl From<CommandType> for Command {
+    fn from(command: CommandType) -> Command {
+        Command {
+            command,
+            redirects: None,
+            asynchronous: false,
+        }
+    }
+}
+
+impl From<Pipeline> for Command {
+    fn from(pipeline: Pipeline) -> Command {
+        // Simplify a pipeline to the command itself if possible
+        if !pipeline.inverted && pipeline.commands.len() == 1 {
+            pipeline.commands.into_iter().next().unwrap()
+        } else {
+            CommandType::Pipeline(pipeline).into()
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RedirectList {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CompoundCommand {
+pub enum CommandType {
+    Pipeline(Pipeline),
+    SimpleCommand(SimpleCommand),
     BraceGroup(CompoundList),
     Subshell(CompoundList),
     ForEach(ForEach),
@@ -180,10 +363,19 @@ impl SimpleCommand {
         &self,
         env: &mut Environment,
         expander: &Expander,
+        aliases: &Aliases,
     ) -> Fallible<Vec<ShellString>> {
         // FIXME: scoped assignments need to return a new env
         let mut argv = vec![];
         for word in &self.words {
+            let word = if argv.is_empty() {
+                let mut word = word.clone();
+                word.apply_command_word_rules(Some(aliases));
+                word
+            } else {
+                word.clone()
+            };
+
             match word.kind {
                 TokenKind::Word(ref s) | TokenKind::Name(ref s) => {
                     let mut fields = expander.expand_word(&s.as_str().into(), env)?;
@@ -202,103 +394,103 @@ mod test {
     use pretty_assertions::assert_eq;
     use shlex::TokenPosition;
 
-    fn parse(text: &str, aliases: Option<&Aliases>) -> Fallible<CompoundList> {
+    fn parse(text: &str) -> Fallible<CompoundList> {
         let mut parser = Parser::new("test", text.as_bytes());
-        parser.parse(aliases)
+        parser.parse()
     }
 
     #[test]
     fn test_parse() {
-        let nodes = parse("ls -l foo", None).unwrap();
+        let list = parse("ls -l foo").unwrap();
         assert_eq!(
-            nodes,
+            list,
             CompoundList {
-                commands: vec![Command::SimpleCommand(SimpleCommand {
+                commands: vec![Command::from(CommandType::SimpleCommand(SimpleCommand {
                     assignments: vec![],
                     file_redirects: vec![],
                     fd_dups: vec![],
                     asynchronous: false,
                     words: vec![
-                        Token {
-                            kind: TokenKind::Word("ls".to_string()),
-                            start: TokenPosition {
+                        Token::new(
+                            TokenKind::Word("ls".to_string()),
+                            TokenPosition {
                                 line_number: 0,
                                 col_number: 0
                             },
-                            end: TokenPosition {
+                            TokenPosition {
                                 line_number: 0,
                                 col_number: 1
                             },
-                        },
-                        Token {
-                            kind: TokenKind::Word("-l".to_string()),
-                            start: TokenPosition {
+                        ),
+                        Token::new(
+                            TokenKind::Word("-l".to_string()),
+                            TokenPosition {
                                 line_number: 0,
                                 col_number: 3
                             },
-                            end: TokenPosition {
+                            TokenPosition {
                                 line_number: 0,
                                 col_number: 4
                             },
-                        },
-                        Token {
-                            kind: TokenKind::Word("foo".to_string()),
-                            start: TokenPosition {
+                        ),
+                        Token::new(
+                            TokenKind::Word("foo".to_string()),
+                            TokenPosition {
                                 line_number: 0,
                                 col_number: 6
                             },
-                            end: TokenPosition {
+                            TokenPosition {
                                 line_number: 0,
                                 col_number: 8
                             },
-                        }
+                        )
                     ]
-                })]
+                }),)]
             }
         );
     }
 
     #[test]
     fn test_parse_two_lines() {
-        let nodes = parse("false\ntrue", None).unwrap();
+        let list = parse("false\ntrue").unwrap();
         assert_eq!(
-            nodes,
+            list,
             CompoundList {
                 commands: vec![
-                    Command::SimpleCommand(SimpleCommand {
+                    Command::from(CommandType::SimpleCommand(SimpleCommand {
                         assignments: vec![],
                         file_redirects: vec![],
                         fd_dups: vec![],
                         asynchronous: false,
-                        words: vec![Token {
-                            kind: TokenKind::Word("false".to_string()),
-                            start: TokenPosition {
+                        words: vec![Token::new(
+                            TokenKind::Word("false".to_string()),
+                            TokenPosition {
                                 line_number: 0,
                                 col_number: 0
                             },
-                            end: TokenPosition {
+                            TokenPosition {
                                 line_number: 0,
                                 col_number: 4
                             },
-                        },]
-                    }),
-                    Command::SimpleCommand(SimpleCommand {
+                        ),]
+                    }),),
+                    Command::from(CommandType::SimpleCommand(SimpleCommand {
                         assignments: vec![],
                         file_redirects: vec![],
                         fd_dups: vec![],
                         asynchronous: false,
-                        words: vec![Token {
-                            kind: TokenKind::Word("true".to_string()),
-                            start: TokenPosition {
+                        words: vec![Token::new(
+                            TokenKind::Word("true".to_string()),
+                            TokenPosition {
                                 line_number: 1,
                                 col_number: 0
                             },
-                            end: TokenPosition {
+                            TokenPosition {
                                 line_number: 1,
                                 col_number: 3
                             },
-                        },]
-                    })
+                        ),]
+                    }))
                 ]
             }
         );
@@ -306,43 +498,38 @@ mod test {
 
     #[test]
     fn test_parse_with_alias() {
+        let list = parse("ls foo").unwrap();
         let mut aliases = Aliases::new();
         aliases.alias("ls", "ls -l");
-        let nodes = parse("ls foo", Some(&aliases)).unwrap();
-        assert_eq!(
-            nodes,
-            CompoundList {
-                commands: vec![Command::SimpleCommand(SimpleCommand {
-                    assignments: vec![],
-                    file_redirects: vec![],
-                    fd_dups: vec![],
-                    asynchronous: false,
-                    words: vec![
-                        Token {
-                            kind: TokenKind::Word("ls -l".to_string()),
-                            start: TokenPosition {
-                                line_number: 0,
-                                col_number: 0
-                            },
-                            end: TokenPosition {
-                                line_number: 0,
-                                col_number: 1
-                            },
-                        },
-                        Token {
-                            kind: TokenKind::Word("foo".to_string()),
-                            start: TokenPosition {
-                                line_number: 0,
-                                col_number: 3
-                            },
-                            end: TokenPosition {
-                                line_number: 0,
-                                col_number: 5
-                            },
-                        }
-                    ]
-                })]
+        let mut env = Environment::new();
+        struct MockExpander {}
+        impl Expander for MockExpander {
+            fn lookup_homedir(
+                &self,
+                _user: Option<&str>,
+                _env: &mut Environment,
+            ) -> Fallible<ShellString> {
+                bail!("nope");
             }
-        );
+        }
+        if let Command {
+            command: CommandType::SimpleCommand(cmd),
+            ..
+        } = &list.commands[0]
+        {
+            let argv = cmd
+                .expand_argv(&mut env, &MockExpander {}, &aliases)
+                .unwrap();
+            assert_eq!(
+                argv,
+                vec![
+                    "ls".to_string().into(),
+                    "-l".to_string().into(),
+                    "foo".to_string().into()
+                ]
+            );
+        } else {
+            panic!("wrong command type!?");
+        }
     }
 }

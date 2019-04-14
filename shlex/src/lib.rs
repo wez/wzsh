@@ -237,9 +237,20 @@ impl Token {
                     if !recursive {
                         break;
                     }
+                } else {
+                    break;
                 }
             }
         }
+    }
+
+    pub fn is_reserved_word(&self, wanted: ReservedWord) -> bool {
+        if let TokenKind::Word(ref word) = self.kind {
+            if let MatchResult::Match(reserved, _) = RESERVED_WORDS.matches(word) {
+                return reserved == wanted;
+            }
+        }
+        false
     }
 }
 
@@ -1034,6 +1045,24 @@ mod test_lex {
                 end: TokenPosition {
                     line_number: 0,
                     col_number: 1
+                }
+            }
+        );
+
+        let (mut tokens, err) = lex("echo");
+        assert_eq!(err, None);
+        tokens[0].apply_command_word_rules(Some(&aliases));
+        assert_eq!(
+            tokens[0],
+            Token {
+                kind: TokenKind::Word("echo".to_string()),
+                start: TokenPosition {
+                    line_number: 0,
+                    col_number: 0
+                },
+                end: TokenPosition {
+                    line_number: 0,
+                    col_number: 3
                 }
             }
         );
