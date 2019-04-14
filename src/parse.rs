@@ -13,6 +13,8 @@ pub enum ParseErrorContext {
     FileNameAfterRedirectionOperator,
     ExpectingPipelineAfter(Operator),
     FdRedirectionExpectsNumber,
+    ExpectingRightBrace,
+    ExpectingRightParen,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Fail)]
@@ -225,7 +227,19 @@ impl<R: std::io::Read> Parser<R> {
     }
 
     fn command(&mut self) -> Fallible<Option<Command>> {
-        if let Some(command) = self.simple_command()? {
+        if let Some(group) = self.brace_group()? {
+            Ok(Some(Command {
+                command: CommandType::BraceGroup(group),
+                asynchronous: false,
+                redirects: None,
+            }))
+        } else if let Some(group) = self.subshell()? {
+            Ok(Some(Command {
+                command: CommandType::Subshell(group),
+                asynchronous: false,
+                redirects: None,
+            }))
+        } else if let Some(command) = self.simple_command()? {
             Ok(Some(Command {
                 command: CommandType::SimpleCommand(command),
                 asynchronous: false,
@@ -234,6 +248,52 @@ impl<R: std::io::Read> Parser<R> {
         } else {
             Ok(None)
         }
+    }
+
+    fn subshell(&mut self) -> Fallible<Option<CompoundList>> {
+        if !self.next_token_is(TokenKind::Operator(Operator::LeftParen))? {
+            return Ok(None);
+        }
+
+        let list = self.compound_list()?;
+
+        if self.next_token_is(TokenKind::Operator(Operator::RightParen))? {
+            Ok(Some(list))
+        } else {
+            Err(self.unexpected_next_token(ParseErrorContext::ExpectingRightParen))
+        }
+    }
+
+    fn brace_group(&mut self) -> Fallible<Option<CompoundList>> {
+        if !self.next_token_is_reserved_word(ReservedWord::LeftBrace)? {
+            return Ok(None);
+        }
+
+        let list = self.compound_list()?;
+
+        if self.next_token_is_reserved_word(ReservedWord::RightBrace)? {
+            Ok(Some(list))
+        } else {
+            Err(self.unexpected_next_token(ParseErrorContext::ExpectingRightBrace))
+        }
+    }
+
+    fn compound_list(&mut self) -> Fallible<CompoundList> {
+        let mut commands = vec![];
+
+        loop {
+            self.newline_list()?;
+
+            if let Some(cmd) = self.and_or()? {
+                commands.push(cmd);
+            } else {
+                break;
+            }
+
+            self.separator()?;
+        }
+
+        Ok(CompoundList { commands })
     }
 
     fn simple_command(&mut self) -> Fallible<Option<SimpleCommand>> {
@@ -254,11 +314,17 @@ impl<R: std::io::Read> Parser<R> {
                 | TokenKind::Operator(Operator::Semicolon)
                 | TokenKind::NewLine
                 | TokenKind::Operator(Operator::AndIf)
+                | TokenKind::Operator(Operator::RightParen)
                 | TokenKind::Operator(Operator::OrIf) => {
                     self.unget_token(token);
                     break;
                 }
                 TokenKind::Word(_) => {
+                    if token.is_reserved_word(ReservedWord::RightBrace) {
+                        self.unget_token(token);
+                        break;
+                    }
+
                     if words.is_empty() && token.kind.parse_assignment_word().is_some() {
                         assignments.push(token);
                     } else {
@@ -915,6 +981,216 @@ mod test {
                 },
                 ParseErrorContext::FdRedirectionExpectsNumber
             )
+        );
+    }
+
+    #[test]
+    fn bad_form_subshell() {
+        assert_eq!(
+            parse("(echo")
+                .unwrap_err()
+                .downcast::<ParseErrorKind>()
+                .unwrap(),
+            ParseErrorKind::UnexpectedToken(
+                Token {
+                    kind: TokenKind::Eof,
+                    start: TokenPosition { line: 0, col: 5 },
+                    end: TokenPosition { line: 0, col: 5 }
+                },
+                ParseErrorContext::ExpectingRightParen
+            )
+        );
+    }
+
+    #[test]
+    fn subshell_no_space() {
+        let list = parse("(echo)").unwrap();
+        assert_eq!(
+            list,
+            CompoundList {
+                commands: vec![Command {
+                    asynchronous: false,
+                    redirects: None,
+                    command: CommandType::Subshell(CompoundList {
+                        commands: vec![Command {
+                            asynchronous: false,
+                            command: CommandType::SimpleCommand(SimpleCommand {
+                                assignments: vec![],
+                                redirections: vec![],
+                                words: vec![Token {
+                                    kind: TokenKind::new_word("echo"),
+                                    start: TokenPosition { line: 0, col: 1 },
+                                    end: TokenPosition { line: 0, col: 4 }
+                                }]
+                            }),
+                            redirects: None
+                        }]
+                    })
+                }]
+            }
+        );
+    }
+
+    #[test]
+    fn brace_group_no_spaces() {
+        // zsh sees this `{ echo }`, but that is not conformant with the
+        // posix shell language spec, which states that `{` is only special
+        // when in the command word position.  As a result, the `{` doesn't
+        // get reported as a separate token, resulting in an attempt to
+        // invoke `{echo}`, which is not typically in the path.
+        let list = parse("{echo}").unwrap();
+        assert_eq!(
+            list,
+            CompoundList {
+                commands: vec![Command {
+                    asynchronous: false,
+                    command: CommandType::SimpleCommand(SimpleCommand {
+                        assignments: vec![],
+                        redirections: vec![],
+                        words: vec![Token {
+                            kind: TokenKind::new_word("{echo}"),
+                            start: TokenPosition { line: 0, col: 0 },
+                            end: TokenPosition { line: 0, col: 5 }
+                        }]
+                    }),
+                    redirects: None
+                }]
+            }
+        );
+    }
+
+    #[test]
+    fn bad_form_brace_group() {
+        assert_eq!(
+            parse("{ echo")
+                .unwrap_err()
+                .downcast::<ParseErrorKind>()
+                .unwrap(),
+            ParseErrorKind::UnexpectedToken(
+                Token {
+                    kind: TokenKind::Eof,
+                    start: TokenPosition { line: 0, col: 6 },
+                    end: TokenPosition { line: 0, col: 6 }
+                },
+                ParseErrorContext::ExpectingRightBrace
+            )
+        );
+    }
+
+    #[test]
+    fn brace_group() {
+        let list = parse("{ echo }").unwrap();
+        assert_eq!(
+            list,
+            CompoundList {
+                commands: vec![Command {
+                    asynchronous: false,
+                    redirects: None,
+                    command: CommandType::BraceGroup(CompoundList {
+                        commands: vec![Command {
+                            asynchronous: false,
+                            command: CommandType::SimpleCommand(SimpleCommand {
+                                assignments: vec![],
+                                redirections: vec![],
+                                words: vec![Token {
+                                    kind: TokenKind::new_word("echo"),
+                                    start: TokenPosition { line: 0, col: 2 },
+                                    end: TokenPosition { line: 0, col: 5 }
+                                }]
+                            }),
+                            redirects: None
+                        }]
+                    })
+                }]
+            }
+        );
+    }
+
+    #[test]
+    fn brace_group_sep_list() {
+        let list = parse("{ echo ; boo }").unwrap();
+        assert_eq!(
+            list,
+            CompoundList {
+                commands: vec![Command {
+                    asynchronous: false,
+                    redirects: None,
+                    command: CommandType::BraceGroup(CompoundList {
+                        commands: vec![
+                            Command {
+                                asynchronous: false,
+                                command: CommandType::SimpleCommand(SimpleCommand {
+                                    assignments: vec![],
+                                    redirections: vec![],
+                                    words: vec![Token {
+                                        kind: TokenKind::new_word("echo"),
+                                        start: TokenPosition { line: 0, col: 2 },
+                                        end: TokenPosition { line: 0, col: 5 }
+                                    }]
+                                }),
+                                redirects: None
+                            },
+                            Command {
+                                asynchronous: false,
+                                command: CommandType::SimpleCommand(SimpleCommand {
+                                    assignments: vec![],
+                                    redirections: vec![],
+                                    words: vec![Token {
+                                        kind: TokenKind::new_word("boo"),
+                                        start: TokenPosition { line: 0, col: 9 },
+                                        end: TokenPosition { line: 0, col: 11 }
+                                    }]
+                                }),
+                                redirects: None
+                            },
+                        ]
+                    })
+                }]
+            }
+        );
+    }
+
+    #[test]
+    fn brace_group_sep_newline() {
+        let list = parse("{\n\techo\n\tboo\n}").unwrap();
+        assert_eq!(
+            list,
+            CompoundList {
+                commands: vec![Command {
+                    asynchronous: false,
+                    redirects: None,
+                    command: CommandType::BraceGroup(CompoundList {
+                        commands: vec![
+                            Command {
+                                asynchronous: false,
+                                command: CommandType::SimpleCommand(SimpleCommand {
+                                    assignments: vec![],
+                                    redirections: vec![],
+                                    words: vec![Token {
+                                        kind: TokenKind::new_word("echo"),
+                                        start: TokenPosition { line: 1, col: 1 },
+                                        end: TokenPosition { line: 1, col: 4 }
+                                    }]
+                                }),
+                                redirects: None
+                            },
+                            Command {
+                                asynchronous: false,
+                                command: CommandType::SimpleCommand(SimpleCommand {
+                                    assignments: vec![],
+                                    redirections: vec![],
+                                    words: vec![Token {
+                                        kind: TokenKind::new_word("boo"),
+                                        start: TokenPosition { line: 2, col: 1 },
+                                        end: TokenPosition { line: 2, col: 3 }
+                                    }]
+                                }),
+                                redirects: None
+                            },
+                        ]
+                    })
+                }]
+            }
         );
     }
 }
