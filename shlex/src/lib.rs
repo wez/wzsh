@@ -136,11 +136,9 @@ impl<T: Copy> LiteralMatcher<T> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum IoNumber {
-    /// `1<` -> Input(1)
-    Input(usize),
-    /// `2>` -> Output(2)
-    Output(usize),
+pub struct IoNumber {
+    fd_num: usize,
+    matched_len: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -150,7 +148,7 @@ pub enum TokenKind {
     ReservedWord(ReservedWord),
     Name(String),
     Word(String),
-    IoNumber(IoNumber),
+    IoNumber(usize),
     NewLine,
 }
 
@@ -429,6 +427,17 @@ impl<R: std::io::Read> Lexer<R> {
                     self.pop();
                     self.comment()?;
                 }
+
+                '>' | '<' => {
+                    if let Some(number) = self.is_io_number(&self.token_text) {
+                        let start = self.tokens[0].pos;
+                        let end = self.tokens[number.matched_len - 1].pos;
+                        self.clear_tokens();
+                        self.unget(b);
+                        return Ok(Token::new(TokenKind::IoNumber(number.fd_num), start, end));
+                    }
+                }
+
                 _ => {}
             }
         }
@@ -442,13 +451,11 @@ impl<R: std::io::Read> Lexer<R> {
         let last = word.as_bytes()[len - 1];
         if last == b'<' || last == b'>' {
             let num_str = &word[0..len - 1];
-            if let Ok(num) = usize::from_str_radix(&num_str, 10) {
-                let number = if last == b'<' {
-                    IoNumber::Input(num)
-                } else {
-                    IoNumber::Output(num)
-                };
-                return Some(number);
+            if let Ok(fd_num) = usize::from_str_radix(&num_str, 10) {
+                return Some(IoNumber {
+                    fd_num,
+                    matched_len: len - 1,
+                });
             }
         }
         None
@@ -468,10 +475,6 @@ impl<R: std::io::Read> Lexer<R> {
         let word = std::mem::replace(&mut self.token_text, String::new());
         let end = self.tokens.last().unwrap().pos;
         self.clear_tokens();
-
-        if let Some(number) = self.is_io_number(&word) {
-            return Token::new(TokenKind::IoNumber(number), start, end);
-        }
 
         Token::new(TokenKind::Word(word), start, end)
     }
@@ -1073,17 +1076,30 @@ mod test_lex {
         assert_eq!(
             lex("1<"),
             (
-                vec![Token {
-                    kind: TokenKind::IoNumber(IoNumber::Input(1)),
-                    start: TokenPosition {
-                        line_number: 0,
-                        col_number: 0
-                    },
-                    end: TokenPosition {
-                        line_number: 0,
-                        col_number: 1
-                    }
-                },],
+                vec![
+                    Token::new(
+                        TokenKind::IoNumber(1),
+                        TokenPosition {
+                            line_number: 0,
+                            col_number: 0
+                        },
+                        TokenPosition {
+                            line_number: 0,
+                            col_number: 0
+                        }
+                    ),
+                    Token::new(
+                        TokenKind::Operator(Operator::Less),
+                        TokenPosition {
+                            line_number: 0,
+                            col_number: 1
+                        },
+                        TokenPosition {
+                            line_number: 0,
+                            col_number: 1
+                        }
+                    ),
+                ],
                 None
             )
         );

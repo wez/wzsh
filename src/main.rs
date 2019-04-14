@@ -80,7 +80,10 @@ fn eval(
 ) -> Fallible<()> {
     for command in list {
         match command.command {
-            CommandType::SimpleCommand(cmd, ..) => {
+            CommandType::SimpleCommand(cmd) => {
+                if !cmd.redirections.is_empty() {
+                    eprintln!("{:#?}", cmd.redirections);
+                }
                 let argv = cmd.expand_argv(env, expander, aliases)?;
                 if !argv.is_empty() {
                     let mut cmd = Command::new(&argv[0]);

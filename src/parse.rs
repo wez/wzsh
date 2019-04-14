@@ -221,8 +221,14 @@ impl<R: std::io::Read> Parser<R> {
     fn simple_command(&mut self) -> Fallible<Option<SimpleCommand>> {
         let mut assignments = vec![];
         let mut words = vec![];
+        let mut redirections = vec![];
 
         loop {
+            if let Some(redir) = self.io_redirect()? {
+                redirections.push(redir);
+                continue;
+            }
+
             let token = self.next_token()?;
             match token.kind {
                 TokenKind::Eof => break,
@@ -237,10 +243,6 @@ impl<R: std::io::Read> Parser<R> {
                 TokenKind::Word(_) => {
                     if words.is_empty() && token.kind.parse_assignment_word().is_some() {
                         assignments.push(token);
-                    } else if words.is_empty() {
-                        // Command word
-                        // token.apply_command_word_rules(aliases);
-                        words.push(token);
                     } else {
                         words.push(token);
                     }
@@ -252,16 +254,92 @@ impl<R: std::io::Read> Parser<R> {
             }
         }
 
-        if assignments.is_empty() && words.is_empty() {
+        if assignments.is_empty() && words.is_empty() && redirections.is_empty() {
             return Ok(None);
         }
 
         Ok(Some(SimpleCommand {
             assignments,
-            file_redirects: vec![],
-            fd_dups: vec![],
+            redirections,
             words,
         }))
+    }
+
+    fn io_redirect(&mut self) -> Fallible<Option<Redirection>> {
+        let t = self.next_token()?;
+        if let TokenKind::IoNumber(fd_number) = t.kind {
+            match self.io_file(Some(fd_number))? {
+                Some(redir) => return Ok(Some(redir)),
+                None => bail!("expected io_file to follow IO_NUMBER"),
+            }
+        }
+        self.unget_token(t);
+        self.io_file(None)
+    }
+
+    fn io_file(&mut self, fd_number: Option<usize>) -> Fallible<Option<Redirection>> {
+        let t = self.next_token()?;
+        let oper = if let TokenKind::Operator(oper) = t.kind {
+            match oper {
+                Operator::Less
+                | Operator::LessAnd
+                | Operator::Great
+                | Operator::GreatAnd
+                | Operator::DoubleGreat
+                | Operator::LessGreat
+                | Operator::Clobber => oper,
+                _ => {
+                    self.unget_token(t);
+                    return Ok(None);
+                }
+            }
+        } else {
+            self.unget_token(t);
+            return Ok(None);
+        };
+
+        let file_name = self.next_token()?;
+        if let TokenKind::Word(_) = file_name.kind {
+            Ok(Some(match oper {
+                Operator::Less => Redirection::File(FileRedirection {
+                    fd_number: fd_number.unwrap_or(0),
+                    file_name,
+                    input: true,
+                    output: false,
+                    clobber: false,
+                    append: false,
+                }),
+                Operator::Great => Redirection::File(FileRedirection {
+                    fd_number: fd_number.unwrap_or(1),
+                    file_name,
+                    input: false,
+                    output: true,
+                    clobber: false,
+                    append: false,
+                }),
+                Operator::DoubleGreat => Redirection::File(FileRedirection {
+                    fd_number: fd_number.unwrap_or(1),
+                    file_name,
+                    input: false,
+                    output: true,
+                    clobber: false,
+                    append: true,
+                }),
+                Operator::Clobber => Redirection::File(FileRedirection {
+                    fd_number: fd_number.unwrap_or(1),
+                    file_name,
+                    input: false,
+                    output: true,
+                    clobber: true,
+                    append: false,
+                }),
+                Operator::LessGreat => bail!("fd redirection not yet impl"),
+                Operator::GreatAnd => bail!("fd redirection not yet impl"),
+                _ => bail!("unhandled redirection oper {:?}", oper),
+            }))
+        } else {
+            bail!("expected filename to follow operator {:?}", t);
+        }
     }
 }
 
@@ -294,7 +372,9 @@ impl From<Pipeline> for Command {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RedirectList {}
+pub struct RedirectList {
+    pub redirections: Vec<Redirection>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommandType {
@@ -363,6 +443,12 @@ pub struct ForEach {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Redirection {
+    File(FileRedirection),
+    Fd(FdDuplication),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileRedirection {
     pub fd_number: usize,
     pub file_name: Token,
@@ -388,8 +474,7 @@ pub struct FdDuplication {
 pub struct SimpleCommand {
     /// Any assignment words to override the environment
     assignments: Vec<Token>,
-    file_redirects: Vec<FileRedirection>,
-    fd_dups: Vec<FdDuplication>,
+    pub redirections: Vec<Redirection>,
     /// The words that will be expanded to form the argv
     words: Vec<Token>,
 }
@@ -443,8 +528,7 @@ mod test {
             CompoundList {
                 commands: vec![Command::from(CommandType::SimpleCommand(SimpleCommand {
                     assignments: vec![],
-                    file_redirects: vec![],
-                    fd_dups: vec![],
+                    redirections: vec![],
                     words: vec![
                         Token::new(
                             TokenKind::Word("ls".to_string()),
@@ -494,8 +578,7 @@ mod test {
                 commands: vec![
                     Command::from(CommandType::SimpleCommand(SimpleCommand {
                         assignments: vec![],
-                        file_redirects: vec![],
-                        fd_dups: vec![],
+                        redirections: vec![],
                         words: vec![Token::new(
                             TokenKind::Word("false".to_string()),
                             TokenPosition {
@@ -510,8 +593,7 @@ mod test {
                     }),),
                     Command::from(CommandType::SimpleCommand(SimpleCommand {
                         assignments: vec![],
-                        file_redirects: vec![],
-                        fd_dups: vec![],
+                        redirections: vec![],
                         words: vec![Token::new(
                             TokenKind::Word("true".to_string()),
                             TokenPosition {
