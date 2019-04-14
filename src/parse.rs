@@ -1,5 +1,5 @@
 //! Shell parser
-use failure::{bail, Fail, Fallible, format_err};
+use failure::{bail, format_err, Fail, Fallible};
 use shlex::string::ShellString;
 use shlex::{Aliases, Environment, Expander, Lexer, Operator, ReservedWord, Token, TokenKind};
 
@@ -80,7 +80,7 @@ impl<R: std::io::Read> Parser<R> {
 
         let then: CompoundList = Command::from(
             self.pipeline()?
-                .ok_or_else(|| format_err!("missing pipeline after {:?}", op))?
+                .ok_or_else(|| format_err!("missing pipeline after {:?}", op))?,
         )
         .into();
         let condition: CompoundList = Command::from(condition).into();
@@ -221,17 +221,13 @@ impl<R: std::io::Read> Parser<R> {
     fn simple_command(&mut self) -> Fallible<Option<SimpleCommand>> {
         let mut assignments = vec![];
         let mut words = vec![];
-        let mut asynchronous = false;
 
         loop {
             let token = self.next_token()?;
             match token.kind {
                 TokenKind::Eof => break,
-                TokenKind::Operator(Operator::Ampersand) => {
-                    asynchronous = true;
-                    break;
-                }
-                TokenKind::Operator(Operator::Semicolon)
+                TokenKind::Operator(Operator::Ampersand)
+                | TokenKind::Operator(Operator::Semicolon)
                 | TokenKind::NewLine
                 | TokenKind::Operator(Operator::AndIf)
                 | TokenKind::Operator(Operator::OrIf) => {
@@ -265,7 +261,6 @@ impl<R: std::io::Read> Parser<R> {
             file_redirects: vec![],
             fd_dups: vec![],
             words,
-            asynchronous,
         }))
     }
 }
@@ -397,9 +392,6 @@ pub struct SimpleCommand {
     fd_dups: Vec<FdDuplication>,
     /// The words that will be expanded to form the argv
     words: Vec<Token>,
-    /// true if `&` was used as the separator between
-    /// commands in the containing list
-    asynchronous: bool,
 }
 
 impl SimpleCommand {
@@ -453,7 +445,6 @@ mod test {
                     assignments: vec![],
                     file_redirects: vec![],
                     fd_dups: vec![],
-                    asynchronous: false,
                     words: vec![
                         Token::new(
                             TokenKind::Word("ls".to_string()),
@@ -505,7 +496,6 @@ mod test {
                         assignments: vec![],
                         file_redirects: vec![],
                         fd_dups: vec![],
-                        asynchronous: false,
                         words: vec![Token::new(
                             TokenKind::Word("false".to_string()),
                             TokenPosition {
@@ -522,7 +512,6 @@ mod test {
                         assignments: vec![],
                         file_redirects: vec![],
                         fd_dups: vec![],
-                        asynchronous: false,
                         words: vec![Token::new(
                             TokenKind::Word("true".to_string()),
                             TokenPosition {
