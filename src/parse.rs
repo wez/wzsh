@@ -632,7 +632,7 @@ pub struct FdDuplication {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SimpleCommand {
     /// Any assignment words to override the environment
-    assignments: Vec<Token>,
+    pub assignments: Vec<Token>,
     pub redirections: Vec<Redirection>,
     /// The words that will be expanded to form the argv
     words: Vec<Token>,

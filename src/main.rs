@@ -12,7 +12,7 @@ use std::rc::Rc;
 
 use shlex::error::{LexError, TokenPosition};
 use shlex::string::ShellString;
-use shlex::{Aliases, Environment, Expander, LexErrorKind, TokenKind};
+use shlex::{Aliases, Environment, Expander, LexErrorKind, Token, TokenKind};
 mod parse;
 use parse::{
     CommandType, CompoundList, FileRedirection, ParseErrorKind, Parser, Redirection, SimpleCommand,
@@ -133,21 +133,24 @@ impl AsRawFd for FileDescriptor {
     }
 }
 
+fn dup(fd: RawFd) -> Fallible<FileDescriptor> {
+    let duped = unsafe { libc::dup(fd) };
+    if duped == -1 {
+        bail!(
+            "dup of fd {} failed: {:?}",
+            fd,
+            std::io::Error::last_os_error()
+        )
+    } else {
+        let mut owned = FileDescriptor { fd: duped };
+        owned.cloexec()?;
+        Ok(owned)
+    }
+}
+
 impl FileDescriptor {
     pub fn dup<F: AsRawFd>(f: F) -> Fallible<Self> {
-        let fd = f.as_raw_fd();
-        let duped = unsafe { libc::dup(fd) };
-        if duped == -1 {
-            bail!(
-                "dup of fd {} failed: {:?}",
-                fd,
-                std::io::Error::last_os_error()
-            )
-        } else {
-            let mut owned = Self { fd: duped };
-            owned.cloexec()?;
-            Ok(owned)
-        }
+        dup(f.as_raw_fd())
     }
 
     /// Helper function to set the close-on-exec flag for a raw descriptor
@@ -169,8 +172,12 @@ impl FileDescriptor {
         Ok(())
     }
 
-    fn as_stdio(&self) -> std::process::Stdio {
-        unsafe { std::process::Stdio::from_raw_fd(self.fd) }
+    fn as_stdio(&self) -> Fallible<std::process::Stdio> {
+        let duped = dup(self.fd)?;
+        let fd = duped.fd;
+        let stdio = unsafe { std::process::Stdio::from_raw_fd(fd) };
+        std::mem::forget(duped); // don't drop; stdio now owns it
+        Ok(stdio)
     }
 }
 
@@ -211,9 +218,9 @@ impl ExecutionEnvironment {
             child_cmd.env_clear();
             child_cmd.envs(self.env.iter());
 
-            child_cmd.stdin(self.stdin.borrow_mut().as_stdio());
-            child_cmd.stdout(self.stdout.borrow_mut().as_stdio());
-            child_cmd.stderr(self.stderr.borrow_mut().as_stdio());
+            child_cmd.stdin(self.stdin.borrow_mut().as_stdio()?);
+            child_cmd.stdout(self.stdout.borrow_mut().as_stdio()?);
+            child_cmd.stderr(self.stderr.borrow_mut().as_stdio()?);
             Ok(Some(child_cmd))
         }
     }
@@ -310,6 +317,42 @@ impl ExecutionEnvironment {
         Ok(())
     }
 
+    fn apply_assignments_to_cmd(
+        &mut self,
+        expander: &ShellExpander,
+        assignments: &Vec<Token>,
+        child_cmd: &mut std::process::Command,
+    ) -> Fallible<()> {
+        for t in assignments {
+            if let Some((key, value)) = t.kind.parse_assignment_word() {
+                let fields = expander.expand_word(&value.into(), &mut self.env)?;
+                ensure!(
+                    fields.len() == 1,
+                    "variable expansion produced {:?}, expected a single field"
+                );
+                child_cmd.env(key, &fields[0]);
+            }
+        }
+        Ok(())
+    }
+    fn apply_assignments_to_env(
+        &mut self,
+        expander: &ShellExpander,
+        assignments: &Vec<Token>,
+    ) -> Fallible<()> {
+        for t in assignments {
+            if let Some((key, value)) = t.kind.parse_assignment_word() {
+                let fields = expander.expand_word(&value.into(), &mut self.env)?;
+                ensure!(
+                    fields.len() == 1,
+                    "variable expansion produced {:?}, expected a single field"
+                );
+                self.env.set(key, &fields[0]);
+            }
+        }
+        Ok(())
+    }
+
     pub fn eval(&mut self, expander: &ShellExpander, list: CompoundList) -> Fallible<ExitStatus> {
         let mut last_status = None;
         for command in list {
@@ -317,10 +360,12 @@ impl ExecutionEnvironment {
                 CommandType::SimpleCommand(cmd) => {
                     if let Some(mut child_cmd) = self.build_command(&cmd, expander)? {
                         self.apply_redirections_to_cmd(&mut child_cmd, &cmd, expander)?;
+                        self.apply_assignments_to_cmd(expander, &cmd.assignments, &mut child_cmd)?;
                         let mut child = child_cmd.spawn()?;
                         last_status = Some(child.wait()?.into());
                     } else {
                         self.apply_redirections_to_env(&cmd, expander)?;
+                        self.apply_assignments_to_env(expander, &cmd.assignments)?;
                     }
                 }
                 CommandType::BraceGroup(list) => {
