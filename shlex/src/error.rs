@@ -2,17 +2,13 @@ use failure::Fail;
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TokenPosition {
-    pub line_number: usize,
-    pub col_number: usize,
+    pub line: usize,
+    pub col: usize,
 }
 
 impl std::fmt::Display for TokenPosition {
     fn fmt(&self, fmt: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
-        write!(
-            fmt,
-            "at line {} column {}",
-            self.line_number, self.col_number
-        )
+        write!(fmt, "at line {} column {}", self.line, self.col)
     }
 }
 

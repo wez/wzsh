@@ -532,36 +532,18 @@ mod test {
                     words: vec![
                         Token::new(
                             TokenKind::Word("ls".to_string()),
-                            TokenPosition {
-                                line_number: 0,
-                                col_number: 0
-                            },
-                            TokenPosition {
-                                line_number: 0,
-                                col_number: 1
-                            },
+                            TokenPosition { line: 0, col: 0 },
+                            TokenPosition { line: 0, col: 1 },
                         ),
                         Token::new(
                             TokenKind::Word("-l".to_string()),
-                            TokenPosition {
-                                line_number: 0,
-                                col_number: 3
-                            },
-                            TokenPosition {
-                                line_number: 0,
-                                col_number: 4
-                            },
+                            TokenPosition { line: 0, col: 3 },
+                            TokenPosition { line: 0, col: 4 },
                         ),
                         Token::new(
                             TokenKind::Word("foo".to_string()),
-                            TokenPosition {
-                                line_number: 0,
-                                col_number: 6
-                            },
-                            TokenPosition {
-                                line_number: 0,
-                                col_number: 8
-                            },
+                            TokenPosition { line: 0, col: 6 },
+                            TokenPosition { line: 0, col: 8 },
                         )
                     ]
                 }),)]
@@ -581,14 +563,8 @@ mod test {
                         redirections: vec![],
                         words: vec![Token::new(
                             TokenKind::Word("false".to_string()),
-                            TokenPosition {
-                                line_number: 0,
-                                col_number: 0
-                            },
-                            TokenPosition {
-                                line_number: 0,
-                                col_number: 4
-                            },
+                            TokenPosition { line: 0, col: 0 },
+                            TokenPosition { line: 0, col: 4 },
                         ),]
                     }),),
                     Command::from(CommandType::SimpleCommand(SimpleCommand {
@@ -596,14 +572,8 @@ mod test {
                         redirections: vec![],
                         words: vec![Token::new(
                             TokenKind::Word("true".to_string()),
-                            TokenPosition {
-                                line_number: 1,
-                                col_number: 0
-                            },
-                            TokenPosition {
-                                line_number: 1,
-                                col_number: 3
-                            },
+                            TokenPosition { line: 1, col: 0 },
+                            TokenPosition { line: 1, col: 3 },
                         ),]
                     }))
                 ]
