@@ -1,5 +1,5 @@
 //! Shell parser
-use failure::{bail, format_err, Error, Fail, Fallible};
+use failure::{bail, Error, Fail, Fallible};
 use shlex::string::ShellString;
 use shlex::{Aliases, Environment, Expander, Lexer, Operator, ReservedWord, Token, TokenKind};
 
@@ -11,6 +11,7 @@ pub enum ParseErrorContext {
     PipeSequence,
     IoFileAfterIoNumber,
     FileNameAfterRedirectionOperator,
+    ExpectingPipelineAfter(Operator),
 }
 
 #[derive(Debug, Clone, Fail)]
@@ -95,10 +96,9 @@ impl<R: std::io::Read> Parser<R> {
     ) -> Fallible<Option<Command>> {
         self.linebreak()?;
 
-        let then: CompoundList = Command::from(
-            self.pipeline()?
-                .ok_or_else(|| format_err!("missing pipeline after {:?}", op))?,
-        )
+        let then: CompoundList = Command::from(self.pipeline()?.ok_or_else(|| {
+            self.unexpected_next_token(ParseErrorContext::ExpectingPipelineAfter(op))
+        })?)
         .into();
         let condition: CompoundList = Command::from(condition).into();
 
