@@ -242,6 +242,7 @@ impl<R: std::io::Read> Parser<R> {
                 redirects: None,
             }))
         } else {
+            // TODO: function_definition
             Ok(None)
         }
     }
@@ -260,6 +261,7 @@ impl<R: std::io::Read> Parser<R> {
                 redirects: None,
             }
         } else {
+            // TODO: for_clause, case_clause, if_clause, while_clause, until_clause
             return Ok(None);
         };
 
