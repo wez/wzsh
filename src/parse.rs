@@ -12,6 +12,7 @@ pub enum ParseErrorContext {
     IoFileAfterIoNumber,
     FileNameAfterRedirectionOperator,
     ExpectingPipelineAfter(Operator),
+    FdRedirectionExpectsNumber,
 }
 
 #[derive(Debug, Clone, Fail)]
@@ -321,6 +322,24 @@ impl<R: std::io::Read> Parser<R> {
             return Ok(None);
         };
 
+        match oper {
+            Operator::LessGreat | Operator::GreatAnd => {
+                if let Some(src_fd_number) = self.number()? {
+                    let dest_fd_number =
+                        fd_number.unwrap_or(if oper == Operator::LessGreat { 0 } else { 1 });
+                    return Ok(Some(Redirection::Fd(FdDuplication {
+                        src_fd_number,
+                        dest_fd_number,
+                    })));
+                } else {
+                    return Err(
+                        self.unexpected_next_token(ParseErrorContext::FdRedirectionExpectsNumber)
+                    );
+                }
+            }
+            _ => {}
+        }
+
         let file_name = self.next_token()?;
         if let TokenKind::Word(_) = file_name.kind {
             Ok(Some(match oper {
@@ -356,14 +375,23 @@ impl<R: std::io::Read> Parser<R> {
                     clobber: true,
                     append: false,
                 }),
-                Operator::LessGreat => bail!("fd redirection not yet impl"),
-                Operator::GreatAnd => bail!("fd redirection not yet impl"),
                 _ => bail!("impossible redirection oper {:?}", oper),
             }))
         } else {
             self.unget_token(file_name);
             Err(self.unexpected_next_token(ParseErrorContext::FileNameAfterRedirectionOperator))
         }
+    }
+
+    fn number(&mut self) -> Fallible<Option<usize>> {
+        let t = self.next_token()?;
+        if let TokenKind::Word(ref word) = t.kind {
+            if let Ok(num) = usize::from_str_radix(word, 10) {
+                return Ok(Some(num));
+            }
+        }
+        self.unget_token(t);
+        Ok(None)
     }
 }
 
