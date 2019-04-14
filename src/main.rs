@@ -81,6 +81,43 @@ struct ExecutionEnvironment {
     aliases: Aliases,
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+struct ExitStatus {
+    code: i32,
+}
+
+impl ExitStatus {
+    pub fn new_ok() -> Self {
+        Self { code: 0 }
+    }
+    pub fn new_fail() -> Self {
+        Self { code: 1 }
+    }
+
+    pub fn is_ok(&self) -> bool {
+        self.code == 0
+    }
+
+    pub fn invert(&self) -> ExitStatus {
+        if self.is_ok() {
+            ExitStatus { code: 1 }
+        } else {
+            ExitStatus { code: 0 }
+        }
+    }
+}
+
+impl From<std::process::ExitStatus> for ExitStatus {
+    fn from(s: std::process::ExitStatus) -> ExitStatus {
+        if let Some(code) = s.code() {
+            ExitStatus { code }
+        } else {
+            // FIXME: do something smarter about reporting signals
+            ExitStatus { code: 127 }
+        }
+    }
+}
+
 impl ExecutionEnvironment {
     pub fn new() -> Self {
         Self {
@@ -175,17 +212,18 @@ impl ExecutionEnvironment {
         Ok(())
     }
 
-    pub fn eval(&mut self, expander: &ShellExpander, list: CompoundList) -> Fallible<()> {
+    pub fn eval(&mut self, expander: &ShellExpander, list: CompoundList) -> Fallible<ExitStatus> {
+        let mut last_status = None;
         for command in list {
             match command.command {
                 CommandType::SimpleCommand(cmd) => {
                     let mut child_cmd = self.build_command(&cmd, expander)?;
                     self.apply_redirections(&mut child_cmd, &cmd, expander)?;
                     let mut child = child_cmd.spawn()?;
-                    child.wait()?;
+                    last_status = Some(child.wait()?.into());
                 }
                 CommandType::BraceGroup(list) => {
-                    self.eval(expander, list)?;
+                    last_status = Some(self.eval(expander, list)?);
                 }
                 CommandType::Subshell(list) => {
                     // Posix wants the subshell to be a forked child,
@@ -194,13 +232,13 @@ impl ExecutionEnvironment {
                     // environment and use that to run the list.
                     // We'll probably need to do something smarter
                     // here to manage signals/process groups on posix systems.
-                    self.clone().eval(expander, list)?;
+                    last_status = Some(self.clone().eval(expander, list)?);
                 }
                 //CommandType::Pipeline(pipeline) => {}
                 _ => bail!("eval doesn't know about {:#?}", command),
             }
         }
-        Ok(())
+        Ok(last_status.unwrap_or(ExitStatus::new_ok()))
     }
 }
 
@@ -294,9 +332,16 @@ fn main() -> Result<(), Error> {
     let expander = ShellExpander {};
 
     let mut input = String::new();
+    let mut last_status = ExitStatus::new_ok();
 
     loop {
-        let readline = rl.readline(if input.is_empty() { "$ " } else { "..> " });
+        let prompt = match (input.is_empty(), last_status) {
+            (true, st) if !st.is_ok() => format!("[{}] $ ", st.code),
+            (true, _) => "$ ".to_owned(),
+            (false, _) => "..> ".to_owned(),
+        };
+
+        let readline = rl.readline(&prompt);
         match readline {
             Ok(line) => {
                 rl.add_history_entry(line.as_ref());
@@ -309,6 +354,7 @@ fn main() -> Result<(), Error> {
                         if !is_recoverable_parse_error(&e) {
                             print_error(&e, &input);
                             input.clear();
+                            last_status = ExitStatus::new_fail();
                         } else {
                             input.push('\n');
                         }
@@ -319,9 +365,13 @@ fn main() -> Result<(), Error> {
                         list
                     }
                 };
-                if let Err(e) = env.eval(&expander, list) {
-                    print_error(&e, &input);
-                }
+                last_status = match env.eval(&expander, list) {
+                    Err(e) => {
+                        print_error(&e, &input);
+                        ExitStatus::new_fail()
+                    }
+                    Ok(status) => status,
+                };
             }
             Err(ReadlineError::Interrupted) => {
                 input.clear();
