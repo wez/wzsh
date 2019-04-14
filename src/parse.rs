@@ -227,12 +227,8 @@ impl<R: std::io::Read> Parser<R> {
     }
 
     fn command(&mut self) -> Fallible<Option<Command>> {
-        if let Some(group) = self.brace_group()? {
-            Ok(Some(Command {
-                command: CommandType::BraceGroup(group),
-                asynchronous: false,
-                redirects: None,
-            }))
+        if let Some(cmd) = self.compound_command()? {
+            Ok(Some(cmd))
         } else if let Some(group) = self.subshell()? {
             Ok(Some(Command {
                 command: CommandType::Subshell(group),
@@ -247,6 +243,40 @@ impl<R: std::io::Read> Parser<R> {
             }))
         } else {
             Ok(None)
+        }
+    }
+
+    fn compound_command(&mut self) -> Fallible<Option<Command>> {
+        let mut command = if let Some(group) = self.brace_group()? {
+            Command {
+                command: CommandType::BraceGroup(group),
+                asynchronous: false,
+                redirects: None,
+            }
+        } else if let Some(group) = self.subshell()? {
+            Command {
+                command: CommandType::Subshell(group),
+                asynchronous: false,
+                redirects: None,
+            }
+        } else {
+            return Ok(None);
+        };
+
+        command.redirects = self.redirect_list()?;
+        Ok(Some(command))
+    }
+
+    fn redirect_list(&mut self) -> Fallible<Option<RedirectList>> {
+        let mut redirections = vec![];
+        loop {
+            if let Some(redir) = self.io_redirect()? {
+                redirections.push(redir);
+            } else if redirections.is_empty() {
+                return Ok(None);
+            } else {
+                return Ok(Some(RedirectList { redirections }));
+            }
         }
     }
 
@@ -1024,6 +1054,49 @@ mod test {
                                 }]
                             }),
                             redirects: None
+                        }]
+                    })
+                }]
+            }
+        );
+    }
+
+    #[test]
+    fn subshell_redirected() {
+        let list = parse("(echo)>foo").unwrap();
+        assert_eq!(
+            list,
+            CompoundList {
+                commands: vec![Command {
+                    asynchronous: false,
+                    redirects: Some(RedirectList {
+                        redirections: vec![Redirection::File(FileRedirection {
+                            fd_number: 1,
+                            file_name: Token {
+                                kind: TokenKind::new_word("foo"),
+                                start: TokenPosition { line: 0, col: 7 },
+                                end: TokenPosition { line: 0, col: 9 }
+                            },
+                            input: false,
+                            output: true,
+                            clobber: false,
+                            append: false
+                        })]
+                    }),
+
+                    command: CommandType::Subshell(CompoundList {
+                        commands: vec![Command {
+                            asynchronous: false,
+                            command: CommandType::SimpleCommand(SimpleCommand {
+                                assignments: vec![],
+                                redirections: vec![],
+                                words: vec![Token {
+                                    kind: TokenKind::new_word("echo"),
+                                    start: TokenPosition { line: 0, col: 1 },
+                                    end: TokenPosition { line: 0, col: 4 }
+                                }]
+                            }),
+                            redirects: None,
                         }]
                     })
                 }]
