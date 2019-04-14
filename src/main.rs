@@ -5,7 +5,10 @@ use rustyline::highlight::Highlighter;
 use rustyline::hint::Hinter;
 use rustyline::{Config, Editor, Helper};
 use std::borrow::Cow;
+use std::cell::RefCell;
+use std::os::unix::prelude::*;
 use std::process::Command;
+use std::rc::Rc;
 
 use shlex::error::{LexError, TokenPosition};
 use shlex::string::ShellString;
@@ -75,12 +78,6 @@ impl Highlighter for LineEditorHelper {
 
 impl Helper for LineEditorHelper {}
 
-#[derive(Clone)]
-struct ExecutionEnvironment {
-    env: Environment,
-    aliases: Aliases,
-}
-
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 struct ExitStatus {
     code: i32,
@@ -118,34 +115,177 @@ impl From<std::process::ExitStatus> for ExitStatus {
     }
 }
 
+struct FileDescriptor {
+    fd: RawFd,
+}
+
+impl Drop for FileDescriptor {
+    fn drop(&mut self) {
+        unsafe {
+            libc::close(self.fd);
+        }
+    }
+}
+
+impl AsRawFd for FileDescriptor {
+    fn as_raw_fd(&self) -> RawFd {
+        self.fd
+    }
+}
+
+impl FileDescriptor {
+    pub fn dup<F: AsRawFd>(f: F) -> Fallible<Self> {
+        let fd = f.as_raw_fd();
+        let duped = unsafe { libc::dup(fd) };
+        if duped == -1 {
+            bail!(
+                "dup of fd {} failed: {:?}",
+                fd,
+                std::io::Error::last_os_error()
+            )
+        } else {
+            let mut owned = Self { fd: duped };
+            owned.cloexec()?;
+            Ok(owned)
+        }
+    }
+
+    /// Helper function to set the close-on-exec flag for a raw descriptor
+    fn cloexec(&mut self) -> Fallible<()> {
+        let flags = unsafe { libc::fcntl(self.fd, libc::F_GETFD) };
+        if flags == -1 {
+            bail!(
+                "fcntl to read flags failed: {:?}",
+                std::io::Error::last_os_error()
+            );
+        }
+        let result = unsafe { libc::fcntl(self.fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) };
+        if result == -1 {
+            bail!(
+                "fcntl to set CLOEXEC failed: {:?}",
+                std::io::Error::last_os_error()
+            );
+        }
+        Ok(())
+    }
+
+    fn as_stdio(&self) -> std::process::Stdio {
+        unsafe { std::process::Stdio::from_raw_fd(self.fd) }
+    }
+}
+
+#[derive(Clone)]
+struct ExecutionEnvironment {
+    env: Environment,
+    aliases: Aliases,
+
+    stdin: Rc<RefCell<FileDescriptor>>,
+    stdout: Rc<RefCell<FileDescriptor>>,
+    stderr: Rc<RefCell<FileDescriptor>>,
+}
+
 impl ExecutionEnvironment {
-    pub fn new() -> Self {
-        Self {
+    pub fn new() -> Fallible<Self> {
+        Ok(Self {
             env: Environment::new(),
             aliases: Aliases::new(),
-        }
+            stdin: Rc::new(RefCell::new(FileDescriptor::dup(std::io::stdin())?)),
+            stdout: Rc::new(RefCell::new(FileDescriptor::dup(std::io::stdout())?)),
+            stderr: Rc::new(RefCell::new(FileDescriptor::dup(std::io::stderr())?)),
+        })
     }
 
     pub fn build_command(
         &mut self,
         cmd: &SimpleCommand,
         expander: &ShellExpander,
-    ) -> Fallible<std::process::Command> {
+    ) -> Fallible<Option<std::process::Command>> {
         let argv = cmd.expand_argv(&mut self.env, expander, &self.aliases)?;
-        ensure!(
-            !argv.is_empty(),
-            "we don't handle exporting redirection only commands yet"
-        );
-        let mut child_cmd = Command::new(&argv[0]);
-        for arg in argv.iter().skip(1) {
-            child_cmd.arg(arg);
+        if argv.is_empty() {
+            Ok(None)
+        } else {
+            let mut child_cmd = Command::new(&argv[0]);
+            for arg in argv.iter().skip(1) {
+                child_cmd.arg(arg);
+            }
+            child_cmd.env_clear();
+            child_cmd.envs(self.env.iter());
+
+            child_cmd.stdin(self.stdin.borrow_mut().as_stdio());
+            child_cmd.stdout(self.stdout.borrow_mut().as_stdio());
+            child_cmd.stderr(self.stderr.borrow_mut().as_stdio());
+            Ok(Some(child_cmd))
         }
-        child_cmd.env_clear();
-        child_cmd.envs(self.env.iter());
-        Ok(child_cmd)
     }
 
-    pub fn apply_redirections(
+    fn file_from_redir(
+        &mut self,
+        redir: &FileRedirection,
+        expander: &ShellExpander,
+    ) -> Fallible<std::fs::File> {
+        ensure!(
+            redir.fd_number < 3,
+            "only stdin, stdout, stderr currently support for redirection"
+        );
+        let file_name = match &redir.file_name.kind {
+            TokenKind::Word(word) => {
+                let word = ShellString::from(word.as_str());
+                let file = expander.expand_word(&word, &mut self.env)?;
+                ensure!(
+                    file.len() == 1,
+                    "{:?} expanded to {:?}, expected just a single item",
+                    redir.file_name,
+                    file
+                );
+                file.into_iter().next().unwrap()
+            }
+            _ => bail!("file_name is not a word token"),
+        };
+        let mut options = std::fs::OpenOptions::new();
+        options
+            .read(redir.input)
+            .write(redir.output)
+            .append(redir.append)
+            .truncate(redir.output && !redir.append)
+            // TODO: if a noclobber option is set, and !redir.clobber,
+            // then we should look at .create_new() instead
+            .create(redir.output || redir.clobber);
+        match options.open(file_name.as_ref()) {
+            Ok(file) => Ok(file),
+            Err(e) => {
+                return Err(e
+                    .context(format!("opening '{}' using {:#?}", file_name, options))
+                    .into());
+            }
+        }
+    }
+
+    pub fn apply_redirections_to_env(
+        &mut self,
+        cmd: &SimpleCommand,
+        expander: &ShellExpander,
+    ) -> Fallible<()> {
+        for redir in &cmd.redirections {
+            match redir {
+                Redirection::File(redir) => {
+                    let file = self.file_from_redir(redir, expander)?;
+                    let fd = Rc::new(RefCell::new(FileDescriptor::dup(file)?));
+                    match redir.fd_number {
+                        0 => self.stdin = fd,
+                        1 => self.stdout = fd,
+                        2 => self.stderr = fd,
+                        _ => bail!("unsupported fd number"),
+                    };
+                }
+                Redirection::Fd(_) => {
+                    bail!("fd redirection not hooked up to eval");
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn apply_redirections_to_cmd(
         &mut self,
         child_cmd: &mut std::process::Command,
         cmd: &SimpleCommand,
@@ -153,51 +293,9 @@ impl ExecutionEnvironment {
     ) -> Fallible<()> {
         for redir in &cmd.redirections {
             match redir {
-                Redirection::File(FileRedirection {
-                    fd_number,
-                    file_name,
-                    input,
-                    output,
-                    clobber,
-                    append,
-                }) => {
-                    ensure!(
-                        *fd_number < 3,
-                        "only stdin, stdout, stderr currently support for redirection"
-                    );
-                    let file_name = match &file_name.kind {
-                        TokenKind::Word(word) => {
-                            let word = ShellString::from(word.as_str());
-                            let file = expander.expand_word(&word, &mut self.env)?;
-                            ensure!(
-                                file.len() == 1,
-                                "{:?} expanded to {:?}, expected just a single item",
-                                file_name,
-                                file
-                            );
-                            file.into_iter().next().unwrap()
-                        }
-                        _ => bail!("file_name is not a word token"),
-                    };
-                    let mut options = std::fs::OpenOptions::new();
-                    options
-                        .read(*input)
-                        .write(*output)
-                        .append(*append)
-                        .truncate(*output && !*append)
-                        // TODO: if a noclobber option is set, and !*clobber,
-                        // then we should look at .create_new() instead
-                        .create(*output || *clobber);
-                    let file = match options.open(file_name.as_ref()) {
-                        Ok(file) => file,
-                        Err(e) => {
-                            return Err(e
-                                .context(format!("opening '{}' using {:#?}", file_name, options))
-                                .into());
-                        }
-                    };
-
-                    match fd_number {
+                Redirection::File(redir) => {
+                    let file = self.file_from_redir(redir, expander)?;
+                    match redir.fd_number {
                         0 => child_cmd.stdin(file),
                         1 => child_cmd.stdout(file),
                         2 => child_cmd.stderr(file),
@@ -217,10 +315,13 @@ impl ExecutionEnvironment {
         for command in list {
             match command.command {
                 CommandType::SimpleCommand(cmd) => {
-                    let mut child_cmd = self.build_command(&cmd, expander)?;
-                    self.apply_redirections(&mut child_cmd, &cmd, expander)?;
-                    let mut child = child_cmd.spawn()?;
-                    last_status = Some(child.wait()?.into());
+                    if let Some(mut child_cmd) = self.build_command(&cmd, expander)? {
+                        self.apply_redirections_to_cmd(&mut child_cmd, &cmd, expander)?;
+                        let mut child = child_cmd.spawn()?;
+                        last_status = Some(child.wait()?.into());
+                    } else {
+                        self.apply_redirections_to_env(&cmd, expander)?;
+                    }
                 }
                 CommandType::BraceGroup(list) => {
                     last_status = Some(self.eval(expander, list)?);
@@ -328,7 +429,7 @@ fn main() -> Result<(), Error> {
     }));
     rl.load_history("history.txt").ok();
 
-    let mut env = ExecutionEnvironment::new();
+    let mut env = ExecutionEnvironment::new()?;
     let expander = ShellExpander {};
 
     let mut input = String::new();

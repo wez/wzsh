@@ -6,6 +6,7 @@ edition = "2018"
 
 [dependencies]
 failure = "0.1"
+libc = "0.2"
 rustyline = "3.0"
 shlex = { path = "shlex" }
 
