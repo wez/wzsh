@@ -118,7 +118,7 @@ fn is_recoverable_parse_error(e: &Error) -> bool {
         }
     } else if let Some(parse_err) = e.downcast_ref::<ParseErrorKind>() {
         match parse_err {
-            ParseErrorKind::UnexpectedToken(_) => false,
+            ParseErrorKind::UnexpectedToken(..) => false,
         }
     } else {
         false

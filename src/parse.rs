@@ -1,12 +1,22 @@
 //! Shell parser
-use failure::{bail, format_err, Fail, Fallible};
+use failure::{bail, format_err, Error, Fail, Fallible};
 use shlex::string::ShellString;
 use shlex::{Aliases, Environment, Expander, Lexer, Operator, ReservedWord, Token, TokenKind};
 
+#[derive(Debug, Clone)]
+pub enum ParseErrorContext {
+    List,
+    SimpleCommand,
+    PipelineStartingWithBang,
+    PipeSequence,
+    IoFileAfterIoNumber,
+    FileNameAfterRedirectionOperator,
+}
+
 #[derive(Debug, Clone, Fail)]
 pub enum ParseErrorKind {
-    #[fail(display = "Unexpected token {}", 0)]
-    UnexpectedToken(Token),
+    #[fail(display = "Unexpected token {} while parsing {:?}", 0, 1)]
+    UnexpectedToken(Token, ParseErrorContext),
 }
 
 pub struct Parser<R: std::io::Read> {
@@ -38,7 +48,7 @@ impl<R: std::io::Read> Parser<R> {
                 if self.next_token_is(TokenKind::Eof)? {
                     return Ok(CompoundList { commands });
                 } else {
-                    bail!("expected and_or");
+                    return Err(self.unexpected_next_token(ParseErrorContext::List));
                 }
             }
         };
@@ -63,6 +73,13 @@ impl<R: std::io::Read> Parser<R> {
             Ok(tok)
         } else {
             self.lexer.next()
+        }
+    }
+
+    fn unexpected_next_token(&mut self, context: ParseErrorContext) -> Error {
+        match self.next_token() {
+            Ok(tok) => ParseErrorKind::UnexpectedToken(tok, context).into(),
+            Err(e) => e,
         }
     }
 
@@ -140,7 +157,7 @@ impl<R: std::io::Read> Parser<R> {
         if let Some(commands) = self.pipe_sequence()? {
             Ok(Some(Pipeline { inverted, commands }))
         } else if inverted {
-            bail!("expected command to follow !");
+            Err(self.unexpected_next_token(ParseErrorContext::PipelineStartingWithBang))
         } else {
             Ok(None)
         }
@@ -158,7 +175,7 @@ impl<R: std::io::Read> Parser<R> {
             self.linebreak()?;
             match self.command()? {
                 Some(cmd) => commands.push(cmd),
-                None => bail!("expected command to follow |"),
+                None => return Err(self.unexpected_next_token(ParseErrorContext::PipeSequence)),
             }
         }
 
@@ -249,7 +266,11 @@ impl<R: std::io::Read> Parser<R> {
                 }
 
                 _ => {
-                    return Err(ParseErrorKind::UnexpectedToken(token).into());
+                    return Err(ParseErrorKind::UnexpectedToken(
+                        token,
+                        ParseErrorContext::SimpleCommand,
+                    )
+                    .into());
                 }
             }
         }
@@ -270,7 +291,9 @@ impl<R: std::io::Read> Parser<R> {
         if let TokenKind::IoNumber(fd_number) = t.kind {
             match self.io_file(Some(fd_number))? {
                 Some(redir) => return Ok(Some(redir)),
-                None => bail!("expected io_file to follow IO_NUMBER"),
+                None => {
+                    return Err(self.unexpected_next_token(ParseErrorContext::IoFileAfterIoNumber));
+                }
             }
         }
         self.unget_token(t);
@@ -335,10 +358,11 @@ impl<R: std::io::Read> Parser<R> {
                 }),
                 Operator::LessGreat => bail!("fd redirection not yet impl"),
                 Operator::GreatAnd => bail!("fd redirection not yet impl"),
-                _ => bail!("unhandled redirection oper {:?}", oper),
+                _ => bail!("impossible redirection oper {:?}", oper),
             }))
         } else {
-            bail!("expected filename to follow operator {:?}", t);
+            self.unget_token(file_name);
+            Err(self.unexpected_next_token(ParseErrorContext::FileNameAfterRedirectionOperator))
         }
     }
 }
