@@ -93,7 +93,7 @@ fn eval(
                     child.wait()?;
                 }
             }
-            _ => bail!("eval doesn't know about {:?}", command),
+            _ => bail!("eval doesn't know about {:#?}", command),
         }
     }
     Ok(())

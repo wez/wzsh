@@ -1,5 +1,5 @@
 //! Shell parser
-use failure::{bail, Fail, Fallible};
+use failure::{bail, Fail, Fallible, format_err};
 use shlex::string::ShellString;
 use shlex::{Aliases, Environment, Expander, Lexer, Operator, ReservedWord, Token, TokenKind};
 
@@ -71,12 +71,42 @@ impl<R: std::io::Read> Parser<R> {
         self.lookahead.replace(tok);
     }
 
+    fn pipeline_conditional(
+        &mut self,
+        condition: Pipeline,
+        op: Operator,
+    ) -> Fallible<Option<Command>> {
+        self.linebreak()?;
+
+        let then: CompoundList = Command::from(
+            self.pipeline()?
+                .ok_or_else(|| format_err!("missing pipeline after {:?}", op))?
+        )
+        .into();
+        let condition: CompoundList = Command::from(condition).into();
+
+        let (true_part, false_part) = if op == Operator::AndIf {
+            (Some(then), None)
+        } else {
+            (None, Some(then))
+        };
+
+        Ok(Some(
+            CommandType::If(If {
+                condition: condition.into(),
+                true_part,
+                false_part,
+            })
+            .into(),
+        ))
+    }
+
     fn and_or(&mut self) -> Fallible<Option<Command>> {
         if let Some(pipeline) = self.pipeline()? {
             if self.next_token_is(TokenKind::Operator(Operator::AndIf))? {
-                bail!("andif not done");
+                self.pipeline_conditional(pipeline, Operator::AndIf)
             } else if self.next_token_is(TokenKind::Operator(Operator::OrIf))? {
-                bail!("orif not done");
+                self.pipeline_conditional(pipeline, Operator::OrIf)
             } else {
                 Ok(Some(pipeline.into()))
             }
@@ -107,26 +137,32 @@ impl<R: std::io::Read> Parser<R> {
 
     fn pipeline(&mut self) -> Fallible<Option<Pipeline>> {
         let inverted = self.next_token_is_reserved_word(ReservedWord::Bang)?;
+        if let Some(commands) = self.pipe_sequence()? {
+            Ok(Some(Pipeline { inverted, commands }))
+        } else if inverted {
+            bail!("expected command to follow !");
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn pipe_sequence(&mut self) -> Fallible<Option<Vec<Command>>> {
         let command = match self.command()? {
-            None => {
-                if inverted {
-                    bail!("expected command to follow !");
-                }
-                return Ok(None);
-            }
+            None => return Ok(None),
             Some(cmd) => cmd,
         };
 
         let mut commands = vec![command];
 
         while self.next_token_is(TokenKind::Operator(Operator::Pipe))? {
+            self.linebreak()?;
             match self.command()? {
                 Some(cmd) => commands.push(cmd),
                 None => bail!("expected command to follow |"),
             }
         }
 
-        Ok(Some(Pipeline { inverted, commands }))
+        Ok(Some(commands))
     }
 
     fn separator_op(&mut self) -> Fallible<Option<Separator>> {
@@ -298,10 +334,18 @@ impl IntoIterator for CompoundList {
     }
 }
 
+impl From<Command> for CompoundList {
+    fn from(cmd: Command) -> CompoundList {
+        CompoundList {
+            commands: vec![cmd],
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct If {
     condition: CompoundList,
-    true_part: CompoundList,
+    true_part: Option<CompoundList>,
     false_part: Option<CompoundList>,
 }
 
