@@ -152,6 +152,12 @@ pub enum TokenKind {
     NewLine,
 }
 
+impl TokenKind {
+    pub fn new_word(word: &str) -> Self {
+        TokenKind::Word(word.to_owned())
+    }
+}
+
 pub fn is_name_char(c: char) -> bool {
     if c >= '0' && c <= '9' {
         true
@@ -690,7 +696,7 @@ mod test_lex {
                         end: TokenPosition { line: 0, col: 2 }
                     },
                     Token {
-                        kind: TokenKind::Word("a".to_string()),
+                        kind: TokenKind::new_word("a"),
                         start: TokenPosition { line: 1, col: 0 },
                         end: TokenPosition { line: 1, col: 0 }
                     },
@@ -707,7 +713,7 @@ mod test_lex {
             (
                 vec![
                     Token {
-                        kind: TokenKind::Word("true".to_string()),
+                        kind: TokenKind::new_word("true"),
                         start: TokenPosition { line: 0, col: 0 },
                         end: TokenPosition { line: 0, col: 3 }
                     },
@@ -717,7 +723,7 @@ mod test_lex {
                         end: TokenPosition { line: 0, col: 6 }
                     },
                     Token {
-                        kind: TokenKind::Word("false".to_string()),
+                        kind: TokenKind::new_word("false"),
                         start: TokenPosition { line: 0, col: 8 },
                         end: TokenPosition { line: 0, col: 12 }
                     },
@@ -730,7 +736,7 @@ mod test_lex {
             (
                 vec![
                     Token {
-                        kind: TokenKind::Word("true".to_string()),
+                        kind: TokenKind::new_word("true"),
                         start: TokenPosition { line: 0, col: 0 },
                         end: TokenPosition { line: 0, col: 3 }
                     },
@@ -740,7 +746,7 @@ mod test_lex {
                         end: TokenPosition { line: 0, col: 5 }
                     },
                     Token {
-                        kind: TokenKind::Word("false".to_string()),
+                        kind: TokenKind::new_word("false"),
                         start: TokenPosition { line: 0, col: 6 },
                         end: TokenPosition { line: 0, col: 10 }
                     },
@@ -756,7 +762,7 @@ mod test_lex {
             lex("'hello'"),
             (
                 vec![Token {
-                    kind: TokenKind::Word("'hello'".to_string()),
+                    kind: TokenKind::new_word("'hello'"),
                     start: TokenPosition { line: 0, col: 0 },
                     end: TokenPosition { line: 0, col: 6 }
                 }],
@@ -767,7 +773,7 @@ mod test_lex {
             lex("'hel\\'lo'"),
             (
                 vec![Token {
-                    kind: TokenKind::Word("'hel\\'lo'".to_string()),
+                    kind: TokenKind::new_word("'hel\\'lo'"),
                     start: TokenPosition { line: 0, col: 0 },
                     end: TokenPosition { line: 0, col: 8 }
                 }],
@@ -778,7 +784,7 @@ mod test_lex {
             lex("hello'world'"),
             (
                 vec![Token {
-                    kind: TokenKind::Word("hello'world'".to_string()),
+                    kind: TokenKind::new_word("hello'world'"),
                     start: TokenPosition { line: 0, col: 0 },
                     end: TokenPosition { line: 0, col: 11 }
                 }],
@@ -793,7 +799,7 @@ mod test_lex {
             lex("\"hello\""),
             (
                 vec![Token {
-                    kind: TokenKind::Word("\"hello\"".to_string()),
+                    kind: TokenKind::new_word("\"hello\""),
                     start: TokenPosition { line: 0, col: 0 },
                     end: TokenPosition { line: 0, col: 6 }
                 }],
@@ -804,7 +810,7 @@ mod test_lex {
             lex("\"hel\\'lo\""),
             (
                 vec![Token {
-                    kind: TokenKind::Word("\"hel\\'lo\"".to_string()),
+                    kind: TokenKind::new_word("\"hel\\'lo\""),
                     start: TokenPosition { line: 0, col: 0 },
                     end: TokenPosition { line: 0, col: 8 }
                 }],
@@ -815,7 +821,7 @@ mod test_lex {
             lex("hello\"world\""),
             (
                 vec![Token {
-                    kind: TokenKind::Word("hello\"world\"".to_string()),
+                    kind: TokenKind::new_word("hello\"world\""),
                     start: TokenPosition { line: 0, col: 0 },
                     end: TokenPosition { line: 0, col: 11 }
                 }],
@@ -837,7 +843,7 @@ mod test_lex {
             lex("\\\\"),
             (
                 vec![Token {
-                    kind: TokenKind::Word("\\\\".to_string()),
+                    kind: TokenKind::new_word("\\\\"),
                     start: TokenPosition { line: 0, col: 0 },
                     end: TokenPosition { line: 0, col: 1 }
                 },],
@@ -849,12 +855,12 @@ mod test_lex {
             (
                 vec![
                     Token {
-                        kind: TokenKind::Word("aa".to_string()),
+                        kind: TokenKind::new_word("aa"),
                         start: TokenPosition { line: 0, col: 0 },
                         end: TokenPosition { line: 1, col: 0 }
                     },
                     Token {
-                        kind: TokenKind::Word("b".to_string()),
+                        kind: TokenKind::new_word("b"),
                         start: TokenPosition { line: 1, col: 2 },
                         end: TokenPosition { line: 1, col: 2 }
                     },
@@ -873,7 +879,7 @@ mod test_lex {
         assert_eq!(
             tokens[0],
             Token {
-                kind: TokenKind::Word("echo".to_string()),
+                kind: TokenKind::new_word("echo"),
                 start: TokenPosition { line: 0, col: 0 },
                 end: TokenPosition { line: 0, col: 3 }
             }
@@ -902,7 +908,7 @@ mod test_lex {
         assert_eq!(
             tokens[0],
             Token {
-                kind: TokenKind::Word("ls -l".to_string()),
+                kind: TokenKind::new_word("ls -l"),
                 start: TokenPosition { line: 0, col: 0 },
                 end: TokenPosition { line: 0, col: 1 }
             }
@@ -914,7 +920,7 @@ mod test_lex {
         assert_eq!(
             tokens[0],
             Token {
-                kind: TokenKind::Word("echo".to_string()),
+                kind: TokenKind::new_word("echo"),
                 start: TokenPosition { line: 0, col: 0 },
                 end: TokenPosition { line: 0, col: 3 }
             }
@@ -954,13 +960,13 @@ mod test_lex {
 
     #[test]
     fn assignment_word() {
-        let tok = TokenKind::Word("foo".to_string());
+        let tok = TokenKind::new_word("foo");
         assert_eq!(tok.parse_assignment_word(), None);
 
-        let tok = TokenKind::Word("foo=bar".to_string());
+        let tok = TokenKind::new_word("foo=bar");
         assert_eq!(tok.parse_assignment_word(), Some(("foo", "bar")));
 
-        let tok = TokenKind::Word("foo=bar=baz".to_string());
+        let tok = TokenKind::new_word("foo=bar=baz");
         assert_eq!(tok.parse_assignment_word(), Some(("foo", "bar=baz")));
     }
 
@@ -970,7 +976,7 @@ mod test_lex {
             lex("foo$hello"),
             (
                 vec![Token {
-                    kind: TokenKind::Word("foo$hello".to_string()),
+                    kind: TokenKind::new_word("foo$hello"),
                     start: TokenPosition { line: 0, col: 0 },
                     end: TokenPosition { line: 0, col: 8 }
                 }],
@@ -981,7 +987,7 @@ mod test_lex {
             lex("${hello}there"),
             (
                 vec![Token {
-                    kind: TokenKind::Word("${hello}there".to_string()),
+                    kind: TokenKind::new_word("${hello}there"),
                     start: TokenPosition { line: 0, col: 0 },
                     end: TokenPosition { line: 0, col: 12 }
                 }],
@@ -992,7 +998,7 @@ mod test_lex {
             lex("${he||o}there"),
             (
                 vec![Token {
-                    kind: TokenKind::Word("${he||o}there".to_string()),
+                    kind: TokenKind::new_word("${he||o}there"),
                     start: TokenPosition { line: 0, col: 0 },
                     end: TokenPosition { line: 0, col: 12 }
                 }],
@@ -1010,7 +1016,7 @@ mod test_lex {
             lex("${e||}}there"),
             (
                 vec![Token {
-                    kind: TokenKind::Word("${e||}}there".to_string()),
+                    kind: TokenKind::new_word("${e||}}there"),
                     start: TokenPosition { line: 0, col: 0 },
                     end: TokenPosition { line: 0, col: 11 }
                 }],

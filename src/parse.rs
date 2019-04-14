@@ -531,17 +531,17 @@ mod test {
                     redirections: vec![],
                     words: vec![
                         Token::new(
-                            TokenKind::Word("ls".to_string()),
+                            TokenKind::new_word("ls"),
                             TokenPosition { line: 0, col: 0 },
                             TokenPosition { line: 0, col: 1 },
                         ),
                         Token::new(
-                            TokenKind::Word("-l".to_string()),
+                            TokenKind::new_word("-l"),
                             TokenPosition { line: 0, col: 3 },
                             TokenPosition { line: 0, col: 4 },
                         ),
                         Token::new(
-                            TokenKind::Word("foo".to_string()),
+                            TokenKind::new_word("foo"),
                             TokenPosition { line: 0, col: 6 },
                             TokenPosition { line: 0, col: 8 },
                         )
@@ -562,7 +562,7 @@ mod test {
                         assignments: vec![],
                         redirections: vec![],
                         words: vec![Token::new(
-                            TokenKind::Word("false".to_string()),
+                            TokenKind::new_word("false"),
                             TokenPosition { line: 0, col: 0 },
                             TokenPosition { line: 0, col: 4 },
                         ),]
@@ -571,7 +571,7 @@ mod test {
                         assignments: vec![],
                         redirections: vec![],
                         words: vec![Token::new(
-                            TokenKind::Word("true".to_string()),
+                            TokenKind::new_word("true"),
                             TokenPosition { line: 1, col: 0 },
                             TokenPosition { line: 1, col: 3 },
                         ),]
