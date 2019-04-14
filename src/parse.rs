@@ -3,7 +3,7 @@ use failure::{bail, Error, Fail, Fallible};
 use shlex::string::ShellString;
 use shlex::{Aliases, Environment, Expander, Lexer, Operator, ReservedWord, Token, TokenKind};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParseErrorContext {
     List,
     SimpleCommand,
@@ -15,7 +15,7 @@ pub enum ParseErrorContext {
     FdRedirectionExpectsNumber,
 }
 
-#[derive(Debug, Clone, Fail)]
+#[derive(Debug, Clone, PartialEq, Eq, Fail)]
 pub enum ParseErrorKind {
     #[fail(display = "Unexpected token {} while parsing {:?}", 0, 1)]
     UnexpectedToken(Token, ParseErrorContext),
@@ -323,10 +323,10 @@ impl<R: std::io::Read> Parser<R> {
         };
 
         match oper {
-            Operator::LessGreat | Operator::GreatAnd => {
+            Operator::GreatAnd | Operator::LessAnd => {
                 if let Some(src_fd_number) = self.number()? {
                     let dest_fd_number =
-                        fd_number.unwrap_or(if oper == Operator::LessGreat { 0 } else { 1 });
+                        fd_number.unwrap_or(if oper == Operator::GreatAnd { 1 } else { 0 });
                     return Ok(Some(Redirection::Fd(FdDuplication {
                         src_fd_number,
                         dest_fd_number,
@@ -348,6 +348,14 @@ impl<R: std::io::Read> Parser<R> {
                     file_name,
                     input: true,
                     output: false,
+                    clobber: false,
+                    append: false,
+                }),
+                Operator::LessGreat => Redirection::File(FileRedirection {
+                    fd_number: fd_number.unwrap_or(0),
+                    file_name,
+                    input: true,
+                    output: true,
                     clobber: false,
                     append: false,
                 }),
@@ -668,5 +676,245 @@ mod test {
         } else {
             panic!("wrong command type!?");
         }
+    }
+
+    #[test]
+    fn redirect_out() {
+        let list = parse("echo >foo").unwrap();
+        assert_eq!(
+            list,
+            CompoundList {
+                commands: vec![Command {
+                    asynchronous: false,
+                    command: CommandType::SimpleCommand(SimpleCommand {
+                        assignments: vec![],
+                        redirections: vec![Redirection::File(FileRedirection {
+                            fd_number: 1,
+                            file_name: Token {
+                                kind: TokenKind::new_word("foo"),
+                                start: TokenPosition { line: 0, col: 6 },
+                                end: TokenPosition { line: 0, col: 8 }
+                            },
+                            input: false,
+                            output: true,
+                            clobber: false,
+                            append: false
+                        })],
+                        words: vec![Token {
+                            kind: TokenKind::new_word("echo"),
+                            start: TokenPosition { line: 0, col: 0 },
+                            end: TokenPosition { line: 0, col: 3 }
+                        }]
+                    }),
+                    redirects: None
+                }]
+            }
+        );
+    }
+
+    #[test]
+    fn redirect_append() {
+        let list = parse("echo >>foo").unwrap();
+        assert_eq!(
+            list,
+            CompoundList {
+                commands: vec![Command {
+                    asynchronous: false,
+                    command: CommandType::SimpleCommand(SimpleCommand {
+                        assignments: vec![],
+                        redirections: vec![Redirection::File(FileRedirection {
+                            fd_number: 1,
+                            file_name: Token {
+                                kind: TokenKind::new_word("foo"),
+                                start: TokenPosition { line: 0, col: 7 },
+                                end: TokenPosition { line: 0, col: 9 }
+                            },
+                            input: false,
+                            output: true,
+                            clobber: false,
+                            append: true
+                        })],
+                        words: vec![Token {
+                            kind: TokenKind::new_word("echo"),
+                            start: TokenPosition { line: 0, col: 0 },
+                            end: TokenPosition { line: 0, col: 3 }
+                        }]
+                    }),
+                    redirects: None
+                }]
+            }
+        );
+    }
+
+    #[test]
+    fn redirect_clobber() {
+        let list = parse("echo >|foo").unwrap();
+        assert_eq!(
+            list,
+            CompoundList {
+                commands: vec![Command {
+                    asynchronous: false,
+                    command: CommandType::SimpleCommand(SimpleCommand {
+                        assignments: vec![],
+                        redirections: vec![Redirection::File(FileRedirection {
+                            fd_number: 1,
+                            file_name: Token {
+                                kind: TokenKind::new_word("foo"),
+                                start: TokenPosition { line: 0, col: 7 },
+                                end: TokenPosition { line: 0, col: 9 }
+                            },
+                            input: false,
+                            output: true,
+                            clobber: true,
+                            append: false
+                        })],
+                        words: vec![Token {
+                            kind: TokenKind::new_word("echo"),
+                            start: TokenPosition { line: 0, col: 0 },
+                            end: TokenPosition { line: 0, col: 3 }
+                        }]
+                    }),
+                    redirects: None
+                }]
+            }
+        );
+    }
+
+    #[test]
+    fn redirect_input() {
+        let list = parse("echo <foo").unwrap();
+        assert_eq!(
+            list,
+            CompoundList {
+                commands: vec![Command {
+                    asynchronous: false,
+                    command: CommandType::SimpleCommand(SimpleCommand {
+                        assignments: vec![],
+                        redirections: vec![Redirection::File(FileRedirection {
+                            fd_number: 0,
+                            file_name: Token {
+                                kind: TokenKind::new_word("foo"),
+                                start: TokenPosition { line: 0, col: 6 },
+                                end: TokenPosition { line: 0, col: 8 }
+                            },
+                            input: true,
+                            output: false,
+                            clobber: false,
+                            append: false
+                        })],
+                        words: vec![Token {
+                            kind: TokenKind::new_word("echo"),
+                            start: TokenPosition { line: 0, col: 0 },
+                            end: TokenPosition { line: 0, col: 3 }
+                        }]
+                    }),
+                    redirects: None
+                }]
+            }
+        );
+    }
+
+    #[test]
+    fn redirect_stderr_stdout() {
+        let list = parse("echo 2>&1").unwrap();
+        assert_eq!(
+            list,
+            CompoundList {
+                commands: vec![Command {
+                    asynchronous: false,
+                    command: CommandType::SimpleCommand(SimpleCommand {
+                        assignments: vec![],
+                        redirections: vec![Redirection::Fd(FdDuplication {
+                            src_fd_number: 1,
+                            dest_fd_number: 2
+                        })],
+                        words: vec![Token {
+                            kind: TokenKind::new_word("echo"),
+                            start: TokenPosition { line: 0, col: 0 },
+                            end: TokenPosition { line: 0, col: 3 }
+                        }]
+                    }),
+                    redirects: None
+                }]
+            }
+        );
+    }
+
+    #[test]
+    fn redirect_dup_for_input() {
+        let list = parse("echo 0<&1").unwrap();
+        assert_eq!(
+            list,
+            CompoundList {
+                commands: vec![Command {
+                    asynchronous: false,
+                    command: CommandType::SimpleCommand(SimpleCommand {
+                        assignments: vec![],
+                        redirections: vec![Redirection::Fd(FdDuplication {
+                            src_fd_number: 1,
+                            dest_fd_number: 0
+                        })],
+                        words: vec![Token {
+                            kind: TokenKind::new_word("echo"),
+                            start: TokenPosition { line: 0, col: 0 },
+                            end: TokenPosition { line: 0, col: 3 }
+                        }]
+                    }),
+                    redirects: None
+                }]
+            }
+        );
+    }
+
+    #[test]
+    fn redirect_dup_for_input_and_output() {
+        let list = parse("echo <>file").unwrap();
+        assert_eq!(
+            list,
+            CompoundList {
+                commands: vec![Command {
+                    asynchronous: false,
+                    command: CommandType::SimpleCommand(SimpleCommand {
+                        assignments: vec![],
+                        redirections: vec![Redirection::File(FileRedirection {
+                            fd_number: 0,
+                            file_name: Token {
+                                kind: TokenKind::new_word("file"),
+                                start: TokenPosition { line: 0, col: 7 },
+                                end: TokenPosition { line: 0, col: 10 }
+                            },
+                            input: true,
+                            output: true,
+                            clobber: false,
+                            append: false
+                        })],
+                        words: vec![Token {
+                            kind: TokenKind::new_word("echo"),
+                            start: TokenPosition { line: 0, col: 0 },
+                            end: TokenPosition { line: 0, col: 3 }
+                        }]
+                    }),
+                    redirects: None
+                }]
+            }
+        );
+    }
+
+    #[test]
+    fn redirect_fd_not_number() {
+        assert_eq!(
+            parse("echo <&file")
+                .unwrap_err()
+                .downcast::<ParseErrorKind>()
+                .unwrap(),
+            ParseErrorKind::UnexpectedToken(
+                Token {
+                    kind: TokenKind::new_word("file"),
+                    start: TokenPosition { line: 0, col: 7 },
+                    end: TokenPosition { line: 0, col: 10 }
+                },
+                ParseErrorContext::FdRedirectionExpectsNumber
+            )
+        );
     }
 }
