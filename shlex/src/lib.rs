@@ -152,6 +152,12 @@ pub enum TokenKind {
     NewLine,
 }
 
+impl std::fmt::Display for TokenKind {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        write!(fmt, "{:?}", self)
+    }
+}
+
 impl TokenKind {
     pub fn new_word(word: &str) -> Self {
         TokenKind::Word(word.to_owned())
@@ -214,6 +220,16 @@ pub struct Token {
     pub kind: TokenKind,
     pub start: TokenPosition,
     pub end: TokenPosition,
+}
+
+impl std::fmt::Display for Token {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        write!(
+            fmt,
+            "{} starting {} ending {}",
+            self.kind, self.start, self.end
+        )
+    }
 }
 
 impl Token {

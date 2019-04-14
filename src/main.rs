@@ -7,10 +7,11 @@ use rustyline::{Config, Editor, Helper};
 use std::borrow::Cow;
 use std::process::Command;
 
+use shlex::error::LexError;
 use shlex::string::ShellString;
-use shlex::{Aliases, Environment, Expander};
+use shlex::{Aliases, Environment, Expander, LexErrorKind};
 mod parse;
-use parse::{CommandType, CompoundList, Parser};
+use parse::{CommandType, CompoundList, ParseErrorKind, Parser};
 
 struct ShellExpander {}
 impl Expander for ShellExpander {
@@ -102,6 +103,28 @@ fn eval(
     Ok(())
 }
 
+/// Returns true if a given error might be resolved by allowing
+/// the user to continue typing more text on a subsequent line.
+/// Most lex errors fall into that category.
+fn is_recoverable_parse_error(e: &Error) -> bool {
+    if let Some(lex_err) = e.downcast_ref::<LexError>() {
+        match lex_err.kind {
+            LexErrorKind::EofDuringBackslash
+            | LexErrorKind::EofDuringComment
+            | LexErrorKind::EofDuringSingleQuotedString
+            | LexErrorKind::EofDuringDoubleQuotedString
+            | LexErrorKind::EofDuringParameterExpansion => true,
+            LexErrorKind::IoError => false,
+        }
+    } else if let Some(parse_err) = e.downcast_ref::<ParseErrorKind>() {
+        match parse_err {
+            ParseErrorKind::UnexpectedToken(_) => false,
+        }
+    } else {
+        false
+    }
+}
+
 fn main() -> Result<(), Error> {
     let config = Config::builder().history_ignore_space(true).build();
 
@@ -128,12 +151,10 @@ fn main() -> Result<(), Error> {
                 let mut parser = Parser::new("stdin", input.as_bytes());
                 let nodes = match parser.parse() {
                     Err(e) => {
-                        // If we get a parse error, it is probably because
-                        // something is incomplete.  Let's keep it buffered
-                        // up in the input vector and allow the user to
-                        // complete it on the next line, or press ctrl-c
-                        // to cancel and clear it.
-                        eprintln!("{:?}", e);
+                        if !is_recoverable_parse_error(&e) {
+                            eprintln!("{}", e);
+                            input.clear();
+                        }
                         continue;
                     }
                     Ok(nodes) => {

@@ -49,9 +49,9 @@ impl LexErrorKind {
 #[derive(Debug, Clone, Fail)]
 #[fail(display = "{} starting {} ending {}", kind, start, end)]
 pub struct LexError {
-    kind: LexErrorKind,
-    start: TokenPosition,
-    end: TokenPosition,
+    pub kind: LexErrorKind,
+    pub start: TokenPosition,
+    pub end: TokenPosition,
 }
 
 impl LexError {

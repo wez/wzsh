@@ -3,10 +3,10 @@ use failure::{bail, format_err, Fail, Fallible};
 use shlex::string::ShellString;
 use shlex::{Aliases, Environment, Expander, Lexer, Operator, ReservedWord, Token, TokenKind};
 
-#[derive(Debug, Clone, Copy, Fail)]
+#[derive(Debug, Clone, Fail)]
 pub enum ParseErrorKind {
-    #[fail(display = "Unexpected token")]
-    UnexpectedToken,
+    #[fail(display = "Unexpected token {}", 0)]
+    UnexpectedToken(Token),
 }
 
 pub struct Parser<R: std::io::Read> {
@@ -249,7 +249,7 @@ impl<R: std::io::Read> Parser<R> {
                 }
 
                 _ => {
-                    return Err(ParseErrorKind::UnexpectedToken.context(token.start).into());
+                    return Err(ParseErrorKind::UnexpectedToken(token).into());
                 }
             }
         }
