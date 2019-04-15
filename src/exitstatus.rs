@@ -11,6 +11,33 @@ pub enum WaitableExitStatus {
     Done(ExitStatus),
 }
 
+#[cfg(unix)]
+fn wait_child(child: &mut std::process::Child) -> Fallible<ExitStatus> {
+    let pid = child.id() as libc::pid_t;
+
+    unsafe {
+        let mut status = 0i32;
+        let res = libc::waitpid(pid, &mut status, libc::WUNTRACED);
+        if res != pid {
+            let err = std::io::Error::last_os_error();
+            return Err(err.context(format!("waiting for child pid {}", pid)))?;
+        }
+        // Put the shell back in the foreground
+        let pgrp = libc::getpgid(libc::getpid());
+        libc::tcsetpgrp(0, pgrp);
+
+        Ok(ExitStatus { code: status })
+    }
+}
+
+#[cfg(not(unix))]
+fn wait_child(child: &mut std::process::Child) -> Fallible<ExitStatus> {
+    let pid = child.id();
+    child
+        .wait()
+        .map_err(|e| e.context(format!("waiting for child pid {}", pid)))
+}
+
 impl WaitableExitStatus {
     pub fn with_child(asynchronous: bool, mut child: std::process::Child) -> Fallible<Self> {
         if asynchronous {
@@ -21,17 +48,8 @@ impl WaitableExitStatus {
             //Ok(WaitableExitStatus::Child(child))
             Ok(WaitableExitStatus::Done(ExitStatus::new_ok()))
         } else {
-            let pid = child.id();
-            let status = child
-                .wait()
-                .map_err(|e| e.context(format!("waiting for child pid {}", pid)));
-            #[cfg(unix)]
-            unsafe {
-                // Put the shell back in the foreground
-                let pgrp = libc::getpgid(libc::getpid());
-                libc::tcsetpgrp(0, pgrp);
-            }
-            Ok(WaitableExitStatus::Done(status?.into()))
+            let status = wait_child(&mut child)?;
+            Ok(WaitableExitStatus::Done(status.into()))
         }
     }
 
