@@ -87,7 +87,12 @@ enum WaitableExitStatus {
 impl WaitableExitStatus {
     fn with_child(asynchronous: bool, mut child: std::process::Child) -> Fallible<Self> {
         if asynchronous {
-            Ok(WaitableExitStatus::Child(child))
+            // TODO: should really distinguish between async procs and
+            // async jobs as part of job control.
+            // For now, if we're async we just ignore the child status
+            // and pretend that it is good.
+            //Ok(WaitableExitStatus::Child(child))
+            Ok(WaitableExitStatus::Done(ExitStatus::new_ok()))
         } else {
             Ok(WaitableExitStatus::Done(child.wait()?.into()))
         }
