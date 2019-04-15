@@ -6,7 +6,6 @@ use rustyline::hint::Hinter;
 use rustyline::{Config, Editor, Helper};
 use std::borrow::Cow;
 use std::cell::RefCell;
-use std::os::unix::prelude::*;
 use std::process::Command;
 use std::rc::Rc;
 
@@ -21,6 +20,9 @@ use parse::{
 
 mod exitstatus;
 use exitstatus::{ExitStatus, WaitableExitStatus};
+
+mod filedescriptor;
+use filedescriptor::FileDescriptor;
 
 struct ShellExpander {}
 impl Expander for ShellExpander {
@@ -81,94 +83,6 @@ impl Highlighter for LineEditorHelper {
 }
 
 impl Helper for LineEditorHelper {}
-
-struct FileDescriptor {
-    fd: RawFd,
-}
-
-impl Drop for FileDescriptor {
-    fn drop(&mut self) {
-        unsafe {
-            libc::close(self.fd);
-        }
-    }
-}
-
-impl AsRawFd for FileDescriptor {
-    fn as_raw_fd(&self) -> RawFd {
-        self.fd
-    }
-}
-
-fn dup(fd: RawFd) -> Fallible<FileDescriptor> {
-    let duped = unsafe { libc::dup(fd) };
-    if duped == -1 {
-        bail!(
-            "dup of fd {} failed: {:?}",
-            fd,
-            std::io::Error::last_os_error()
-        )
-    } else {
-        let mut owned = FileDescriptor { fd: duped };
-        owned.cloexec()?;
-        Ok(owned)
-    }
-}
-
-struct Pipes {
-    read: FileDescriptor,
-    write: FileDescriptor,
-}
-
-impl FileDescriptor {
-    pub fn dup<F: AsRawFd>(f: F) -> Fallible<Self> {
-        dup(f.as_raw_fd())
-    }
-
-    pub fn pipe() -> Fallible<Pipes> {
-        let mut fds = [-1i32; 2];
-        let res = unsafe { libc::pipe(fds.as_mut_ptr()) };
-        if res == -1 {
-            bail!(
-                "failed to create a pipe: {:?}",
-                std::io::Error::last_os_error()
-            )
-        } else {
-            let mut read = FileDescriptor { fd: fds[0] };
-            let mut write = FileDescriptor { fd: fds[1] };
-            read.cloexec()?;
-            write.cloexec()?;
-            Ok(Pipes { read, write })
-        }
-    }
-
-    /// Helper function to set the close-on-exec flag for a raw descriptor
-    fn cloexec(&mut self) -> Fallible<()> {
-        let flags = unsafe { libc::fcntl(self.fd, libc::F_GETFD) };
-        if flags == -1 {
-            bail!(
-                "fcntl to read flags failed: {:?}",
-                std::io::Error::last_os_error()
-            );
-        }
-        let result = unsafe { libc::fcntl(self.fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) };
-        if result == -1 {
-            bail!(
-                "fcntl to set CLOEXEC failed: {:?}",
-                std::io::Error::last_os_error()
-            );
-        }
-        Ok(())
-    }
-
-    fn as_stdio(&self) -> Fallible<std::process::Stdio> {
-        let duped = dup(self.fd)?;
-        let fd = duped.fd;
-        let stdio = unsafe { std::process::Stdio::from_raw_fd(fd) };
-        std::mem::forget(duped); // don't drop; stdio now owns it
-        Ok(stdio)
-    }
-}
 
 #[derive(Clone)]
 struct ExecutionEnvironment {
