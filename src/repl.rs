@@ -8,9 +8,10 @@ use shlex::error::LexError;
 use shlex::LexErrorKind;
 use std::borrow::Cow;
 
+use crate::errorprint::print_error;
 use crate::exitstatus::ExitStatus;
 use crate::parse::{ParseErrorKind, Parser};
-use crate::{print_error, ExecutionEnvironment, ShellExpander};
+use crate::{ExecutionEnvironment, ShellExpander};
 
 struct LineEditorHelper {
     completer: FilenameCompleter,
