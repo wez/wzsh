@@ -79,6 +79,28 @@ impl Highlighter for LineEditorHelper {
 
 impl Helper for LineEditorHelper {}
 
+enum WaitableExitStatus {
+    Child(std::process::Child),
+    Done(ExitStatus),
+}
+
+impl WaitableExitStatus {
+    fn with_child(asynchronous: bool, mut child: std::process::Child) -> Fallible<Self> {
+        if asynchronous {
+            Ok(WaitableExitStatus::Child(child))
+        } else {
+            Ok(WaitableExitStatus::Done(child.wait()?.into()))
+        }
+    }
+
+    fn wait(self) -> Fallible<ExitStatus> {
+        match self {
+            WaitableExitStatus::Child(mut child) => Ok(child.wait()?.into()),
+            WaitableExitStatus::Done(status) => Ok(status),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 struct ExitStatus {
     code: i32,
@@ -388,22 +410,22 @@ impl ExecutionEnvironment {
         &mut self,
         expander: &ShellExpander,
         command: &ShellCommand,
-    ) -> Fallible<ExitStatus> {
+    ) -> Fallible<WaitableExitStatus> {
         match &command.command {
             CommandType::SimpleCommand(cmd) => {
                 if let Some(mut child_cmd) = self.build_command(&cmd, expander)? {
                     self.apply_redirections_to_cmd(&mut child_cmd, &cmd, expander)?;
                     self.apply_assignments_to_cmd(expander, &cmd.assignments, &mut child_cmd)?;
-                    let mut child = child_cmd.spawn()?;
-                    Ok(child.wait()?.into())
+                    let child = child_cmd.spawn()?;
+                    WaitableExitStatus::with_child(command.asynchronous, child)
                 } else {
                     self.apply_redirections_to_env(&cmd, expander)?;
                     self.apply_assignments_to_env(expander, &cmd.assignments)?;
-                    Ok(ExitStatus::new_ok())
+                    Ok(WaitableExitStatus::Done(ExitStatus::new_ok()))
                 }
             }
             CommandType::BraceGroup(list) => {
-                let mut status = ExitStatus::new_ok();
+                let mut status = WaitableExitStatus::Done(ExitStatus::new_ok());
                 for cmd in &list.commands {
                     status = self.eval(expander, &cmd)?;
                 }
@@ -415,9 +437,11 @@ impl ExecutionEnvironment {
                 // to windows.  Instead we clone the current execution
                 // environment and use that to run the list.
                 // We'll probably need to do something smarter
-                // here to manage signals/process groups on posix systems.
+                // here to manage signals/process groups on posix systems,
+                // and for async subshells, may want to consider using
+                // a thread to execute it.
                 let mut sub_env = self.clone();
-                let mut status = ExitStatus::new_ok();
+                let mut status = WaitableExitStatus::Done(ExitStatus::new_ok());
                 for cmd in &list.commands {
                     status = sub_env.eval(expander, &cmd)?;
                 }
@@ -443,23 +467,23 @@ impl ExecutionEnvironment {
                 // pipeline.
                 envs.reverse();
 
-                let mut status = ExitStatus::new_ok();
+                let mut status = WaitableExitStatus::Done(ExitStatus::new_ok());
                 for cmd in &pipeline.commands {
                     let mut env = envs.pop().unwrap();
                     status = env.eval(expander, cmd)?;
                     // We want to drop the env so that its ref to the
                     // pipes is released, causing the pipes to cascade
                     // shut as we move along.
-                    // TODO: we should make each of the pipe commands
-                    // (except the last) async and not wait for them.
                     drop(env);
                 }
 
-                if pipeline.inverted {
-                    Ok(status.invert())
+                let status = status.wait()?;
+                let status = if pipeline.inverted {
+                    status.invert()
                 } else {
-                    Ok(status)
-                }
+                    status
+                };
+                Ok(WaitableExitStatus::Done(status))
             }
             _ => bail!("eval doesn't know about {:#?}", command),
         }
@@ -594,7 +618,7 @@ fn main() -> Result<(), Error> {
                         print_error(&e, &input);
                         ExitStatus::new_fail()
                     }
-                    Ok(status) => status,
+                    Ok(status) => status.wait()?,
                 };
             }
             Err(ReadlineError::Interrupted) => {

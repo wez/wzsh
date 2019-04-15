@@ -182,6 +182,10 @@ impl<R: std::io::Read> Parser<R> {
             }
         }
 
+        for cmd in commands.iter_mut().rev().skip(1) {
+            cmd.asynchronous = true;
+        }
+
         Ok(Some(commands))
     }
 
