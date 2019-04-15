@@ -41,8 +41,39 @@ pub trait Expander {
                     self.maybe_glob_expand(&field, &mut expanded)?;
                 }
 
+                // Quote removal
+                for field in &mut expanded {
+                    self.remove_quotes(field);
+                }
+
                 Ok(expanded)
             }
+        }
+    }
+
+    fn remove_quotes(&self, s: &mut ShellString) {
+        match s {
+            ShellString::String(s) => {
+                let mut removed = String::with_capacity(s.len());
+                let mut backslash = false;
+                for c in s.chars() {
+                    if backslash {
+                        backslash = false;
+                        removed.push(c);
+                        continue;
+                    }
+                    if c == '\\' {
+                        backslash = true;
+                        continue;
+                    }
+                    if c == '"' || c == '\'' {
+                        continue;
+                    }
+                    removed.push(c)
+                }
+                *s = removed;
+            }
+            _ => {}
         }
     }
 
@@ -489,6 +520,23 @@ mod test {
         assert_eq!(
             expander.expand_word(&"hello there".into(), &mut env)?,
             vec!["hello".to_owned().into(), "there".to_owned().into()]
+        );
+
+        assert_eq!(
+            expander.expand_word(&"hel\"lo\" there".into(), &mut env)?,
+            vec!["hello".to_owned().into(), "there".to_owned().into()]
+        );
+        assert_eq!(
+            expander.expand_word(&"hel'lo' there".into(), &mut env)?,
+            vec!["hello".to_owned().into(), "there".to_owned().into()]
+        );
+        assert_eq!(
+            expander.expand_word(&"hel\\lo there".into(), &mut env)?,
+            vec!["hello".to_owned().into(), "there".to_owned().into()]
+        );
+        assert_eq!(
+            expander.expand_word(&"hel\\\\lo there".into(), &mut env)?,
+            vec!["hel\\lo".to_owned().into(), "there".to_owned().into()]
         );
 
         assert_eq!(
