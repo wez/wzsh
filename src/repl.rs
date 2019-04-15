@@ -10,6 +10,7 @@ use std::borrow::Cow;
 
 use crate::errorprint::print_error;
 use crate::exitstatus::ExitStatus;
+use crate::job::put_shell_in_foreground;
 use crate::parse::{ParseErrorKind, Parser};
 use crate::{ExecutionEnvironment, ShellExpander};
 
@@ -164,12 +165,32 @@ pub fn repl(mut env: ExecutionEnvironment, expander: ShellExpander) -> Fallible<
                         list
                     }
                 };
-                last_status = match env.eval(&expander, &list) {
+                last_status = match env.eval(&expander, &list, None) {
                     Err(e) => {
                         print_error(&e, &input);
                         ExitStatus::new_fail()
                     }
-                    Ok(status) => status.wait()?,
+                    Ok(mut job) => {
+                        eprintln!("job: {:#?}", job);
+                        if job.is_background() {
+                            put_shell_in_foreground();
+                            ExitStatus::new_ok()
+                        } else {
+                            job.put_in_foreground();
+                            let status;
+                            loop {
+                                status = match job.wait() {
+                                    Err(e) => {
+                                        print_error(&e, "");
+                                        continue;
+                                    }
+                                    Ok(status) => status,
+                                };
+                                break;
+                            }
+                            status
+                        }
+                    }
                 };
             }
             Err(ReadlineError::Interrupted) => {
@@ -180,7 +201,7 @@ pub fn repl(mut env: ExecutionEnvironment, expander: ShellExpander) -> Fallible<
                 break;
             }
             Err(err) => {
-                println!("Error: {}", err);
+                print_error(&err.context("during readline").into(), "");
                 break;
             }
         }

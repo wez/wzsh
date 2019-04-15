@@ -1,5 +1,6 @@
 use crate::exitstatus::{ExitStatus, WaitableExitStatus};
 use crate::filedescriptor::FileDescriptor;
+use crate::job::{make_foreground_process_group, make_own_process_group, Job, JobList};
 use crate::parse::{
     Command as ShellCommand, CommandType, FileRedirection, Redirection, SimpleCommand,
 };
@@ -10,24 +11,13 @@ use shlex::{Aliases, Environment, Expander, Token, TokenKind};
 use std::cell::RefCell;
 use std::process::Command;
 use std::rc::Rc;
-
-#[cfg(unix)]
-fn make_foreground_process_group(pid: i32) {
-    unsafe {
-        // Put the process into its own process group
-        libc::setpgid(pid, pid);
-
-        // Grant that process group foreground control
-        // over the terminal
-        let pty_fd = 0;
-        libc::tcsetpgrp(pty_fd, pid);
-    }
-}
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct ExecutionEnvironment {
     env: Rc<RefCell<Environment>>,
     aliases: Rc<RefCell<Aliases>>,
+    jobs: Arc<JobList>,
 
     stdin: Rc<RefCell<FileDescriptor>>,
     stdout: Rc<RefCell<FileDescriptor>>,
@@ -38,6 +28,7 @@ impl ExecutionEnvironment {
     pub fn new() -> Fallible<Self> {
         Ok(Self {
             env: Rc::new(RefCell::new(Environment::new())),
+            jobs: Arc::new(JobList::default()),
             aliases: Rc::new(RefCell::new(Aliases::new())),
             stdin: Rc::new(RefCell::new(FileDescriptor::dup(std::io::stdin())?)),
             stdout: Rc::new(RefCell::new(FileDescriptor::dup(std::io::stdout())?)),
@@ -53,10 +44,11 @@ impl ExecutionEnvironment {
         self.stdout = Rc::new(RefCell::new(fd));
     }
 
-    pub fn build_command(
+    fn build_command(
         &mut self,
         cmd: &SimpleCommand,
         expander: &ShellExpander,
+        asynchronous: bool,
     ) -> Fallible<Option<std::process::Command>> {
         let argv = cmd.expand_argv(&mut self.env.borrow_mut(), expander, &self.aliases.borrow())?;
         if argv.is_empty() {
@@ -76,9 +68,24 @@ impl ExecutionEnvironment {
             #[cfg(unix)]
             unsafe {
                 use std::os::unix::process::CommandExt;
-                child_cmd.pre_exec(|| {
+                child_cmd.pre_exec(move || {
                     let pid = libc::getpid();
-                    make_foreground_process_group(pid);
+                    if asynchronous {
+                        make_own_process_group(pid);
+                    } else {
+                        make_foreground_process_group(pid);
+                    }
+                    for s in &[
+                        libc::SIGINT,
+                        libc::SIGQUIT,
+                        libc::SIGTSTP,
+                        libc::SIGTTIN,
+                        libc::SIGTTOU,
+                        libc::SIGCHLD,
+                    ] {
+                        libc::signal(*s, libc::SIG_DFL);
+                    }
+
                     Ok(())
                 });
             }
@@ -219,10 +226,13 @@ impl ExecutionEnvironment {
         &mut self,
         expander: &ShellExpander,
         command: &ShellCommand,
-    ) -> Fallible<WaitableExitStatus> {
+        mut job: Option<Job>,
+    ) -> Fallible<Job> {
         match &command.command {
             CommandType::SimpleCommand(cmd) => {
-                if let Some(mut child_cmd) = self.build_command(&cmd, expander)? {
+                if let Some(mut child_cmd) =
+                    self.build_command(&cmd, expander, command.asynchronous)?
+                {
                     self.apply_redirections_to_cmd(&mut child_cmd, &cmd, expander)?;
                     self.apply_assignments_to_cmd(expander, &cmd.assignments, &mut child_cmd)?;
                     let child = child_cmd.spawn()?;
@@ -235,21 +245,33 @@ impl ExecutionEnvironment {
                     #[cfg(unix)]
                     {
                         let pid = child.id() as i32;
-                        make_foreground_process_group(pid);
+                        if command.asynchronous {
+                            make_own_process_group(pid);
+                        } else {
+                            make_foreground_process_group(pid);
+                        }
                     }
-                    WaitableExitStatus::with_child(command.asynchronous, child)
+
+                    Ok(Job::add_to_job_or_create(
+                        job,
+                        WaitableExitStatus::Child(child),
+                        command.asynchronous,
+                    ))
                 } else {
                     self.apply_redirections_to_env(&cmd, expander)?;
                     self.apply_assignments_to_env(expander, &cmd.assignments)?;
-                    Ok(WaitableExitStatus::Done(ExitStatus::new_ok()))
+                    Ok(Job::add_to_job_or_create(
+                        job,
+                        WaitableExitStatus::Done(ExitStatus::new_ok()),
+                        command.asynchronous,
+                    ))
                 }
             }
             CommandType::BraceGroup(list) => {
-                let mut status = WaitableExitStatus::Done(ExitStatus::new_ok());
                 for cmd in &list.commands {
-                    status = self.eval(expander, &cmd)?;
+                    job = Some(self.eval(expander, &cmd, job)?);
                 }
-                Ok(status)
+                Ok(Job::unwrap(job))
             }
             CommandType::Subshell(list) => {
                 // Posix wants the subshell to be a forked child,
@@ -261,11 +283,10 @@ impl ExecutionEnvironment {
                 // and for async subshells, may want to consider using
                 // a thread to execute it.
                 let mut sub_env = self.clone();
-                let mut status = WaitableExitStatus::Done(ExitStatus::new_ok());
                 for cmd in &list.commands {
-                    status = sub_env.eval(expander, &cmd)?;
+                    job = Some(sub_env.eval(expander, &cmd, job)?);
                 }
-                Ok(status)
+                Ok(Job::unwrap(job))
             }
             CommandType::Pipeline(pipeline) => {
                 let mut envs = vec![];
@@ -287,23 +308,26 @@ impl ExecutionEnvironment {
                 // pipeline.
                 envs.reverse();
 
-                let mut status = WaitableExitStatus::Done(ExitStatus::new_ok());
                 for cmd in &pipeline.commands {
                     let mut env = envs.pop().unwrap();
-                    status = env.eval(expander, cmd)?;
+                    job = Some(env.eval(expander, cmd, job)?);
                     // We want to drop the env so that its ref to the
                     // pipes is released, causing the pipes to cascade
                     // shut as we move along.
                     drop(env);
                 }
 
-                let status = status.wait()?;
+                let mut job = Job::unwrap(job);
+
+                // FIXME: is command.asynchronous shouldn't wait.
+                // But also: what about inverted-ness if it is async?
+                let status = job.wait()?;
                 let status = if pipeline.inverted {
                     status.invert()
                 } else {
                     status
                 };
-                Ok(WaitableExitStatus::Done(status))
+                Ok(Job::new(WaitableExitStatus::Done(status), false))
             }
             _ => bail!("eval doesn't know about {:#?}", command),
         }
