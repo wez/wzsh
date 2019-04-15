@@ -136,7 +136,7 @@ pub fn repl(mut env: ExecutionEnvironment, expander: ShellExpander) -> Fallible<
 
     loop {
         let prompt = match (input.is_empty(), last_status) {
-            (true, st) if !st.is_ok() => format!("[{}] $ ", st.code()),
+            (true, st) if !st.is_ok() => format!("[{}] $ ", st),
             (true, _) => "$ ".to_owned(),
             (false, _) => "..> ".to_owned(),
         };

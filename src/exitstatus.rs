@@ -1,9 +1,53 @@
 use crate::job::put_shell_in_foreground;
 use failure::{Fail, Fallible};
+use std::borrow::Cow;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub struct ExitStatus {
-    code: i32,
+pub enum ExitStatus {
+    Running,
+    Stopped,
+    ExitCode(i32),
+    Signalled(i32),
+}
+
+// libc doesn't provide an NSIG value, so we guess; this
+// value is likely larger than reality but it is safe because
+// we only use signal numbers produced from a process exit
+// status to index into the sys_signame and sys_siglist
+// globals, and those are therefore valid signal offsets.
+const NSIG: usize = 1024;
+extern "C" {
+    static sys_signame: [*const i8; NSIG];
+    static sys_siglist: [*const i8; NSIG];
+}
+
+fn signame(n: i32) -> Cow<'static, str> {
+    unsafe {
+        let c_str = sys_signame[n as usize];
+        std::ffi::CStr::from_ptr(c_str).to_string_lossy()
+    }
+}
+
+fn sigdesc(n: i32) -> Cow<'static, str> {
+    unsafe {
+        let c_str = sys_siglist[n as usize];
+        std::ffi::CStr::from_ptr(c_str).to_string_lossy()
+    }
+}
+
+impl std::fmt::Display for ExitStatus {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        match self {
+            ExitStatus::Running => write!(fmt, "running"),
+            ExitStatus::Stopped => write!(fmt, "stopped"),
+            ExitStatus::ExitCode(n) => write!(fmt, "exit code {}", n),
+            ExitStatus::Signalled(n) => {
+                let name = signame(*n);
+                let desc = sigdesc(*n);
+                write!(fmt, "signal {} sig{}: {}", n, name, desc)
+            }
+        }
+    }
 }
 
 pub enum WaitableExitStatus {
@@ -20,7 +64,7 @@ impl std::fmt::Debug for WaitableExitStatus {
                 .finish(),
             WaitableExitStatus::Done(status) => fmt
                 .debug_struct("WaitableExitStatus::Done")
-                .field("code", &status.code)
+                .field("code", &status)
                 .finish(),
         }
     }
@@ -39,7 +83,17 @@ fn wait_child(child: &mut std::process::Child) -> Fallible<ExitStatus> {
         }
         put_shell_in_foreground();
 
-        Ok(ExitStatus { code: status })
+        let status = if libc::WIFSTOPPED(status) {
+            ExitStatus::Stopped
+        } else if libc::WIFSIGNALED(status) {
+            ExitStatus::Signalled(libc::WTERMSIG(status))
+        } else if libc::WIFEXITED(status) {
+            ExitStatus::ExitCode(libc::WEXITSTATUS(status))
+        } else {
+            ExitStatus::Running
+        };
+
+        Ok(status)
     }
 }
 
@@ -65,36 +119,24 @@ impl WaitableExitStatus {
 
 impl ExitStatus {
     pub fn new_ok() -> Self {
-        Self { code: 0 }
+        ExitStatus::ExitCode(0)
     }
     pub fn new_fail() -> Self {
-        Self { code: 1 }
+        ExitStatus::ExitCode(1)
     }
 
     pub fn is_ok(&self) -> bool {
-        self.code == 0
-    }
-
-    pub fn code(&self) -> i32 {
-        self.code
+        match self {
+            ExitStatus::ExitCode(0) => true,
+            _ => false,
+        }
     }
 
     pub fn invert(&self) -> ExitStatus {
-        if self.is_ok() {
-            ExitStatus { code: 1 }
-        } else {
-            ExitStatus { code: 0 }
-        }
-    }
-}
-
-impl From<std::process::ExitStatus> for ExitStatus {
-    fn from(s: std::process::ExitStatus) -> ExitStatus {
-        if let Some(code) = s.code() {
-            ExitStatus { code }
-        } else {
-            // FIXME: do something smarter about reporting signals
-            ExitStatus { code: 127 }
+        match self {
+            ExitStatus::ExitCode(0) => ExitStatus::ExitCode(1),
+            ExitStatus::ExitCode(_) | ExitStatus::Signalled(_) => ExitStatus::ExitCode(0),
+            _ => ExitStatus::ExitCode(1),
         }
     }
 }
