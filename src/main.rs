@@ -15,7 +15,8 @@ use shlex::string::ShellString;
 use shlex::{Aliases, Environment, Expander, LexErrorKind, Token, TokenKind};
 mod parse;
 use parse::{
-    CommandType, CompoundList, FileRedirection, ParseErrorKind, Parser, Redirection, SimpleCommand,
+    Command as ShellCommand, CommandType, FileRedirection, ParseErrorKind, Parser, Redirection,
+    SimpleCommand,
 };
 
 struct ShellExpander {}
@@ -148,9 +149,31 @@ fn dup(fd: RawFd) -> Fallible<FileDescriptor> {
     }
 }
 
+struct Pipes {
+    read: FileDescriptor,
+    write: FileDescriptor,
+}
+
 impl FileDescriptor {
     pub fn dup<F: AsRawFd>(f: F) -> Fallible<Self> {
         dup(f.as_raw_fd())
+    }
+
+    pub fn pipe() -> Fallible<Pipes> {
+        let mut fds = [-1i32; 2];
+        let res = unsafe { libc::pipe(fds.as_mut_ptr()) };
+        if res == -1 {
+            bail!(
+                "failed to create a pipe: {:?}",
+                std::io::Error::last_os_error()
+            )
+        } else {
+            let mut read = FileDescriptor { fd: fds[0] };
+            let mut write = FileDescriptor { fd: fds[1] };
+            read.cloexec()?;
+            write.cloexec()?;
+            Ok(Pipes { read, write })
+        }
     }
 
     /// Helper function to set the close-on-exec flag for a raw descriptor
@@ -200,6 +223,14 @@ impl ExecutionEnvironment {
             stdout: Rc::new(RefCell::new(FileDescriptor::dup(std::io::stdout())?)),
             stderr: Rc::new(RefCell::new(FileDescriptor::dup(std::io::stderr())?)),
         })
+    }
+
+    pub fn set_stdin(&mut self, fd: FileDescriptor) {
+        self.stdin = Rc::new(RefCell::new(fd));
+    }
+
+    pub fn set_stdout(&mut self, fd: FileDescriptor) {
+        self.stdout = Rc::new(RefCell::new(fd));
     }
 
     pub fn build_command(
@@ -353,38 +384,85 @@ impl ExecutionEnvironment {
         Ok(())
     }
 
-    pub fn eval(&mut self, expander: &ShellExpander, list: CompoundList) -> Fallible<ExitStatus> {
-        let mut last_status = None;
-        for command in list {
-            match command.command {
-                CommandType::SimpleCommand(cmd) => {
-                    if let Some(mut child_cmd) = self.build_command(&cmd, expander)? {
-                        self.apply_redirections_to_cmd(&mut child_cmd, &cmd, expander)?;
-                        self.apply_assignments_to_cmd(expander, &cmd.assignments, &mut child_cmd)?;
-                        let mut child = child_cmd.spawn()?;
-                        last_status = Some(child.wait()?.into());
-                    } else {
-                        self.apply_redirections_to_env(&cmd, expander)?;
-                        self.apply_assignments_to_env(expander, &cmd.assignments)?;
-                    }
+    pub fn eval(
+        &mut self,
+        expander: &ShellExpander,
+        command: &ShellCommand,
+    ) -> Fallible<ExitStatus> {
+        match &command.command {
+            CommandType::SimpleCommand(cmd) => {
+                if let Some(mut child_cmd) = self.build_command(&cmd, expander)? {
+                    self.apply_redirections_to_cmd(&mut child_cmd, &cmd, expander)?;
+                    self.apply_assignments_to_cmd(expander, &cmd.assignments, &mut child_cmd)?;
+                    let mut child = child_cmd.spawn()?;
+                    Ok(child.wait()?.into())
+                } else {
+                    self.apply_redirections_to_env(&cmd, expander)?;
+                    self.apply_assignments_to_env(expander, &cmd.assignments)?;
+                    Ok(ExitStatus::new_ok())
                 }
-                CommandType::BraceGroup(list) => {
-                    last_status = Some(self.eval(expander, list)?);
-                }
-                CommandType::Subshell(list) => {
-                    // Posix wants the subshell to be a forked child,
-                    // but we don't do that in the interests of portability
-                    // to windows.  Instead we clone the current execution
-                    // environment and use that to run the list.
-                    // We'll probably need to do something smarter
-                    // here to manage signals/process groups on posix systems.
-                    last_status = Some(self.clone().eval(expander, list)?);
-                }
-                //CommandType::Pipeline(pipeline) => {}
-                _ => bail!("eval doesn't know about {:#?}", command),
             }
+            CommandType::BraceGroup(list) => {
+                let mut status = ExitStatus::new_ok();
+                for cmd in &list.commands {
+                    status = self.eval(expander, &cmd)?;
+                }
+                Ok(status)
+            }
+            CommandType::Subshell(list) => {
+                // Posix wants the subshell to be a forked child,
+                // but we don't do that in the interests of portability
+                // to windows.  Instead we clone the current execution
+                // environment and use that to run the list.
+                // We'll probably need to do something smarter
+                // here to manage signals/process groups on posix systems.
+                let mut sub_env = self.clone();
+                let mut status = ExitStatus::new_ok();
+                for cmd in &list.commands {
+                    status = sub_env.eval(expander, &cmd)?;
+                }
+                Ok(status)
+            }
+            CommandType::Pipeline(pipeline) => {
+                let mut envs = vec![];
+                for _ in 0..pipeline.commands.len() {
+                    envs.push(self.clone());
+                }
+
+                for i in 0..pipeline.commands.len() - 1 {
+                    let pipe = FileDescriptor::pipe()?;
+
+                    envs[i].set_stdout(pipe.write);
+                    envs[i + 1].set_stdin(pipe.read);
+                }
+
+                // We need to release the pipe handles as we
+                // work through the pipe sequence, and the easiest
+                // way to do that is to reverse this sequence and
+                // pop the envs off as we walk forwards through the
+                // pipeline.
+                envs.reverse();
+
+                let mut status = ExitStatus::new_ok();
+                for cmd in &pipeline.commands {
+                    let mut env = envs.pop().unwrap();
+                    status = env.eval(expander, cmd)?;
+                    // We want to drop the env so that its ref to the
+                    // pipes is released, causing the pipes to cascade
+                    // shut as we move along.
+                    // TODO: we should make each of the pipe commands
+                    // (except the last) async and not wait for them.
+                    drop(env);
+                }
+
+                if pipeline.inverted {
+                    Ok(status.invert())
+                } else {
+                    Ok(status)
+                }
+            }
+            _ => bail!("eval doesn't know about {:#?}", command),
         }
-        Ok(last_status.unwrap_or(ExitStatus::new_ok()))
     }
 }
 
@@ -511,7 +589,7 @@ fn main() -> Result<(), Error> {
                         list
                     }
                 };
-                last_status = match env.eval(&expander, list) {
+                last_status = match env.eval(&expander, &list) {
                     Err(e) => {
                         print_error(&e, &input);
                         ExitStatus::new_fail()

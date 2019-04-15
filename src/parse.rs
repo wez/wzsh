@@ -43,14 +43,14 @@ impl<R: std::io::Read> Parser<R> {
         }
     }
 
-    pub fn parse(&mut self) -> Fallible<CompoundList> {
+    pub fn parse(&mut self) -> Fallible<Command> {
         let mut commands = vec![];
 
         let mut cmd = match self.and_or()? {
             Some(cmd) => cmd,
             None => {
                 if self.next_token_is(TokenKind::Eof)? {
-                    return Ok(CompoundList { commands });
+                    return Ok(CommandType::BraceGroup(CompoundList { commands }).into());
                 } else {
                     return Err(self.unexpected_next_token(ParseErrorContext::List));
                 }
@@ -65,7 +65,7 @@ impl<R: std::io::Read> Parser<R> {
             commands.push(cmd);
         }
 
-        Ok(CompoundList { commands })
+        Ok(CommandType::BraceGroup(CompoundList { commands }).into())
     }
 
     fn separator_is_async(&mut self) -> Fallible<bool> {
@@ -551,13 +551,13 @@ pub enum CommandType {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pipeline {
     /// true if the pipeline starts with a bang
-    inverted: bool,
-    commands: Vec<Command>,
+    pub inverted: bool,
+    pub commands: Vec<Command>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompoundList {
-    commands: Vec<Command>,
+    pub commands: Vec<Command>,
 }
 
 impl IntoIterator for CompoundList {
@@ -676,7 +676,10 @@ mod test {
 
     fn parse(text: &str) -> Fallible<CompoundList> {
         let mut parser = Parser::new("test", text.as_bytes());
-        parser.parse()
+        match parser.parse()?.command {
+            CommandType::BraceGroup(list) => Ok(list),
+            _ => bail!("should only return a brace group"),
+        }
     }
 
     #[test]
