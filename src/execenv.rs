@@ -36,6 +36,10 @@ impl ExecutionEnvironment {
         })
     }
 
+    pub fn job_list(&self) -> Arc<JobList> {
+        Arc::clone(&self.jobs)
+    }
+
     pub fn set_stdin(&mut self, fd: FileDescriptor) {
         self.stdin = Rc::new(RefCell::new(fd));
     }
@@ -252,26 +256,26 @@ impl ExecutionEnvironment {
                         }
                     }
 
-                    Ok(Job::add_to_job_or_create(
+                    Ok(self.jobs.add(Job::add_to_job_or_create(
                         job,
-                        WaitableExitStatus::Child(child),
+                        WaitableExitStatus::with_child(child),
                         command.asynchronous,
-                    ))
+                    )))
                 } else {
                     self.apply_redirections_to_env(&cmd, expander)?;
                     self.apply_assignments_to_env(expander, &cmd.assignments)?;
-                    Ok(Job::add_to_job_or_create(
+                    Ok(self.jobs.add(Job::add_to_job_or_create(
                         job,
                         WaitableExitStatus::Done(ExitStatus::new_ok()),
                         command.asynchronous,
-                    ))
+                    )))
                 }
             }
             CommandType::BraceGroup(list) => {
                 for cmd in &list.commands {
                     job = Some(self.eval(expander, &cmd, job)?);
                 }
-                Ok(Job::unwrap(job))
+                Ok(self.jobs.add(Job::unwrap(job)))
             }
             CommandType::Subshell(list) => {
                 // Posix wants the subshell to be a forked child,
@@ -286,7 +290,7 @@ impl ExecutionEnvironment {
                 for cmd in &list.commands {
                     job = Some(sub_env.eval(expander, &cmd, job)?);
                 }
-                Ok(Job::unwrap(job))
+                Ok(self.jobs.add(Job::unwrap(job)))
             }
             CommandType::Pipeline(pipeline) => {
                 let mut envs = vec![];
@@ -317,7 +321,7 @@ impl ExecutionEnvironment {
                     drop(env);
                 }
 
-                let mut job = Job::unwrap(job);
+                let mut job = self.jobs.add(Job::unwrap(job));
 
                 // FIXME: is command.asynchronous shouldn't wait.
                 // But also: what about inverted-ness if it is async?

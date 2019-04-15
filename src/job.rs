@@ -1,5 +1,6 @@
 use crate::exitstatus::{ExitStatus, WaitableExitStatus};
 use failure::{Fail, Fallible};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 pub fn put_shell_in_foreground() {
@@ -33,7 +34,6 @@ struct Inner {
     processes: Vec<WaitableExitStatus>,
     process_group_id: libc::pid_t,
     background: bool,
-    stopped: bool,
 }
 
 impl Inner {
@@ -49,21 +49,21 @@ pub struct Job {
 
 #[derive(Default, Debug)]
 pub struct JobList {
-    pub jobs: Mutex<Vec<Arc<Job>>>,
+    pub jobs: Mutex<HashMap<i32, Job>>,
 }
 
 impl Job {
     pub fn new(proc: WaitableExitStatus, background: bool) -> Self {
         let process_group_id = match proc {
             WaitableExitStatus::Child(ref proc) => proc.id() as _,
-            _ => 0,
+            WaitableExitStatus::UnixChild(ref proc) => proc.pid(),
+            WaitableExitStatus::Done(_) => 0,
         };
         Self {
             inner: Arc::new(Mutex::new(Inner {
                 processes: vec![proc],
                 process_group_id,
                 background,
-                stopped: false,
             })),
         }
     }
@@ -71,6 +71,11 @@ impl Job {
     pub fn is_background(&self) -> bool {
         let inner = self.inner.lock().unwrap();
         inner.background
+    }
+
+    pub fn process_group_id(&self) -> i32 {
+        let inner = self.inner.lock().unwrap();
+        inner.process_group_id
     }
 
     pub fn put_in_background(&mut self) -> Fallible<()> {
@@ -119,5 +124,42 @@ impl Job {
     pub fn wait(&mut self) -> Fallible<ExitStatus> {
         let mut inner = self.inner.lock().unwrap();
         inner.processes.last_mut().unwrap().wait()
+    }
+    pub fn try_wait(&mut self) -> Fallible<Option<ExitStatus>> {
+        let mut inner = self.inner.lock().unwrap();
+        inner.processes.last_mut().unwrap().try_wait()
+    }
+}
+
+impl JobList {
+    pub fn add(&self, job: Job) -> Job {
+        let id = job.process_group_id();
+        let mut jobs = self.jobs.lock().unwrap();
+        jobs.insert(id, job.clone());
+        eprintln!("tracking {} jobs", jobs.len());
+        job
+    }
+
+    pub fn check_and_print_status(&self) {
+        let mut jobs = self.jobs.lock().unwrap();
+        eprintln!("doing status check");
+        let mut terminated = vec![];
+        for (id, job) in jobs.iter_mut() {
+            eprintln!("consider id {}", *id);
+            match job.try_wait() {
+                Ok(Some(status)) => {
+                    eprintln!("{} {:?}", status, job);
+                    if status.terminated() {
+                        terminated.push(*id);
+                    }
+                }
+                Ok(_) => {}
+                Err(e) => eprintln!("wzsh: wait failed for job {} {}", id, e),
+            }
+        }
+
+        for id in terminated {
+            jobs.remove(&id);
+        }
     }
 }

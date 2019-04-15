@@ -141,6 +141,8 @@ pub fn repl(mut env: ExecutionEnvironment, expander: ShellExpander) -> Fallible<
             (false, _) => "..> ".to_owned(),
         };
 
+        env.job_list().check_and_print_status();
+
         let readline = rl.readline(&prompt);
         match readline {
             Ok(line) => {
