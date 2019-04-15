@@ -183,8 +183,8 @@ impl FileDescriptor {
 
 #[derive(Clone)]
 struct ExecutionEnvironment {
-    env: Environment,
-    aliases: Aliases,
+    env: Rc<RefCell<Environment>>,
+    aliases: Rc<RefCell<Aliases>>,
 
     stdin: Rc<RefCell<FileDescriptor>>,
     stdout: Rc<RefCell<FileDescriptor>>,
@@ -194,8 +194,8 @@ struct ExecutionEnvironment {
 impl ExecutionEnvironment {
     pub fn new() -> Fallible<Self> {
         Ok(Self {
-            env: Environment::new(),
-            aliases: Aliases::new(),
+            env: Rc::new(RefCell::new(Environment::new())),
+            aliases: Rc::new(RefCell::new(Aliases::new())),
             stdin: Rc::new(RefCell::new(FileDescriptor::dup(std::io::stdin())?)),
             stdout: Rc::new(RefCell::new(FileDescriptor::dup(std::io::stdout())?)),
             stderr: Rc::new(RefCell::new(FileDescriptor::dup(std::io::stderr())?)),
@@ -207,7 +207,7 @@ impl ExecutionEnvironment {
         cmd: &SimpleCommand,
         expander: &ShellExpander,
     ) -> Fallible<Option<std::process::Command>> {
-        let argv = cmd.expand_argv(&mut self.env, expander, &self.aliases)?;
+        let argv = cmd.expand_argv(&mut self.env.borrow_mut(), expander, &self.aliases.borrow())?;
         if argv.is_empty() {
             Ok(None)
         } else {
@@ -216,7 +216,7 @@ impl ExecutionEnvironment {
                 child_cmd.arg(arg);
             }
             child_cmd.env_clear();
-            child_cmd.envs(self.env.iter());
+            child_cmd.envs(self.env.borrow().iter());
 
             child_cmd.stdin(self.stdin.borrow_mut().as_stdio()?);
             child_cmd.stdout(self.stdout.borrow_mut().as_stdio()?);
@@ -237,7 +237,7 @@ impl ExecutionEnvironment {
         let file_name = match &redir.file_name.kind {
             TokenKind::Word(word) => {
                 let word = ShellString::from(word.as_str());
-                let file = expander.expand_word(&word, &mut self.env)?;
+                let file = expander.expand_word(&word, &mut self.env.borrow_mut())?;
                 ensure!(
                     file.len() == 1,
                     "{:?} expanded to {:?}, expected just a single item",
@@ -325,7 +325,7 @@ impl ExecutionEnvironment {
     ) -> Fallible<()> {
         for t in assignments {
             if let Some((key, value)) = t.kind.parse_assignment_word() {
-                let fields = expander.expand_word(&value.into(), &mut self.env)?;
+                let fields = expander.expand_word(&value.into(), &mut self.env.borrow_mut())?;
                 ensure!(
                     fields.len() == 1,
                     "variable expansion produced {:?}, expected a single field"
@@ -342,12 +342,12 @@ impl ExecutionEnvironment {
     ) -> Fallible<()> {
         for t in assignments {
             if let Some((key, value)) = t.kind.parse_assignment_word() {
-                let fields = expander.expand_word(&value.into(), &mut self.env)?;
+                let fields = expander.expand_word(&value.into(), &mut self.env.borrow_mut())?;
                 ensure!(
                     fields.len() == 1,
                     "variable expansion produced {:?}, expected a single field"
                 );
-                self.env.set(key, &fields[0]);
+                self.env.borrow_mut().set(key, &fields[0]);
             }
         }
         Ok(())
