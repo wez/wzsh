@@ -11,6 +11,19 @@ use std::cell::RefCell;
 use std::process::Command;
 use std::rc::Rc;
 
+#[cfg(unix)]
+fn make_foreground_process_group(pid: i32) {
+    unsafe {
+        // Put the process into its own process group
+        libc::setpgid(pid, pid);
+
+        // Grant that process group foreground control
+        // over the terminal
+        let pty_fd = 0;
+        libc::tcsetpgrp(pty_fd, pid);
+    }
+}
+
 #[derive(Clone)]
 pub struct ExecutionEnvironment {
     env: Rc<RefCell<Environment>>,
@@ -59,6 +72,17 @@ impl ExecutionEnvironment {
             child_cmd.stdin(self.stdin.borrow_mut().as_stdio()?);
             child_cmd.stdout(self.stdout.borrow_mut().as_stdio()?);
             child_cmd.stderr(self.stderr.borrow_mut().as_stdio()?);
+
+            #[cfg(unix)]
+            unsafe {
+                use std::os::unix::process::CommandExt;
+                child_cmd.pre_exec(|| {
+                    let pid = libc::getpid();
+                    make_foreground_process_group(pid);
+                    Ok(())
+                });
+            }
+
             Ok(Some(child_cmd))
         }
     }
@@ -202,6 +226,17 @@ impl ExecutionEnvironment {
                     self.apply_redirections_to_cmd(&mut child_cmd, &cmd, expander)?;
                     self.apply_assignments_to_cmd(expander, &cmd.assignments, &mut child_cmd)?;
                     let child = child_cmd.spawn()?;
+
+                    // To avoid a race condition with starting up the child, we
+                    // need to also munge the process group assignment here in
+                    // the parent.  Note that the loser of the race will experience
+                    // errors in attempting this block, so we willfully ignore
+                    // the return values here: we cannot do anything about them.
+                    #[cfg(unix)]
+                    {
+                        let pid = child.id() as i32;
+                        make_foreground_process_group(pid);
+                    }
                     WaitableExitStatus::with_child(command.asynchronous, child)
                 } else {
                     self.apply_redirections_to_env(&cmd, expander)?;

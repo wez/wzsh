@@ -1,4 +1,4 @@
-use failure::{Error, Fallible};
+use failure::{Error, Fail, Fallible};
 use rustyline::completion::{Completer, FilenameCompleter, Pair};
 use rustyline::error::ReadlineError;
 use rustyline::highlight::Highlighter;
@@ -77,7 +77,51 @@ fn is_recoverable_parse_error(e: &Error) -> bool {
     }
 }
 
+fn init_job_control() -> Fallible<()> {
+    let pty_fd = 0;
+    unsafe {
+        // Loop until we are in the foreground.
+        loop {
+            let pgrp = libc::tcgetpgrp(pty_fd);
+            let shell_pgid = libc::getpgrp();
+            if shell_pgid == pgrp {
+                break;
+            }
+            libc::kill(-shell_pgid, libc::SIGTTIN);
+        }
+
+        // Ignore interactive and job control signals
+        for s in &[
+            libc::SIGINT,
+            libc::SIGQUIT,
+            libc::SIGTSTP,
+            libc::SIGTTIN,
+            libc::SIGTTOU,
+            // libc::SIGCHLD : we need to leave SIGCHLD alone,
+            // otherwise waitpid returns ECHILD
+        ] {
+            libc::signal(*s, libc::SIG_IGN);
+        }
+
+        // Put ourselves in our own process group
+        let shell_pgid = libc::getpid();
+        if libc::setpgid(shell_pgid, shell_pgid) != 0 {
+            return Err(std::io::Error::last_os_error()
+                .context("unable to put shell into its own process group")
+                .into());
+        }
+
+        // Grab control of the terminal
+        libc::tcsetpgrp(pty_fd, shell_pgid);
+
+        // TODO: tcgetattr to save terminal attributes
+    }
+    Ok(())
+}
+
 pub fn repl(mut env: ExecutionEnvironment, expander: ShellExpander) -> Fallible<()> {
+    init_job_control()?;
+
     let config = Config::builder().history_ignore_space(true).build();
 
     let mut rl = Editor::with_config(config);

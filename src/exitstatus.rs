@@ -1,4 +1,4 @@
-use failure::Fallible;
+use failure::{Fail, Fallible};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct ExitStatus {
@@ -21,7 +21,17 @@ impl WaitableExitStatus {
             //Ok(WaitableExitStatus::Child(child))
             Ok(WaitableExitStatus::Done(ExitStatus::new_ok()))
         } else {
-            Ok(WaitableExitStatus::Done(child.wait()?.into()))
+            let pid = child.id();
+            let status = child
+                .wait()
+                .map_err(|e| e.context(format!("waiting for child pid {}", pid)));
+            #[cfg(unix)]
+            unsafe {
+                // Put the shell back in the foreground
+                let pgrp = libc::getpgid(libc::getpid());
+                libc::tcsetpgrp(0, pgrp);
+            }
+            Ok(WaitableExitStatus::Done(status?.into()))
         }
     }
 
