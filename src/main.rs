@@ -19,6 +19,9 @@ use parse::{
     SimpleCommand,
 };
 
+mod exitstatus;
+use exitstatus::{ExitStatus, WaitableExitStatus};
+
 struct ShellExpander {}
 impl Expander for ShellExpander {
     fn lookup_homedir(
@@ -78,70 +81,6 @@ impl Highlighter for LineEditorHelper {
 }
 
 impl Helper for LineEditorHelper {}
-
-enum WaitableExitStatus {
-    Child(std::process::Child),
-    Done(ExitStatus),
-}
-
-impl WaitableExitStatus {
-    fn with_child(asynchronous: bool, mut child: std::process::Child) -> Fallible<Self> {
-        if asynchronous {
-            // TODO: should really distinguish between async procs and
-            // async jobs as part of job control.
-            // For now, if we're async we just ignore the child status
-            // and pretend that it is good.
-            //Ok(WaitableExitStatus::Child(child))
-            Ok(WaitableExitStatus::Done(ExitStatus::new_ok()))
-        } else {
-            Ok(WaitableExitStatus::Done(child.wait()?.into()))
-        }
-    }
-
-    fn wait(self) -> Fallible<ExitStatus> {
-        match self {
-            WaitableExitStatus::Child(mut child) => Ok(child.wait()?.into()),
-            WaitableExitStatus::Done(status) => Ok(status),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-struct ExitStatus {
-    code: i32,
-}
-
-impl ExitStatus {
-    pub fn new_ok() -> Self {
-        Self { code: 0 }
-    }
-    pub fn new_fail() -> Self {
-        Self { code: 1 }
-    }
-
-    pub fn is_ok(&self) -> bool {
-        self.code == 0
-    }
-
-    pub fn invert(&self) -> ExitStatus {
-        if self.is_ok() {
-            ExitStatus { code: 1 }
-        } else {
-            ExitStatus { code: 0 }
-        }
-    }
-}
-
-impl From<std::process::ExitStatus> for ExitStatus {
-    fn from(s: std::process::ExitStatus) -> ExitStatus {
-        if let Some(code) = s.code() {
-            ExitStatus { code }
-        } else {
-            // FIXME: do something smarter about reporting signals
-            ExitStatus { code: 127 }
-        }
-    }
-}
 
 struct FileDescriptor {
     fd: RawFd,
@@ -589,7 +528,7 @@ fn main() -> Result<(), Error> {
 
     loop {
         let prompt = match (input.is_empty(), last_status) {
-            (true, st) if !st.is_ok() => format!("[{}] $ ", st.code),
+            (true, st) if !st.is_ok() => format!("[{}] $ ", st.code()),
             (true, _) => "$ ".to_owned(),
             (false, _) => "..> ".to_owned(),
         };
