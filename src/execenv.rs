@@ -1,4 +1,4 @@
-use crate::builtins::{lookup_builtin, BuiltinCommand};
+use crate::builtins::{lookup_builtin, BuiltinFunc};
 use crate::exitstatus::{ExitStatus, WaitableExitStatus};
 use crate::filedescriptor::FileDescriptor;
 use crate::job::{make_foreground_process_group, make_own_process_group, Job, JobList};
@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 pub enum RunnableCommand {
     ChildProcess(std::process::Command),
-    Builtin(BuiltinCommand),
+    Builtin(BuiltinFunc, Vec<ShellString>),
 }
 
 #[derive(Clone)]
@@ -74,9 +74,7 @@ impl ExecutionEnvironment {
         if argv.is_empty() {
             Ok(None)
         } else if let Some(builtin) = lookup_builtin(&argv[0]) {
-            Ok(Some(RunnableCommand::Builtin(BuiltinCommand::new(
-                builtin, argv,
-            ))))
+            Ok(Some(RunnableCommand::Builtin(builtin, argv)))
         } else {
             let mut child_cmd = Command::new(&argv[0]);
             for arg in argv.iter().skip(1) {
@@ -279,11 +277,11 @@ impl ExecutionEnvironment {
                         job.add(WaitableExitStatus::with_child(child))?;
                         Ok(self.jobs.add(job))
                     }
-                    Some(RunnableCommand::Builtin(builtin)) => {
+                    Some(RunnableCommand::Builtin(builtin, argv)) => {
                         let mut env = self.clone();
                         env.apply_redirections_to_env(&cmd, expander)?;
                         env.apply_assignments_to_env(expander, &cmd.assignments)?;
-                        job.add(WaitableExitStatus::Done(builtin.run(&env)?))?;
+                        job.add(WaitableExitStatus::Done(builtin(argv, &env)?))?;
                         Ok(self.jobs.add(job))
                     }
                     None => {
