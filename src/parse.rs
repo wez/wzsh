@@ -44,13 +44,11 @@ impl<R: std::io::Read> Parser<R> {
     }
 
     pub fn parse(&mut self) -> Fallible<Command> {
-        let mut commands = vec![];
-
         let mut cmd = match self.and_or()? {
             Some(cmd) => cmd,
             None => {
                 if self.next_token_is(TokenKind::Eof)? {
-                    return Ok(CommandType::BraceGroup(CompoundList { commands }).into());
+                    return Ok(CommandType::SimpleCommand(Default::default()).into());
                 } else {
                     return Err(self.unexpected_next_token(ParseErrorContext::List));
                 }
@@ -58,18 +56,22 @@ impl<R: std::io::Read> Parser<R> {
         };
 
         cmd.asynchronous = self.separator_is_async()?;
-        commands.push(cmd);
+        let mut commands = vec![cmd];
 
         while let Some(mut cmd) = self.and_or()? {
             cmd.asynchronous = self.separator_is_async()?;
             commands.push(cmd);
         }
 
-        let is_async = commands.last().unwrap().asynchronous;
+        if commands.len() == 1 {
+            Ok(commands.pop().unwrap())
+        } else {
+            let is_async = commands.last().unwrap().asynchronous;
 
-        let mut command: Command = CommandType::BraceGroup(CompoundList { commands }).into();
-        command.asynchronous = is_async;
-        Ok(command)
+            let mut command: Command = CommandType::BraceGroup(CompoundList { commands }).into();
+            command.asynchronous = is_async;
+            Ok(command)
+        }
     }
 
     fn separator_is_async(&mut self) -> Fallible<bool> {
@@ -696,7 +698,7 @@ pub struct FdDuplication {
     pub dest_fd_number: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct SimpleCommand {
     /// Any assignment words to override the environment
     pub assignments: Vec<Token>,
@@ -741,12 +743,9 @@ mod test {
     use pretty_assertions::assert_eq;
     use shlex::TokenPosition;
 
-    fn parse(text: &str) -> Fallible<CompoundList> {
+    fn parse(text: &str) -> Fallible<Command> {
         let mut parser = Parser::new("test", text.as_bytes());
-        match parser.parse()?.command {
-            CommandType::BraceGroup(list) => Ok(list),
-            _ => bail!("should only return a brace group"),
-        }
+        parser.parse()
     }
 
     #[test]
@@ -754,29 +753,27 @@ mod test {
         let list = parse("ls -l foo").unwrap();
         assert_eq!(
             list,
-            CompoundList {
-                commands: vec![Command::from(CommandType::SimpleCommand(SimpleCommand {
-                    assignments: vec![],
-                    redirections: vec![],
-                    words: vec![
-                        Token::new(
-                            TokenKind::new_word("ls"),
-                            TokenPosition { line: 0, col: 0 },
-                            TokenPosition { line: 0, col: 1 },
-                        ),
-                        Token::new(
-                            TokenKind::new_word("-l"),
-                            TokenPosition { line: 0, col: 3 },
-                            TokenPosition { line: 0, col: 4 },
-                        ),
-                        Token::new(
-                            TokenKind::new_word("foo"),
-                            TokenPosition { line: 0, col: 6 },
-                            TokenPosition { line: 0, col: 8 },
-                        )
-                    ]
-                }),)]
-            }
+            Command::from(CommandType::SimpleCommand(SimpleCommand {
+                assignments: vec![],
+                redirections: vec![],
+                words: vec![
+                    Token::new(
+                        TokenKind::new_word("ls"),
+                        TokenPosition { line: 0, col: 0 },
+                        TokenPosition { line: 0, col: 1 },
+                    ),
+                    Token::new(
+                        TokenKind::new_word("-l"),
+                        TokenPosition { line: 0, col: 3 },
+                        TokenPosition { line: 0, col: 4 },
+                    ),
+                    Token::new(
+                        TokenKind::new_word("foo"),
+                        TokenPosition { line: 0, col: 6 },
+                        TokenPosition { line: 0, col: 8 },
+                    )
+                ]
+            }))
         );
     }
 
@@ -785,7 +782,7 @@ mod test {
         let list = parse("false\ntrue").unwrap();
         assert_eq!(
             list,
-            CompoundList {
+            Command::from(CommandType::BraceGroup(CompoundList {
                 commands: vec![
                     Command::from(CommandType::SimpleCommand(SimpleCommand {
                         assignments: vec![],
@@ -806,13 +803,13 @@ mod test {
                         ),]
                     }))
                 ]
-            }
+            }))
         );
     }
 
     #[test]
     fn test_parse_with_alias() {
-        let list = parse("ls foo").unwrap();
+        let command = parse("ls foo").unwrap();
         let mut aliases = Aliases::new();
         aliases.alias("ls", "ls -l");
         let mut env = Environment::new();
@@ -829,7 +826,7 @@ mod test {
         if let Command {
             command: CommandType::SimpleCommand(cmd),
             ..
-        } = &list.commands[0]
+        } = command
         {
             let argv = cmd
                 .expand_argv(&mut env, &MockExpander {}, &aliases)
@@ -852,31 +849,29 @@ mod test {
         let list = parse("echo >foo").unwrap();
         assert_eq!(
             list,
-            CompoundList {
-                commands: vec![Command {
-                    asynchronous: false,
-                    command: CommandType::SimpleCommand(SimpleCommand {
-                        assignments: vec![],
-                        redirections: vec![Redirection::File(FileRedirection {
-                            fd_number: 1,
-                            file_name: Token {
-                                kind: TokenKind::new_word("foo"),
-                                start: TokenPosition { line: 0, col: 6 },
-                                end: TokenPosition { line: 0, col: 8 }
-                            },
-                            input: false,
-                            output: true,
-                            clobber: false,
-                            append: false
-                        })],
-                        words: vec![Token {
-                            kind: TokenKind::new_word("echo"),
-                            start: TokenPosition { line: 0, col: 0 },
-                            end: TokenPosition { line: 0, col: 3 }
-                        }]
-                    }),
-                    redirects: None
-                }]
+            Command {
+                asynchronous: false,
+                command: CommandType::SimpleCommand(SimpleCommand {
+                    assignments: vec![],
+                    redirections: vec![Redirection::File(FileRedirection {
+                        fd_number: 1,
+                        file_name: Token {
+                            kind: TokenKind::new_word("foo"),
+                            start: TokenPosition { line: 0, col: 6 },
+                            end: TokenPosition { line: 0, col: 8 }
+                        },
+                        input: false,
+                        output: true,
+                        clobber: false,
+                        append: false
+                    })],
+                    words: vec![Token {
+                        kind: TokenKind::new_word("echo"),
+                        start: TokenPosition { line: 0, col: 0 },
+                        end: TokenPosition { line: 0, col: 3 }
+                    }]
+                }),
+                redirects: None
             }
         );
     }
@@ -886,31 +881,29 @@ mod test {
         let list = parse("echo >>foo").unwrap();
         assert_eq!(
             list,
-            CompoundList {
-                commands: vec![Command {
-                    asynchronous: false,
-                    command: CommandType::SimpleCommand(SimpleCommand {
-                        assignments: vec![],
-                        redirections: vec![Redirection::File(FileRedirection {
-                            fd_number: 1,
-                            file_name: Token {
-                                kind: TokenKind::new_word("foo"),
-                                start: TokenPosition { line: 0, col: 7 },
-                                end: TokenPosition { line: 0, col: 9 }
-                            },
-                            input: false,
-                            output: true,
-                            clobber: false,
-                            append: true
-                        })],
-                        words: vec![Token {
-                            kind: TokenKind::new_word("echo"),
-                            start: TokenPosition { line: 0, col: 0 },
-                            end: TokenPosition { line: 0, col: 3 }
-                        }]
-                    }),
-                    redirects: None
-                }]
+            Command {
+                asynchronous: false,
+                command: CommandType::SimpleCommand(SimpleCommand {
+                    assignments: vec![],
+                    redirections: vec![Redirection::File(FileRedirection {
+                        fd_number: 1,
+                        file_name: Token {
+                            kind: TokenKind::new_word("foo"),
+                            start: TokenPosition { line: 0, col: 7 },
+                            end: TokenPosition { line: 0, col: 9 }
+                        },
+                        input: false,
+                        output: true,
+                        clobber: false,
+                        append: true
+                    })],
+                    words: vec![Token {
+                        kind: TokenKind::new_word("echo"),
+                        start: TokenPosition { line: 0, col: 0 },
+                        end: TokenPosition { line: 0, col: 3 }
+                    }]
+                }),
+                redirects: None
             }
         );
     }
@@ -920,31 +913,29 @@ mod test {
         let list = parse("echo >|foo").unwrap();
         assert_eq!(
             list,
-            CompoundList {
-                commands: vec![Command {
-                    asynchronous: false,
-                    command: CommandType::SimpleCommand(SimpleCommand {
-                        assignments: vec![],
-                        redirections: vec![Redirection::File(FileRedirection {
-                            fd_number: 1,
-                            file_name: Token {
-                                kind: TokenKind::new_word("foo"),
-                                start: TokenPosition { line: 0, col: 7 },
-                                end: TokenPosition { line: 0, col: 9 }
-                            },
-                            input: false,
-                            output: true,
-                            clobber: true,
-                            append: false
-                        })],
-                        words: vec![Token {
-                            kind: TokenKind::new_word("echo"),
-                            start: TokenPosition { line: 0, col: 0 },
-                            end: TokenPosition { line: 0, col: 3 }
-                        }]
-                    }),
-                    redirects: None
-                }]
+            Command {
+                asynchronous: false,
+                command: CommandType::SimpleCommand(SimpleCommand {
+                    assignments: vec![],
+                    redirections: vec![Redirection::File(FileRedirection {
+                        fd_number: 1,
+                        file_name: Token {
+                            kind: TokenKind::new_word("foo"),
+                            start: TokenPosition { line: 0, col: 7 },
+                            end: TokenPosition { line: 0, col: 9 }
+                        },
+                        input: false,
+                        output: true,
+                        clobber: true,
+                        append: false
+                    })],
+                    words: vec![Token {
+                        kind: TokenKind::new_word("echo"),
+                        start: TokenPosition { line: 0, col: 0 },
+                        end: TokenPosition { line: 0, col: 3 }
+                    }]
+                }),
+                redirects: None
             }
         );
     }
@@ -954,31 +945,29 @@ mod test {
         let list = parse("echo <foo").unwrap();
         assert_eq!(
             list,
-            CompoundList {
-                commands: vec![Command {
-                    asynchronous: false,
-                    command: CommandType::SimpleCommand(SimpleCommand {
-                        assignments: vec![],
-                        redirections: vec![Redirection::File(FileRedirection {
-                            fd_number: 0,
-                            file_name: Token {
-                                kind: TokenKind::new_word("foo"),
-                                start: TokenPosition { line: 0, col: 6 },
-                                end: TokenPosition { line: 0, col: 8 }
-                            },
-                            input: true,
-                            output: false,
-                            clobber: false,
-                            append: false
-                        })],
-                        words: vec![Token {
-                            kind: TokenKind::new_word("echo"),
-                            start: TokenPosition { line: 0, col: 0 },
-                            end: TokenPosition { line: 0, col: 3 }
-                        }]
-                    }),
-                    redirects: None
-                }]
+            Command {
+                asynchronous: false,
+                command: CommandType::SimpleCommand(SimpleCommand {
+                    assignments: vec![],
+                    redirections: vec![Redirection::File(FileRedirection {
+                        fd_number: 0,
+                        file_name: Token {
+                            kind: TokenKind::new_word("foo"),
+                            start: TokenPosition { line: 0, col: 6 },
+                            end: TokenPosition { line: 0, col: 8 }
+                        },
+                        input: true,
+                        output: false,
+                        clobber: false,
+                        append: false
+                    })],
+                    words: vec![Token {
+                        kind: TokenKind::new_word("echo"),
+                        start: TokenPosition { line: 0, col: 0 },
+                        end: TokenPosition { line: 0, col: 3 }
+                    }]
+                }),
+                redirects: None
             }
         );
     }
@@ -988,23 +977,21 @@ mod test {
         let list = parse("echo 2>&1").unwrap();
         assert_eq!(
             list,
-            CompoundList {
-                commands: vec![Command {
-                    asynchronous: false,
-                    command: CommandType::SimpleCommand(SimpleCommand {
-                        assignments: vec![],
-                        redirections: vec![Redirection::Fd(FdDuplication {
-                            src_fd_number: 1,
-                            dest_fd_number: 2
-                        })],
-                        words: vec![Token {
-                            kind: TokenKind::new_word("echo"),
-                            start: TokenPosition { line: 0, col: 0 },
-                            end: TokenPosition { line: 0, col: 3 }
-                        }]
-                    }),
-                    redirects: None
-                }]
+            Command {
+                asynchronous: false,
+                command: CommandType::SimpleCommand(SimpleCommand {
+                    assignments: vec![],
+                    redirections: vec![Redirection::Fd(FdDuplication {
+                        src_fd_number: 1,
+                        dest_fd_number: 2
+                    })],
+                    words: vec![Token {
+                        kind: TokenKind::new_word("echo"),
+                        start: TokenPosition { line: 0, col: 0 },
+                        end: TokenPosition { line: 0, col: 3 }
+                    }]
+                }),
+                redirects: None
             }
         );
     }
@@ -1014,23 +1001,21 @@ mod test {
         let list = parse("echo 0<&1").unwrap();
         assert_eq!(
             list,
-            CompoundList {
-                commands: vec![Command {
-                    asynchronous: false,
-                    command: CommandType::SimpleCommand(SimpleCommand {
-                        assignments: vec![],
-                        redirections: vec![Redirection::Fd(FdDuplication {
-                            src_fd_number: 1,
-                            dest_fd_number: 0
-                        })],
-                        words: vec![Token {
-                            kind: TokenKind::new_word("echo"),
-                            start: TokenPosition { line: 0, col: 0 },
-                            end: TokenPosition { line: 0, col: 3 }
-                        }]
-                    }),
-                    redirects: None
-                }]
+            Command {
+                asynchronous: false,
+                command: CommandType::SimpleCommand(SimpleCommand {
+                    assignments: vec![],
+                    redirections: vec![Redirection::Fd(FdDuplication {
+                        src_fd_number: 1,
+                        dest_fd_number: 0
+                    })],
+                    words: vec![Token {
+                        kind: TokenKind::new_word("echo"),
+                        start: TokenPosition { line: 0, col: 0 },
+                        end: TokenPosition { line: 0, col: 3 }
+                    }]
+                }),
+                redirects: None
             }
         );
     }
@@ -1040,31 +1025,29 @@ mod test {
         let list = parse("echo <>file").unwrap();
         assert_eq!(
             list,
-            CompoundList {
-                commands: vec![Command {
-                    asynchronous: false,
-                    command: CommandType::SimpleCommand(SimpleCommand {
-                        assignments: vec![],
-                        redirections: vec![Redirection::File(FileRedirection {
-                            fd_number: 0,
-                            file_name: Token {
-                                kind: TokenKind::new_word("file"),
-                                start: TokenPosition { line: 0, col: 7 },
-                                end: TokenPosition { line: 0, col: 10 }
-                            },
-                            input: true,
-                            output: true,
-                            clobber: false,
-                            append: false
-                        })],
-                        words: vec![Token {
-                            kind: TokenKind::new_word("echo"),
-                            start: TokenPosition { line: 0, col: 0 },
-                            end: TokenPosition { line: 0, col: 3 }
-                        }]
-                    }),
-                    redirects: None
-                }]
+            Command {
+                asynchronous: false,
+                command: CommandType::SimpleCommand(SimpleCommand {
+                    assignments: vec![],
+                    redirections: vec![Redirection::File(FileRedirection {
+                        fd_number: 0,
+                        file_name: Token {
+                            kind: TokenKind::new_word("file"),
+                            start: TokenPosition { line: 0, col: 7 },
+                            end: TokenPosition { line: 0, col: 10 }
+                        },
+                        input: true,
+                        output: true,
+                        clobber: false,
+                        append: false
+                    })],
+                    words: vec![Token {
+                        kind: TokenKind::new_word("echo"),
+                        start: TokenPosition { line: 0, col: 0 },
+                        end: TokenPosition { line: 0, col: 3 }
+                    }]
+                }),
+                redirects: None
             }
         );
     }
@@ -1110,26 +1093,24 @@ mod test {
         let list = parse("(echo)").unwrap();
         assert_eq!(
             list,
-            CompoundList {
-                commands: vec![Command {
-                    asynchronous: false,
-                    redirects: None,
-                    command: CommandType::Subshell(CompoundList {
-                        commands: vec![Command {
-                            asynchronous: false,
-                            command: CommandType::SimpleCommand(SimpleCommand {
-                                assignments: vec![],
-                                redirections: vec![],
-                                words: vec![Token {
-                                    kind: TokenKind::new_word("echo"),
-                                    start: TokenPosition { line: 0, col: 1 },
-                                    end: TokenPosition { line: 0, col: 4 }
-                                }]
-                            }),
-                            redirects: None
-                        }]
-                    })
-                }]
+            Command {
+                asynchronous: false,
+                redirects: None,
+                command: CommandType::Subshell(CompoundList {
+                    commands: vec![Command {
+                        asynchronous: false,
+                        command: CommandType::SimpleCommand(SimpleCommand {
+                            assignments: vec![],
+                            redirections: vec![],
+                            words: vec![Token {
+                                kind: TokenKind::new_word("echo"),
+                                start: TokenPosition { line: 0, col: 1 },
+                                end: TokenPosition { line: 0, col: 4 }
+                            }]
+                        }),
+                        redirects: None
+                    }]
+                })
             }
         );
     }
@@ -1139,40 +1120,38 @@ mod test {
         let list = parse("(echo)>foo").unwrap();
         assert_eq!(
             list,
-            CompoundList {
-                commands: vec![Command {
-                    asynchronous: false,
-                    redirects: Some(RedirectList {
-                        redirections: vec![Redirection::File(FileRedirection {
-                            fd_number: 1,
-                            file_name: Token {
-                                kind: TokenKind::new_word("foo"),
-                                start: TokenPosition { line: 0, col: 7 },
-                                end: TokenPosition { line: 0, col: 9 }
-                            },
-                            input: false,
-                            output: true,
-                            clobber: false,
-                            append: false
-                        })]
-                    }),
+            Command {
+                asynchronous: false,
+                redirects: Some(RedirectList {
+                    redirections: vec![Redirection::File(FileRedirection {
+                        fd_number: 1,
+                        file_name: Token {
+                            kind: TokenKind::new_word("foo"),
+                            start: TokenPosition { line: 0, col: 7 },
+                            end: TokenPosition { line: 0, col: 9 }
+                        },
+                        input: false,
+                        output: true,
+                        clobber: false,
+                        append: false
+                    })]
+                }),
 
-                    command: CommandType::Subshell(CompoundList {
-                        commands: vec![Command {
-                            asynchronous: false,
-                            command: CommandType::SimpleCommand(SimpleCommand {
-                                assignments: vec![],
-                                redirections: vec![],
-                                words: vec![Token {
-                                    kind: TokenKind::new_word("echo"),
-                                    start: TokenPosition { line: 0, col: 1 },
-                                    end: TokenPosition { line: 0, col: 4 }
-                                }]
-                            }),
-                            redirects: None,
-                        }]
-                    })
-                }]
+                command: CommandType::Subshell(CompoundList {
+                    commands: vec![Command {
+                        asynchronous: false,
+                        command: CommandType::SimpleCommand(SimpleCommand {
+                            assignments: vec![],
+                            redirections: vec![],
+                            words: vec![Token {
+                                kind: TokenKind::new_word("echo"),
+                                start: TokenPosition { line: 0, col: 1 },
+                                end: TokenPosition { line: 0, col: 4 }
+                            }]
+                        }),
+                        redirects: None,
+                    }]
+                })
             }
         );
     }
@@ -1187,20 +1166,18 @@ mod test {
         let list = parse("{echo}").unwrap();
         assert_eq!(
             list,
-            CompoundList {
-                commands: vec![Command {
-                    asynchronous: false,
-                    command: CommandType::SimpleCommand(SimpleCommand {
-                        assignments: vec![],
-                        redirections: vec![],
-                        words: vec![Token {
-                            kind: TokenKind::new_word("{echo}"),
-                            start: TokenPosition { line: 0, col: 0 },
-                            end: TokenPosition { line: 0, col: 5 }
-                        }]
-                    }),
-                    redirects: None
-                }]
+            Command {
+                asynchronous: false,
+                command: CommandType::SimpleCommand(SimpleCommand {
+                    assignments: vec![],
+                    redirections: vec![],
+                    words: vec![Token {
+                        kind: TokenKind::new_word("{echo}"),
+                        start: TokenPosition { line: 0, col: 0 },
+                        end: TokenPosition { line: 0, col: 5 }
+                    }]
+                }),
+                redirects: None
             }
         );
     }
@@ -1228,12 +1205,39 @@ mod test {
         let list = parse("{ echo }").unwrap();
         assert_eq!(
             list,
-            CompoundList {
-                commands: vec![Command {
-                    asynchronous: false,
-                    redirects: None,
-                    command: CommandType::BraceGroup(CompoundList {
-                        commands: vec![Command {
+            Command {
+                asynchronous: false,
+                redirects: None,
+                command: CommandType::BraceGroup(CompoundList {
+                    commands: vec![Command {
+                        asynchronous: false,
+                        command: CommandType::SimpleCommand(SimpleCommand {
+                            assignments: vec![],
+                            redirections: vec![],
+                            words: vec![Token {
+                                kind: TokenKind::new_word("echo"),
+                                start: TokenPosition { line: 0, col: 2 },
+                                end: TokenPosition { line: 0, col: 5 }
+                            }]
+                        }),
+                        redirects: None
+                    }]
+                })
+            }
+        );
+    }
+
+    #[test]
+    fn brace_group_sep_list() {
+        let list = parse("{ echo ; boo }").unwrap();
+        assert_eq!(
+            list,
+            Command {
+                asynchronous: false,
+                redirects: None,
+                command: CommandType::BraceGroup(CompoundList {
+                    commands: vec![
+                        Command {
                             asynchronous: false,
                             command: CommandType::SimpleCommand(SimpleCommand {
                                 assignments: vec![],
@@ -1245,53 +1249,22 @@ mod test {
                                 }]
                             }),
                             redirects: None
-                        }]
-                    })
-                }]
-            }
-        );
-    }
-
-    #[test]
-    fn brace_group_sep_list() {
-        let list = parse("{ echo ; boo }").unwrap();
-        assert_eq!(
-            list,
-            CompoundList {
-                commands: vec![Command {
-                    asynchronous: false,
-                    redirects: None,
-                    command: CommandType::BraceGroup(CompoundList {
-                        commands: vec![
-                            Command {
-                                asynchronous: false,
-                                command: CommandType::SimpleCommand(SimpleCommand {
-                                    assignments: vec![],
-                                    redirections: vec![],
-                                    words: vec![Token {
-                                        kind: TokenKind::new_word("echo"),
-                                        start: TokenPosition { line: 0, col: 2 },
-                                        end: TokenPosition { line: 0, col: 5 }
-                                    }]
-                                }),
-                                redirects: None
-                            },
-                            Command {
-                                asynchronous: false,
-                                command: CommandType::SimpleCommand(SimpleCommand {
-                                    assignments: vec![],
-                                    redirections: vec![],
-                                    words: vec![Token {
-                                        kind: TokenKind::new_word("boo"),
-                                        start: TokenPosition { line: 0, col: 9 },
-                                        end: TokenPosition { line: 0, col: 11 }
-                                    }]
-                                }),
-                                redirects: None
-                            },
-                        ]
-                    })
-                }]
+                        },
+                        Command {
+                            asynchronous: false,
+                            command: CommandType::SimpleCommand(SimpleCommand {
+                                assignments: vec![],
+                                redirections: vec![],
+                                words: vec![Token {
+                                    kind: TokenKind::new_word("boo"),
+                                    start: TokenPosition { line: 0, col: 9 },
+                                    end: TokenPosition { line: 0, col: 11 }
+                                }]
+                            }),
+                            redirects: None
+                        },
+                    ]
+                })
             }
         );
     }
@@ -1301,41 +1274,39 @@ mod test {
         let list = parse("{\n\techo\n\tboo\n}").unwrap();
         assert_eq!(
             list,
-            CompoundList {
-                commands: vec![Command {
-                    asynchronous: false,
-                    redirects: None,
-                    command: CommandType::BraceGroup(CompoundList {
-                        commands: vec![
-                            Command {
-                                asynchronous: false,
-                                command: CommandType::SimpleCommand(SimpleCommand {
-                                    assignments: vec![],
-                                    redirections: vec![],
-                                    words: vec![Token {
-                                        kind: TokenKind::new_word("echo"),
-                                        start: TokenPosition { line: 1, col: 1 },
-                                        end: TokenPosition { line: 1, col: 4 }
-                                    }]
-                                }),
-                                redirects: None
-                            },
-                            Command {
-                                asynchronous: false,
-                                command: CommandType::SimpleCommand(SimpleCommand {
-                                    assignments: vec![],
-                                    redirections: vec![],
-                                    words: vec![Token {
-                                        kind: TokenKind::new_word("boo"),
-                                        start: TokenPosition { line: 2, col: 1 },
-                                        end: TokenPosition { line: 2, col: 3 }
-                                    }]
-                                }),
-                                redirects: None
-                            },
-                        ]
-                    })
-                }]
+            Command {
+                asynchronous: false,
+                redirects: None,
+                command: CommandType::BraceGroup(CompoundList {
+                    commands: vec![
+                        Command {
+                            asynchronous: false,
+                            command: CommandType::SimpleCommand(SimpleCommand {
+                                assignments: vec![],
+                                redirections: vec![],
+                                words: vec![Token {
+                                    kind: TokenKind::new_word("echo"),
+                                    start: TokenPosition { line: 1, col: 1 },
+                                    end: TokenPosition { line: 1, col: 4 }
+                                }]
+                            }),
+                            redirects: None
+                        },
+                        Command {
+                            asynchronous: false,
+                            command: CommandType::SimpleCommand(SimpleCommand {
+                                assignments: vec![],
+                                redirections: vec![],
+                                words: vec![Token {
+                                    kind: TokenKind::new_word("boo"),
+                                    start: TokenPosition { line: 2, col: 1 },
+                                    end: TokenPosition { line: 2, col: 3 }
+                                }]
+                            }),
+                            redirects: None
+                        },
+                    ]
+                })
             }
         );
     }
