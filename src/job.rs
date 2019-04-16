@@ -30,11 +30,21 @@ pub fn make_foreground_process_group(pid: i32) {
     }
 }
 
+fn send_cont(pid: libc::pid_t) -> Fallible<()> {
+    unsafe {
+        if libc::kill(pid, libc::SIGCONT) != 0 {
+            let err = std::io::Error::last_os_error();
+            Err(err.context(format!("SIGCONT pid {}", pid)).into())
+        } else {
+            Ok(())
+        }
+    }
+}
+
 #[derive(Debug)]
 struct Inner {
     processes: Vec<WaitableExitStatus>,
     process_group_id: libc::pid_t,
-    background: bool,
     label: String,
 }
 
@@ -61,13 +71,12 @@ impl Job {
             inner: Arc::new(Mutex::new(Inner {
                 processes: vec![],
                 process_group_id: 0,
-                background: cmd.asynchronous,
                 label: format!("{}", cmd),
             })),
         }
     }
 
-    pub fn add(&mut self, mut proc: WaitableExitStatus, background: bool) -> Fallible<()> {
+    pub fn add(&mut self, proc: WaitableExitStatus) -> Fallible<()> {
         let process_group_id = match &proc {
             WaitableExitStatus::Child(ref proc) => proc.id() as _,
             WaitableExitStatus::UnixChild(ref proc) => proc.pid(),
@@ -79,17 +88,14 @@ impl Job {
             inner.process_group_id = process_group_id;
         }
 
-        if !background {
-            inner.processes.push(WaitableExitStatus::Done(proc.wait()?));
-        } else {
-            inner.processes.push(proc);
-        }
+        inner.processes.push(proc);
         Ok(())
     }
 
     pub fn is_background(&self) -> bool {
         let inner = self.inner.lock().unwrap();
-        inner.background
+        let pgrp = unsafe { libc::tcgetpgrp(0) };
+        inner.process_group_id != pgrp
     }
 
     pub fn process_group_id(&self) -> i32 {
@@ -99,24 +105,25 @@ impl Job {
 
     pub fn put_in_background(&mut self) -> Fallible<()> {
         let inner = self.inner.lock().unwrap();
-        unsafe {
-            if libc::kill(-inner.process_group_id, libc::SIGCONT) != 0 {
-                let err = std::io::Error::last_os_error();
-                Err(err
-                    .context(format!("SIGCONT progress group {}", inner.process_group_id))
-                    .into())
-            } else {
-                Ok(())
-            }
-        }
+        send_cont(-inner.process_group_id).ok();
+        Ok(())
     }
 
-    pub fn put_in_foreground(&mut self) {
+    pub fn put_in_foreground(&mut self) -> Fallible<()> {
         let inner = self.inner.lock().unwrap();
+        if inner.process_group_id == 0 {
+            return Ok(());
+        }
         unsafe {
             let pty_fd = 0;
-            libc::tcsetpgrp(pty_fd, inner.process_group_id);
+            if libc::tcsetpgrp(pty_fd, inner.process_group_id) != 0 {
+                let err = std::io::Error::last_os_error();
+                eprintln!("Job::put_in_foreground {:?} {:?}", inner, err);
+            }
         }
+        send_cont(-inner.process_group_id).ok();
+
+        Ok(())
     }
 
     pub fn unwrap_or_create(job: Option<Job>, cmd: &Command) -> Job {
@@ -152,9 +159,11 @@ impl JobList {
         for (id, job) in jobs.iter_mut() {
             match job.try_wait() {
                 Ok(Some(status)) => {
+                    /* FIXME: only print if it wasn't the most recent fg command
                     if job.is_background() {
                         eprintln!("[{}] - {} {}", id, status, job);
                     }
+                    */
                     if status.terminated() {
                         terminated.push(*id);
                     }

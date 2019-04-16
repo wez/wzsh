@@ -176,7 +176,7 @@ pub fn repl(mut env: ExecutionEnvironment, expander: ShellExpander) -> Fallible<
                         if job.is_background() {
                             ExitStatus::new_ok()
                         } else {
-                            job.put_in_foreground();
+                            job.put_in_foreground()?;
                             let status;
                             loop {
                                 status = match job.wait() {

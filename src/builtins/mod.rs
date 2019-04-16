@@ -29,6 +29,25 @@ pub fn lookup_builtin(name: &ShellString) -> Option<BuiltinFunc> {
     }
 }
 
+fn fg(_argv: &[ShellString], exe: &ExecutionEnvironment) -> Fallible<ExitStatus> {
+    let mut jobs = exe.job_list().jobs();
+    if let Some(mut job) = jobs.pop() {
+        writeln!(
+            exe.stderr(),
+            "wzsh: putting [{}] {} into fg",
+            job.process_group_id(),
+            job
+        )?;
+        job.put_in_foreground()?;
+        let status = job.wait()?;
+        writeln!(exe.stderr(), "wzsh: after fg, wait returned {}", status)?;
+        Ok(ExitStatus::ExitCode(0))
+    } else {
+        writeln!(exe.stderr(), "wzsh: fg: no jobs to put in foreground")?;
+        Ok(ExitStatus::ExitCode(1))
+    }
+}
+
 fn jobs(_argv: &[ShellString], exe: &ExecutionEnvironment) -> Fallible<ExitStatus> {
     let mut jobs = exe.job_list().jobs();
     for job in &mut jobs {
@@ -42,7 +61,7 @@ fn jobs(_argv: &[ShellString], exe: &ExecutionEnvironment) -> Fallible<ExitStatu
             )?,
             Ok(None) => writeln!(
                 exe.stdout(),
-                "[{}] - running {}",
+                "[{}] - <nochange> {}", // TODO: be smarter about stopped status
                 job.process_group_id(),
                 job
             )?,
@@ -54,7 +73,7 @@ fn jobs(_argv: &[ShellString], exe: &ExecutionEnvironment) -> Fallible<ExitStatu
 
 lazy_static! {
     static ref BUILTINS: HashMap<&'static str, BuiltinFunc> = {
-        let builtins = [("jobs", jobs)];
+        let builtins: [(&'static str, BuiltinFunc); 2] = [("jobs", jobs), ("fg", fg)];
 
         // This identity helper effectively casts away the per-function
         // type information that would otherwise cause a type mismatch

@@ -1,4 +1,3 @@
-use crate::job::put_shell_in_foreground;
 use failure::{err_msg, Fail, Fallible};
 use std::borrow::Cow;
 
@@ -117,7 +116,6 @@ impl UnixChild {
                 let err = std::io::Error::last_os_error();
                 return Err(err.context(format!("waiting for child pid {}", self.pid)))?;
             }
-            put_shell_in_foreground();
 
             let status = if libc::WIFSTOPPED(status) {
                 ExitStatus::Stopped

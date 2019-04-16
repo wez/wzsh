@@ -276,20 +276,20 @@ impl ExecutionEnvironment {
                             }
                         }
 
-                        job.add(WaitableExitStatus::with_child(child), command.asynchronous)?;
+                        job.add(WaitableExitStatus::with_child(child))?;
                         Ok(self.jobs.add(job))
                     }
                     Some(RunnableCommand::Builtin(builtin)) => {
                         let mut env = self.clone();
                         env.apply_redirections_to_env(&cmd, expander)?;
                         env.apply_assignments_to_env(expander, &cmd.assignments)?;
-                        job.add(WaitableExitStatus::Done(builtin.run(&env)?), false)?;
+                        job.add(WaitableExitStatus::Done(builtin.run(&env)?))?;
                         Ok(self.jobs.add(job))
                     }
                     None => {
                         self.apply_redirections_to_env(&cmd, expander)?;
                         self.apply_assignments_to_env(expander, &cmd.assignments)?;
-                        job.add(WaitableExitStatus::Done(ExitStatus::new_ok()), false)?;
+                        job.add(WaitableExitStatus::Done(ExitStatus::new_ok()))?;
                         Ok(self.jobs.add(job))
                     }
                 }
@@ -354,7 +354,7 @@ impl ExecutionEnvironment {
                 } else {
                     status
                 };
-                job.add(WaitableExitStatus::Done(status), false)?;
+                job.add(WaitableExitStatus::Done(status))?;
                 Ok(job)
             }
             _ => bail!("eval doesn't know about {:#?}", command),
