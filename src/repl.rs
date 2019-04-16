@@ -173,9 +173,7 @@ pub fn repl(mut env: ExecutionEnvironment, expander: ShellExpander) -> Fallible<
                         ExitStatus::new_fail()
                     }
                     Ok(mut job) => {
-                        eprintln!("job: {:#?}", job);
                         if job.is_background() {
-                            put_shell_in_foreground();
                             ExitStatus::new_ok()
                         } else {
                             job.put_in_foreground();
@@ -194,6 +192,7 @@ pub fn repl(mut env: ExecutionEnvironment, expander: ShellExpander) -> Fallible<
                         }
                     }
                 };
+                put_shell_in_foreground();
             }
             Err(ReadlineError::Interrupted) => {
                 input.clear();

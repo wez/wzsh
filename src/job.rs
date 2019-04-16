@@ -138,19 +138,23 @@ impl JobList {
         let id = job.process_group_id();
         let mut jobs = self.jobs.lock().unwrap();
         jobs.insert(id, job.clone());
-        eprintln!("tracking {} jobs", jobs.len());
         job
+    }
+
+    pub fn jobs(&self) -> Vec<Job> {
+        let jobs = self.jobs.lock().unwrap();
+        jobs.iter().map(|(_, v)| v.clone()).collect()
     }
 
     pub fn check_and_print_status(&self) {
         let mut jobs = self.jobs.lock().unwrap();
-        eprintln!("doing status check");
         let mut terminated = vec![];
         for (id, job) in jobs.iter_mut() {
-            eprintln!("consider id {}", *id);
             match job.try_wait() {
                 Ok(Some(status)) => {
-                    eprintln!("{} {}", status, job);
+                    if job.is_background() {
+                        eprintln!("[{}] - {} {}", id, status, job);
+                    }
                     if status.terminated() {
                         terminated.push(*id);
                     }

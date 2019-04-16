@@ -30,7 +30,25 @@ pub fn lookup_builtin(name: &ShellString) -> Option<BuiltinFunc> {
 }
 
 fn jobs(_argv: &[ShellString], exe: &ExecutionEnvironment) -> Fallible<ExitStatus> {
-    writeln!(exe.stdout(), "I am the jobs builtin")?;
+    let mut jobs = exe.job_list().jobs();
+    for job in &mut jobs {
+        match job.try_wait() {
+            Ok(Some(status)) => writeln!(
+                exe.stdout(),
+                "[{}] - {} {}",
+                job.process_group_id(),
+                status,
+                job
+            )?,
+            Ok(None) => writeln!(
+                exe.stdout(),
+                "[{}] - running {}",
+                job.process_group_id(),
+                job
+            )?,
+            Err(e) => writeln!(exe.stderr(), "wzsh: wait failed for job {}", e)?,
+        }
+    }
     Ok(ExitStatus::ExitCode(0))
 }
 
