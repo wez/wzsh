@@ -9,7 +9,7 @@ use crate::ShellExpander;
 use failure::{bail, ensure, Fail, Fallible};
 use shlex::string::ShellString;
 use shlex::{Aliases, Environment, Expander, Token, TokenKind};
-use std::cell::RefCell;
+use std::cell::{RefCell, RefMut};
 use std::process::Command;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -44,6 +44,16 @@ impl ExecutionEnvironment {
 
     pub fn job_list(&self) -> Arc<JobList> {
         Arc::clone(&self.jobs)
+    }
+
+    pub fn stdin(&self) -> RefMut<std::io::Read> {
+        self.stdin.borrow_mut()
+    }
+    pub fn stdout(&self) -> RefMut<std::io::Write> {
+        self.stdout.borrow_mut()
+    }
+    pub fn stderr(&self) -> RefMut<std::io::Write> {
+        self.stderr.borrow_mut()
     }
 
     pub fn set_stdin(&mut self, fd: FileDescriptor) {
@@ -273,7 +283,7 @@ impl ExecutionEnvironment {
                         let mut env = self.clone();
                         env.apply_redirections_to_env(&cmd, expander)?;
                         env.apply_assignments_to_env(expander, &cmd.assignments)?;
-                        job.add(WaitableExitStatus::Done(builtin.run(&env)), false)?;
+                        job.add(WaitableExitStatus::Done(builtin.run(&env)?), false)?;
                         Ok(self.jobs.add(job))
                     }
                     None => {

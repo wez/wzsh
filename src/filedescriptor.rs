@@ -5,6 +5,31 @@ pub struct FileDescriptor {
     fd: RawFd,
 }
 
+impl std::io::Read for FileDescriptor {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, std::io::Error> {
+        let size = unsafe { libc::read(self.fd, buf.as_mut_ptr() as *mut _, buf.len()) };
+        if size == -1 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(size as usize)
+        }
+    }
+}
+
+impl std::io::Write for FileDescriptor {
+    fn write(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {
+        let size = unsafe { libc::write(self.fd, buf.as_ptr() as *const _, buf.len()) };
+        if size == -1 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(size as usize)
+        }
+    }
+    fn flush(&mut self) -> Result<(), std::io::Error> {
+        Ok(())
+    }
+}
+
 impl Drop for FileDescriptor {
     fn drop(&mut self) {
         unsafe {

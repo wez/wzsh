@@ -1,10 +1,11 @@
 use crate::execenv::ExecutionEnvironment;
 use crate::exitstatus::ExitStatus;
+use failure::Fallible;
 use lazy_static::lazy_static;
 use shlex::string::ShellString;
 use std::collections::HashMap;
 
-pub type BuiltinFunc = fn(argv: &[ShellString], exe: &ExecutionEnvironment) -> ExitStatus;
+pub type BuiltinFunc = fn(argv: &[ShellString], exe: &ExecutionEnvironment) -> Fallible<ExitStatus>;
 
 pub struct BuiltinCommand {
     argv: Vec<ShellString>,
@@ -16,7 +17,7 @@ impl BuiltinCommand {
         Self { func, argv }
     }
 
-    pub fn run(&self, exe: &ExecutionEnvironment) -> ExitStatus {
+    pub fn run(&self, exe: &ExecutionEnvironment) -> Fallible<ExitStatus> {
         (self.func)(&self.argv, exe)
     }
 }
@@ -28,9 +29,9 @@ pub fn lookup_builtin(name: &ShellString) -> Option<BuiltinFunc> {
     }
 }
 
-fn jobs(_argv: &[ShellString], _exe: &ExecutionEnvironment) -> ExitStatus {
-    eprintln!("I am the jobs builtin");
-    ExitStatus::ExitCode(0)
+fn jobs(_argv: &[ShellString], exe: &ExecutionEnvironment) -> Fallible<ExitStatus> {
+    writeln!(exe.stdout(), "I am the jobs builtin")?;
+    Ok(ExitStatus::ExitCode(0))
 }
 
 lazy_static! {
