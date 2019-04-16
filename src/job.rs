@@ -38,12 +38,6 @@ struct Inner {
     label: String,
 }
 
-impl Inner {
-    fn add(&mut self, proc: WaitableExitStatus) {
-        self.processes.push(proc);
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct Job {
     inner: Arc<Mutex<Inner>>,

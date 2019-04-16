@@ -1,3 +1,4 @@
+use crate::builtins::{lookup_builtin, BuiltinCommand};
 use crate::exitstatus::{ExitStatus, WaitableExitStatus};
 use crate::filedescriptor::FileDescriptor;
 use crate::job::{make_foreground_process_group, make_own_process_group, Job, JobList};
@@ -12,6 +13,11 @@ use std::cell::RefCell;
 use std::process::Command;
 use std::rc::Rc;
 use std::sync::Arc;
+
+pub enum RunnableCommand {
+    ChildProcess(std::process::Command),
+    Builtin(BuiltinCommand),
+}
 
 #[derive(Clone)]
 pub struct ExecutionEnvironment {
@@ -53,10 +59,14 @@ impl ExecutionEnvironment {
         cmd: &SimpleCommand,
         expander: &ShellExpander,
         asynchronous: bool,
-    ) -> Fallible<Option<std::process::Command>> {
+    ) -> Fallible<Option<RunnableCommand>> {
         let argv = cmd.expand_argv(&mut self.env.borrow_mut(), expander, &self.aliases.borrow())?;
         if argv.is_empty() {
             Ok(None)
+        } else if let Some(builtin) = lookup_builtin(&argv[0]) {
+            Ok(Some(RunnableCommand::Builtin(BuiltinCommand::new(
+                builtin, argv,
+            ))))
         } else {
             let mut child_cmd = Command::new(&argv[0]);
             for arg in argv.iter().skip(1) {
@@ -94,7 +104,7 @@ impl ExecutionEnvironment {
                 });
             }
 
-            Ok(Some(child_cmd))
+            Ok(Some(RunnableCommand::ChildProcess(child_cmd)))
         }
     }
 
@@ -235,35 +245,43 @@ impl ExecutionEnvironment {
         let mut job = Job::unwrap_or_create(job, command);
         match &command.command {
             CommandType::SimpleCommand(cmd) => {
-                if let Some(mut child_cmd) =
-                    self.build_command(&cmd, expander, command.asynchronous)?
-                {
-                    self.apply_redirections_to_cmd(&mut child_cmd, &cmd, expander)?;
-                    self.apply_assignments_to_cmd(expander, &cmd.assignments, &mut child_cmd)?;
-                    let child = child_cmd.spawn()?;
+                match self.build_command(&cmd, expander, command.asynchronous)? {
+                    Some(RunnableCommand::ChildProcess(mut child_cmd)) => {
+                        self.apply_redirections_to_cmd(&mut child_cmd, &cmd, expander)?;
+                        self.apply_assignments_to_cmd(expander, &cmd.assignments, &mut child_cmd)?;
+                        let child = child_cmd.spawn()?;
 
-                    // To avoid a race condition with starting up the child, we
-                    // need to also munge the process group assignment here in
-                    // the parent.  Note that the loser of the race will experience
-                    // errors in attempting this block, so we willfully ignore
-                    // the return values here: we cannot do anything about them.
-                    #[cfg(unix)]
-                    {
-                        let pid = child.id() as i32;
-                        if command.asynchronous {
-                            make_own_process_group(pid);
-                        } else {
-                            make_foreground_process_group(pid);
+                        // To avoid a race condition with starting up the child, we
+                        // need to also munge the process group assignment here in
+                        // the parent.  Note that the loser of the race will experience
+                        // errors in attempting this block, so we willfully ignore
+                        // the return values here: we cannot do anything about them.
+                        #[cfg(unix)]
+                        {
+                            let pid = child.id() as i32;
+                            if command.asynchronous {
+                                make_own_process_group(pid);
+                            } else {
+                                make_foreground_process_group(pid);
+                            }
                         }
-                    }
 
-                    job.add(WaitableExitStatus::with_child(child), command.asynchronous)?;
-                    Ok(self.jobs.add(job))
-                } else {
-                    self.apply_redirections_to_env(&cmd, expander)?;
-                    self.apply_assignments_to_env(expander, &cmd.assignments)?;
-                    job.add(WaitableExitStatus::Done(ExitStatus::new_ok()), false)?;
-                    Ok(self.jobs.add(job))
+                        job.add(WaitableExitStatus::with_child(child), command.asynchronous)?;
+                        Ok(self.jobs.add(job))
+                    }
+                    Some(RunnableCommand::Builtin(builtin)) => {
+                        let mut env = self.clone();
+                        env.apply_redirections_to_env(&cmd, expander)?;
+                        env.apply_assignments_to_env(expander, &cmd.assignments)?;
+                        job.add(WaitableExitStatus::Done(builtin.run(&env)), false)?;
+                        Ok(self.jobs.add(job))
+                    }
+                    None => {
+                        self.apply_redirections_to_env(&cmd, expander)?;
+                        self.apply_assignments_to_env(expander, &cmd.assignments)?;
+                        job.add(WaitableExitStatus::Done(ExitStatus::new_ok()), false)?;
+                        Ok(self.jobs.add(job))
+                    }
                 }
             }
             CommandType::BraceGroup(list) => {

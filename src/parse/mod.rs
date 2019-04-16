@@ -1,7 +1,6 @@
 //! Shell parser
 use failure::{bail, Error, Fail, Fallible};
-use shlex::string::ShellString;
-use shlex::{Aliases, Environment, Expander, Lexer, Operator, ReservedWord, Token, TokenKind};
+use shlex::{Lexer, Operator, ReservedWord, Token, TokenKind};
 
 mod types;
 pub use types::*;
