@@ -39,6 +39,17 @@ pub enum $Enum {
         $variant
     ),+
 }
+
+impl std::fmt::Display for $Enum {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        match self {
+        $(
+            $Enum::$variant => write!(fmt, "{}", $text)
+        ),+
+        }
+    }
+}
+
 lazy_static! {
     static ref $Matcher: LiteralMatcher<$Enum> = {
         LiteralMatcher::new(&[

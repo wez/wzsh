@@ -65,7 +65,11 @@ impl<R: std::io::Read> Parser<R> {
             commands.push(cmd);
         }
 
-        Ok(CommandType::BraceGroup(CompoundList { commands }).into())
+        let is_async = commands.last().unwrap().asynchronous;
+
+        let mut command: Command = CommandType::BraceGroup(CompoundList { commands }).into();
+        command.asynchronous = is_async;
+        Ok(command)
     }
 
     fn separator_is_async(&mut self) -> Fallible<bool> {
@@ -511,6 +515,65 @@ pub struct Command {
     pub asynchronous: bool,
     pub command: CommandType,
     pub redirects: Option<RedirectList>,
+}
+
+fn display_token_text(t: &Token, fmt: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+    match &t.kind {
+        TokenKind::Word(word) => write!(fmt, "{}", word),
+        TokenKind::Name(word) => write!(fmt, "{}", word),
+        TokenKind::IoNumber(word) => write!(fmt, "{}", word),
+        TokenKind::Eof => Ok(()),
+        TokenKind::NewLine => write!(fmt, "\n"),
+        TokenKind::Operator(op) => write!(fmt, "{}", op),
+        TokenKind::ReservedWord(word) => write!(fmt, "{}", word),
+    }
+}
+
+impl std::fmt::Display for Command {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        match &self.command {
+            CommandType::SimpleCommand(cmd) => {
+                for t in &cmd.assignments {
+                    display_token_text(t, fmt)?;
+                    write!(fmt, " ")?;
+                }
+                for t in &cmd.words {
+                    display_token_text(t, fmt)?;
+                    write!(fmt, " ")?;
+                }
+                // TODO: redirections
+            }
+            CommandType::ForEach(_)
+            | CommandType::If(_)
+            | CommandType::UntilLoop(_)
+            | CommandType::WhileLoop(_) => {
+                write!(fmt, "Display not implemented; {:?}", self.command)?;
+            }
+            CommandType::Subshell(commands) => {
+                write!(fmt, "(")?;
+                for cmd in commands.commands.iter() {
+                    cmd.fmt(fmt)?;
+                }
+                write!(fmt, ")")?;
+            }
+            CommandType::BraceGroup(commands) => {
+                write!(fmt, "{{ ")?;
+                for cmd in commands.commands.iter() {
+                    cmd.fmt(fmt)?;
+                }
+                write!(fmt, " }}")?;
+            }
+            CommandType::Pipeline(pipeline) => {
+                for (idx, cmd) in pipeline.commands.iter().enumerate() {
+                    if idx > 0 {
+                        write!(fmt, "|")?;
+                    }
+                    cmd.fmt(fmt)?;
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 impl From<CommandType> for Command {

@@ -1,4 +1,5 @@
 use crate::exitstatus::{ExitStatus, WaitableExitStatus};
+use crate::parse::Command;
 use failure::{Fail, Fallible};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -34,6 +35,7 @@ struct Inner {
     processes: Vec<WaitableExitStatus>,
     process_group_id: libc::pid_t,
     background: bool,
+    label: String,
 }
 
 impl Inner {
@@ -52,20 +54,43 @@ pub struct JobList {
     pub jobs: Mutex<HashMap<i32, Job>>,
 }
 
+impl std::fmt::Display for Job {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        let inner = self.inner.lock().unwrap();
+        write!(fmt, "{}", inner.label)
+    }
+}
+
 impl Job {
-    pub fn new(proc: WaitableExitStatus, background: bool) -> Self {
-        let process_group_id = match proc {
+    pub fn new_empty(cmd: &Command) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(Inner {
+                processes: vec![],
+                process_group_id: 0,
+                background: cmd.asynchronous,
+                label: format!("{}", cmd),
+            })),
+        }
+    }
+
+    pub fn add(&mut self, mut proc: WaitableExitStatus, background: bool) -> Fallible<()> {
+        let process_group_id = match &proc {
             WaitableExitStatus::Child(ref proc) => proc.id() as _,
             WaitableExitStatus::UnixChild(ref proc) => proc.pid(),
             WaitableExitStatus::Done(_) => 0,
         };
-        Self {
-            inner: Arc::new(Mutex::new(Inner {
-                processes: vec![proc],
-                process_group_id,
-                background,
-            })),
+
+        let mut inner = self.inner.lock().unwrap();
+        if inner.process_group_id == 0 {
+            inner.process_group_id = process_group_id;
         }
+
+        if !background {
+            inner.processes.push(WaitableExitStatus::Done(proc.wait()?));
+        } else {
+            inner.processes.push(proc);
+        }
+        Ok(())
     }
 
     pub fn is_background(&self) -> bool {
@@ -100,25 +125,8 @@ impl Job {
         }
     }
 
-    pub fn unwrap(job: Option<Job>) -> Job {
-        job.unwrap_or_else(|| Job::new(WaitableExitStatus::Done(ExitStatus::new_ok()), false))
-    }
-
-    pub fn add_to_job_or_create(
-        job: Option<Job>,
-        proc: WaitableExitStatus,
-        background: bool,
-    ) -> Job {
-        match job {
-            Some(job) => {
-                {
-                    let mut inner = job.inner.lock().unwrap();
-                    inner.add(proc);
-                }
-                job.clone()
-            }
-            None => Job::new(proc, background),
-        }
+    pub fn unwrap_or_create(job: Option<Job>, cmd: &Command) -> Job {
+        job.unwrap_or_else(|| Job::new_empty(cmd))
     }
 
     pub fn wait(&mut self) -> Fallible<ExitStatus> {
@@ -148,7 +156,7 @@ impl JobList {
             eprintln!("consider id {}", *id);
             match job.try_wait() {
                 Ok(Some(status)) => {
-                    eprintln!("{} {:?}", status, job);
+                    eprintln!("{} {}", status, job);
                     if status.terminated() {
                         terminated.push(*id);
                     }

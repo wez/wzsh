@@ -230,8 +230,9 @@ impl ExecutionEnvironment {
         &mut self,
         expander: &ShellExpander,
         command: &ShellCommand,
-        mut job: Option<Job>,
+        job: Option<Job>,
     ) -> Fallible<Job> {
+        let mut job = Job::unwrap_or_create(job, command);
         match &command.command {
             CommandType::SimpleCommand(cmd) => {
                 if let Some(mut child_cmd) =
@@ -256,26 +257,20 @@ impl ExecutionEnvironment {
                         }
                     }
 
-                    Ok(self.jobs.add(Job::add_to_job_or_create(
-                        job,
-                        WaitableExitStatus::with_child(child),
-                        command.asynchronous,
-                    )))
+                    job.add(WaitableExitStatus::with_child(child), command.asynchronous)?;
+                    Ok(self.jobs.add(job))
                 } else {
                     self.apply_redirections_to_env(&cmd, expander)?;
                     self.apply_assignments_to_env(expander, &cmd.assignments)?;
-                    Ok(self.jobs.add(Job::add_to_job_or_create(
-                        job,
-                        WaitableExitStatus::Done(ExitStatus::new_ok()),
-                        command.asynchronous,
-                    )))
+                    job.add(WaitableExitStatus::Done(ExitStatus::new_ok()), false)?;
+                    Ok(self.jobs.add(job))
                 }
             }
             CommandType::BraceGroup(list) => {
                 for cmd in &list.commands {
-                    job = Some(self.eval(expander, &cmd, job)?);
+                    self.eval(expander, &cmd, Some(job.clone()))?;
                 }
-                Ok(self.jobs.add(Job::unwrap(job)))
+                Ok(self.jobs.add(job))
             }
             CommandType::Subshell(list) => {
                 // Posix wants the subshell to be a forked child,
@@ -288,9 +283,9 @@ impl ExecutionEnvironment {
                 // a thread to execute it.
                 let mut sub_env = self.clone();
                 for cmd in &list.commands {
-                    job = Some(sub_env.eval(expander, &cmd, job)?);
+                    sub_env.eval(expander, &cmd, Some(job.clone()))?;
                 }
-                Ok(self.jobs.add(Job::unwrap(job)))
+                Ok(self.jobs.add(job))
             }
             CommandType::Pipeline(pipeline) => {
                 let mut envs = vec![];
@@ -314,14 +309,14 @@ impl ExecutionEnvironment {
 
                 for cmd in &pipeline.commands {
                     let mut env = envs.pop().unwrap();
-                    job = Some(env.eval(expander, cmd, job)?);
+                    env.eval(expander, cmd, Some(job.clone()))?;
                     // We want to drop the env so that its ref to the
                     // pipes is released, causing the pipes to cascade
                     // shut as we move along.
                     drop(env);
                 }
 
-                let mut job = self.jobs.add(Job::unwrap(job));
+                let mut job = self.jobs.add(job);
 
                 // FIXME: is command.asynchronous shouldn't wait.
                 // But also: what about inverted-ness if it is async?
@@ -331,7 +326,8 @@ impl ExecutionEnvironment {
                 } else {
                     status
                 };
-                Ok(Job::new(WaitableExitStatus::Done(status), false))
+                job.add(WaitableExitStatus::Done(status), false)?;
+                Ok(job)
             }
             _ => bail!("eval doesn't know about {:#?}", command),
         }
