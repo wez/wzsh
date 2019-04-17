@@ -5,7 +5,7 @@ use failure::Fallible;
 use structopt::*;
 
 #[derive(Debug, StructOpt)]
-#[structopt(about = "Place a background job into the foreground")]
+/// Place a background job into the foreground
 pub struct FgCommand {}
 impl Builtin for FgCommand {
     fn name() -> &'static str {
@@ -33,7 +33,7 @@ impl Builtin for FgCommand {
 }
 
 #[derive(Debug, StructOpt, Default)]
-#[structopt(about = "list known jobs")]
+/// list known jobs
 pub struct JobsCommand {}
 impl Builtin for JobsCommand {
     fn name() -> &'static str {

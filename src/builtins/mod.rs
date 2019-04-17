@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use structopt::*;
 
 mod jobcontrol;
+mod workingdir;
 
 pub trait Builtin: StructOpt {
     fn eval(argv: Vec<ShellString>, exe: &ExecutionEnvironment) -> Fallible<ExitStatus>
@@ -56,6 +57,7 @@ lazy_static! {
         builtins!(
             jobcontrol::JobsCommand,
             jobcontrol::FgCommand,
+            workingdir::PwdCommand,
         );
 
         builtins

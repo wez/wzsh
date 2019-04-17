@@ -46,6 +46,10 @@ impl ExecutionEnvironment {
         Arc::clone(&self.jobs)
     }
 
+    pub fn env(&self) -> RefMut<Environment> {
+        self.env.borrow_mut()
+    }
+
     pub fn stdin(&self) -> RefMut<std::io::Read> {
         self.stdin.borrow_mut()
     }
