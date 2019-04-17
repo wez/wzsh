@@ -57,6 +57,7 @@ lazy_static! {
         builtins!(
             jobcontrol::JobsCommand,
             jobcontrol::FgCommand,
+            workingdir::CdCommand,
             workingdir::PwdCommand,
         );
 

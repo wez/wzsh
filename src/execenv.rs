@@ -6,10 +6,11 @@ use crate::parse::{
     Command as ShellCommand, CommandType, FileRedirection, If, Redirection, SimpleCommand,
 };
 use crate::ShellExpander;
-use failure::{bail, ensure, Fail, Fallible};
+use failure::{bail, ensure, Fail, Fallible, ResultExt};
 use shlex::string::ShellString;
 use shlex::{Aliases, Environment, Expander, Token, TokenKind};
-use std::cell::{RefCell, RefMut};
+use std::cell::{Ref, RefCell, RefMut};
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -20,14 +21,30 @@ pub enum RunnableCommand {
 }
 
 #[derive(Clone)]
+struct Shared {
+    aliases: RefCell<Aliases>,
+    cwd: RefCell<PathBuf>,
+}
+
+impl Shared {
+    fn new() -> Fallible<Self> {
+        Ok(Self {
+            aliases: RefCell::new(Aliases::new()),
+            cwd: RefCell::new(std::env::current_dir().context("failed to obtain cwd")?),
+        })
+    }
+}
+
+#[derive(Clone)]
 pub struct ExecutionEnvironment {
     env: Rc<RefCell<Environment>>,
-    aliases: Rc<RefCell<Aliases>>,
     jobs: Arc<JobList>,
 
     stdin: Rc<RefCell<FileDescriptor>>,
     stdout: Rc<RefCell<FileDescriptor>>,
     stderr: Rc<RefCell<FileDescriptor>>,
+
+    shared: Arc<Shared>,
 }
 
 impl ExecutionEnvironment {
@@ -35,11 +52,29 @@ impl ExecutionEnvironment {
         Ok(Self {
             env: Rc::new(RefCell::new(Environment::new())),
             jobs: Arc::new(JobList::default()),
-            aliases: Rc::new(RefCell::new(Aliases::new())),
             stdin: Rc::new(RefCell::new(FileDescriptor::dup(std::io::stdin())?)),
             stdout: Rc::new(RefCell::new(FileDescriptor::dup(std::io::stdout())?)),
             stderr: Rc::new(RefCell::new(FileDescriptor::dup(std::io::stderr())?)),
+            shared: Arc::new(Shared::new()?),
         })
+    }
+
+    pub fn make_subshell(&self) -> Self {
+        let mut subshell = self.clone();
+        subshell.shared = Arc::new((*self.shared).clone());
+        subshell
+    }
+
+    pub fn cwd(&self) -> Ref<Path> {
+        let p = self.shared.cwd.borrow();
+        Ref::map(p, |p| p.as_path())
+    }
+
+    pub fn chdir<P: AsRef<Path>>(&self, p: P) {
+        self.env.borrow_mut().set("OLDPWD", self.cwd().to_owned());
+        let path = self.cwd().join(p);
+        self.env.borrow_mut().set("PWD", path.clone());
+        *self.shared.cwd.borrow_mut() = path;
     }
 
     pub fn job_list(&self) -> Arc<JobList> {
@@ -74,7 +109,11 @@ impl ExecutionEnvironment {
         expander: &ShellExpander,
         asynchronous: bool,
     ) -> Fallible<Option<RunnableCommand>> {
-        let argv = cmd.expand_argv(&mut self.env.borrow_mut(), expander, &self.aliases.borrow())?;
+        let argv = cmd.expand_argv(
+            &mut self.env.borrow_mut(),
+            expander,
+            &self.shared.aliases.borrow(),
+        )?;
         if argv.is_empty() {
             Ok(None)
         } else if let Some(builtin) = lookup_builtin(&argv[0]) {
@@ -86,6 +125,7 @@ impl ExecutionEnvironment {
             }
             child_cmd.env_clear();
             child_cmd.envs(self.env.borrow().iter());
+            child_cmd.current_dir(&*self.cwd());
 
             child_cmd.stdin(self.stdin.borrow_mut().as_stdio()?);
             child_cmd.stdout(self.stdout.borrow_mut().as_stdio()?);
@@ -311,7 +351,7 @@ impl ExecutionEnvironment {
                 // here to manage signals/process groups on posix systems,
                 // and for async subshells, may want to consider using
                 // a thread to execute it.
-                let mut sub_env = self.clone();
+                let mut sub_env = self.make_subshell();
                 for cmd in &list.commands {
                     sub_env.eval(expander, &cmd, Some(job.clone()))?;
                 }

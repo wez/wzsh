@@ -143,6 +143,14 @@ pub fn repl(mut env: ExecutionEnvironment, expander: ShellExpander) -> Fallible<
 
         env.job_list().check_and_print_status();
 
+        // A little bit gross, but the FilenameCompleter implementation
+        // uses the process-wide current working dir, so we need to be
+        // sure to sync that up with the top level environment in order
+        // for tab completion to work as the user expects.
+        if std::env::current_dir()?.as_path() != &*env.cwd() {
+            std::env::set_current_dir(&*env.cwd())?;
+        }
+
         let readline = rl.readline(&prompt);
         match readline {
             Ok(line) => {
