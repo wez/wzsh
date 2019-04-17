@@ -127,10 +127,37 @@ impl std::fmt::Display for Command {
                 }
                 // TODO: redirections
             }
-            CommandType::ForEach(_)
-            | CommandType::If(_)
-            | CommandType::UntilLoop(_)
-            | CommandType::WhileLoop(_) => {
+            CommandType::If(If {
+                condition,
+                true_part,
+                false_part,
+            }) => {
+                write!(fmt, "if ")?;
+                for cmd in &condition.commands {
+                    cmd.fmt(fmt)?;
+                    write!(fmt, "{}", if cmd.asynchronous { "&" } else { ";" })?;
+                }
+                write!(fmt, " ; then ")?;
+                if let Some(true_part) = true_part {
+                    for cmd in &true_part.commands {
+                        cmd.fmt(fmt)?;
+                        write!(fmt, "{}", if cmd.asynchronous { "&" } else { ";" })?;
+                    }
+                } else {
+                    write!(fmt, ": ")?;
+                }
+                write!(fmt, " ; else ")?;
+                if let Some(false_part) = false_part {
+                    for cmd in &false_part.commands {
+                        cmd.fmt(fmt)?;
+                        write!(fmt, "{}", if cmd.asynchronous { "&" } else { ";" })?;
+                    }
+                } else {
+                    write!(fmt, ": ")?;
+                }
+                write!(fmt, " ; fi")?;
+            }
+            CommandType::ForEach(_) | CommandType::UntilLoop(_) | CommandType::WhileLoop(_) => {
                 write!(fmt, "Display not implemented; {:?}", self.command)?;
             }
             CommandType::Subshell(commands) => {

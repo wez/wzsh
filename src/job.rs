@@ -116,11 +116,8 @@ impl Job {
         }
         unsafe {
             let pty_fd = 0;
-            if libc::tcsetpgrp(pty_fd, inner.process_group_id) != 0 {
-                let err = std::io::Error::last_os_error();
-                eprintln!("Job::put_in_foreground {:?} {:?}", inner, err);
-            }
-        }
+            libc::tcsetpgrp(pty_fd, inner.process_group_id)
+        };
         send_cont(-inner.process_group_id).ok();
 
         Ok(())

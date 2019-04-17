@@ -3,7 +3,7 @@ use crate::exitstatus::{ExitStatus, WaitableExitStatus};
 use crate::filedescriptor::FileDescriptor;
 use crate::job::{make_foreground_process_group, make_own_process_group, Job, JobList};
 use crate::parse::{
-    Command as ShellCommand, CommandType, FileRedirection, Redirection, SimpleCommand,
+    Command as ShellCommand, CommandType, FileRedirection, If, Redirection, SimpleCommand,
 };
 use crate::ShellExpander;
 use failure::{bail, ensure, Fail, Fallible};
@@ -353,6 +353,29 @@ impl ExecutionEnvironment {
                     status
                 };
                 job.add(WaitableExitStatus::Done(status))?;
+                Ok(job)
+            }
+            CommandType::If(If {
+                condition,
+                true_part,
+                false_part,
+            }) => {
+                for cmd in &condition.commands {
+                    self.eval(expander, &cmd, Some(job.clone()))?;
+                }
+
+                let status = job.wait()?;
+                let next = if status.is_ok() {
+                    true_part
+                } else {
+                    false_part
+                };
+                if let Some(next) = next {
+                    for cmd in &next.commands {
+                        self.eval(expander, &cmd, Some(job.clone()))?;
+                    }
+                    job.wait()?;
+                }
                 Ok(job)
             }
             _ => bail!("eval doesn't know about {:#?}", command),
