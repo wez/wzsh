@@ -8,6 +8,7 @@ use structopt::*;
 
 mod colon;
 mod jobcontrol;
+mod truefalse;
 mod workingdir;
 
 pub trait Builtin: StructOpt {
@@ -61,6 +62,8 @@ lazy_static! {
             workingdir::CdCommand,
             workingdir::PwdCommand,
             colon::ColonCommand,
+            truefalse::TrueCommand,
+            truefalse::FalseCommand,
         );
 
         builtins
