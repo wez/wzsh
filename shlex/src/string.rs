@@ -19,6 +19,15 @@ pub enum ShellString {
     Os(OsString),
 }
 
+impl ShellString {
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            ShellString::String(s) => Some(s.as_str()),
+            _ => None,
+        }
+    }
+}
+
 impl AsRef<OsStr> for ShellString {
     fn as_ref(&self) -> &OsStr {
         match self {

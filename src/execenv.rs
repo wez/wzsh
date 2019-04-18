@@ -109,16 +109,32 @@ impl ExecutionEnvironment {
         expander: &ShellExpander,
         asynchronous: bool,
     ) -> Fallible<Option<RunnableCommand>> {
-        let argv = cmd.expand_argv(
+        let mut argv = cmd.expand_argv(
             &mut self.env.borrow_mut(),
             expander,
             &self.shared.aliases.borrow(),
         )?;
         if argv.is_empty() {
-            Ok(None)
-        } else if let Some(builtin) = lookup_builtin(&argv[0]) {
-            Ok(Some(RunnableCommand::Builtin(builtin, argv)))
+            return Ok(None);
+        }
+
+        let (search_builtin, search_path) = if argv[0].as_str() == Some("command") {
+            argv.remove(0);
+            (false, true)
+        } else if argv[0].as_str() == Some("builtin") {
+            argv.remove(0);
+            (true, false)
         } else {
+            (true, true)
+        };
+
+        if search_builtin {
+            if let Some(builtin) = lookup_builtin(&argv[0]) {
+                return Ok(Some(RunnableCommand::Builtin(builtin, argv)));
+            }
+        }
+
+        if search_path {
             let mut child_cmd = Command::new(&argv[0]);
             for arg in argv.iter().skip(1) {
                 child_cmd.arg(arg);
@@ -156,8 +172,10 @@ impl ExecutionEnvironment {
                 });
             }
 
-            Ok(Some(RunnableCommand::ChildProcess(child_cmd)))
+            return Ok(Some(RunnableCommand::ChildProcess(child_cmd)));
         }
+
+        bail!("wzsh: {}: command not found", argv[0]);
     }
 
     fn file_from_redir(
