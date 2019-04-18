@@ -8,6 +8,7 @@ mod expander;
 mod filedescriptor;
 mod job;
 mod parse;
+mod pathsearch;
 mod repl;
 
 use execenv::ExecutionEnvironment;

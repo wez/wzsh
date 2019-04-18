@@ -25,8 +25,8 @@ impl Environment {
         self.map.insert(key.into(), value.into());
     }
 
-    pub fn get<K: AsRef<OsStr>>(&self, key: K) -> Option<&OsString> {
-        self.map.get(key.as_ref())
+    pub fn get<K: AsRef<OsStr>>(&self, key: K) -> Option<&OsStr> {
+        self.map.get(key.as_ref()).map(OsString::as_os_str)
     }
 
     pub fn get_str<K: AsRef<OsStr> + std::fmt::Debug>(&self, key: K) -> Fallible<Option<&str>> {

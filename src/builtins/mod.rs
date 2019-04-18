@@ -10,6 +10,7 @@ mod builtins;
 mod colon;
 mod jobcontrol;
 mod truefalse;
+mod which;
 mod workingdir;
 
 pub trait Builtin: StructOpt {
@@ -66,6 +67,7 @@ lazy_static! {
             truefalse::TrueCommand,
             truefalse::FalseCommand,
             builtins::BuiltinsCommand,
+            which::WhichCommand,
         );
 
         builtins

@@ -14,7 +14,7 @@ impl Expander for ShellExpander {
             let home = environment
                 .get("HOME")
                 .ok_or_else(|| format_err!("HOME is not set"))?;
-            Ok(home.as_os_str().into())
+            Ok(home.into())
         } else {
             bail!("ze goggles");
         }
