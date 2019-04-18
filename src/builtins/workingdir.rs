@@ -10,11 +10,11 @@ use structopt::*;
 pub struct PwdCommand {
     /// Display the logical current working directory.
     /// This is the default behavior.
-    #[structopt(short = "L")]
+    #[structopt(short = "L", conflicts_with = "physical")]
     logical: bool,
 
     /// Display the physical current working directory (all symbolic links resolved).
-    #[structopt(short = "P")]
+    #[structopt(short = "P", conflicts_with = "logical")]
     physical: bool,
 }
 
@@ -24,21 +24,13 @@ impl Builtin for PwdCommand {
     }
 
     fn run(&mut self, exe: &ExecutionEnvironment) -> Fallible<ExitStatus> {
-        if self.logical && self.physical {
-            writeln!(
-                exe.stderr(),
-                "pwd: cannot print both physical and logical at the same time"
-            )?;
-            Ok(ExitStatus::ExitCode(1))
+        let pwd = if self.physical {
+            exe.cwd().canonicalize()?
         } else {
-            let pwd = if self.physical {
-                exe.cwd().canonicalize()?
-            } else {
-                exe.cwd().to_path_buf()
-            };
-            writeln!(exe.stdout(), "{}", pwd.display())?;
-            Ok(ExitStatus::ExitCode(0))
-        }
+            exe.cwd().to_path_buf()
+        };
+        writeln!(exe.stdout(), "{}", pwd.display())?;
+        Ok(ExitStatus::ExitCode(0))
     }
 }
 
@@ -48,11 +40,11 @@ impl Builtin for PwdCommand {
 /// The cd utility changes the working directory of the current shell environment.
 pub struct CdCommand {
     /// Handle the operand dot-dot logically; symbolic link components shall not be resolved before dot-dot components are processed
-    #[structopt(short = "L")]
+    #[structopt(short = "L", conflicts_with = "physical")]
     logical: bool,
 
     /// Handle the operand dot-dot physically; symbolic link components shall be resolved before dot-dot components are processed
-    #[structopt(short = "P")]
+    #[structopt(short = "P", conflicts_with = "logical")]
     physical: bool,
 
     /// The destination directory
@@ -112,14 +104,6 @@ impl Builtin for CdCommand {
                 }
             }
         };
-
-        if self.logical && self.physical {
-            writeln!(
-                exe.stderr(),
-                "cd: cannot be both physical and logical at the same time"
-            )?;
-            return Ok(ExitStatus::ExitCode(1));
-        }
 
         let mut print = false;
 
