@@ -6,6 +6,7 @@ use shlex::string::ShellString;
 use std::collections::HashMap;
 use structopt::*;
 
+mod builtins;
 mod colon;
 mod jobcontrol;
 mod truefalse;
@@ -64,6 +65,7 @@ lazy_static! {
             colon::ColonCommand,
             truefalse::TrueCommand,
             truefalse::FalseCommand,
+            builtins::BuiltinsCommand,
         );
 
         builtins
