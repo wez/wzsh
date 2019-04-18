@@ -1,6 +1,7 @@
 use super::*;
 use pretty_assertions::assert_eq;
-use shlex::TokenPosition;
+use shlex::string::ShellString;
+use shlex::{Aliases, Environment, Expander, TokenPosition};
 
 fn parse(text: &str) -> Fallible<Command> {
     let mut parser = Parser::new("test", text.as_bytes());
