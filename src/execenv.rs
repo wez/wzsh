@@ -5,6 +5,7 @@ use crate::job::{make_foreground_process_group, make_own_process_group, Job, Job
 use crate::parse::{
     Command as ShellCommand, CommandType, FileRedirection, If, Redirection, SimpleCommand,
 };
+use crate::pathsearch::PathSearcher;
 use crate::ShellExpander;
 use failure::{bail, ensure, Fail, Fallible, ResultExt};
 use shlex::string::ShellString;
@@ -135,44 +136,47 @@ impl ExecutionEnvironment {
         }
 
         if search_path {
-            let mut child_cmd = Command::new(&argv[0]);
-            for arg in argv.iter().skip(1) {
-                child_cmd.arg(arg);
+            let env = self.env.borrow();
+            if let Some(exe) = PathSearcher::new(&argv[0], &*env).next() {
+                let mut child_cmd = Command::new(&exe);
+                for arg in argv.iter().skip(1) {
+                    child_cmd.arg(arg);
+                }
+                child_cmd.env_clear();
+                child_cmd.envs(env.iter());
+                child_cmd.current_dir(&*self.cwd());
+
+                child_cmd.stdin(self.stdin.borrow_mut().as_stdio()?);
+                child_cmd.stdout(self.stdout.borrow_mut().as_stdio()?);
+                child_cmd.stderr(self.stderr.borrow_mut().as_stdio()?);
+
+                #[cfg(unix)]
+                unsafe {
+                    use std::os::unix::process::CommandExt;
+                    child_cmd.pre_exec(move || {
+                        let pid = libc::getpid();
+                        if asynchronous {
+                            make_own_process_group(pid);
+                        } else {
+                            make_foreground_process_group(pid);
+                        }
+                        for s in &[
+                            libc::SIGINT,
+                            libc::SIGQUIT,
+                            libc::SIGTSTP,
+                            libc::SIGTTIN,
+                            libc::SIGTTOU,
+                            libc::SIGCHLD,
+                        ] {
+                            libc::signal(*s, libc::SIG_DFL);
+                        }
+
+                        Ok(())
+                    });
+                }
+
+                return Ok(Some(RunnableCommand::ChildProcess(child_cmd)));
             }
-            child_cmd.env_clear();
-            child_cmd.envs(self.env.borrow().iter());
-            child_cmd.current_dir(&*self.cwd());
-
-            child_cmd.stdin(self.stdin.borrow_mut().as_stdio()?);
-            child_cmd.stdout(self.stdout.borrow_mut().as_stdio()?);
-            child_cmd.stderr(self.stderr.borrow_mut().as_stdio()?);
-
-            #[cfg(unix)]
-            unsafe {
-                use std::os::unix::process::CommandExt;
-                child_cmd.pre_exec(move || {
-                    let pid = libc::getpid();
-                    if asynchronous {
-                        make_own_process_group(pid);
-                    } else {
-                        make_foreground_process_group(pid);
-                    }
-                    for s in &[
-                        libc::SIGINT,
-                        libc::SIGQUIT,
-                        libc::SIGTSTP,
-                        libc::SIGTTIN,
-                        libc::SIGTTOU,
-                        libc::SIGCHLD,
-                    ] {
-                        libc::signal(*s, libc::SIG_DFL);
-                    }
-
-                    Ok(())
-                });
-            }
-
-            return Ok(Some(RunnableCommand::ChildProcess(child_cmd)));
         }
 
         bail!("wzsh: {}: command not found", argv[0]);
