@@ -6,6 +6,7 @@ use shlex::string::ShellString;
 use std::collections::HashMap;
 use structopt::*;
 
+mod colon;
 mod jobcontrol;
 mod workingdir;
 
@@ -59,6 +60,7 @@ lazy_static! {
             jobcontrol::FgCommand,
             workingdir::CdCommand,
             workingdir::PwdCommand,
+            colon::ColonCommand,
         );
 
         builtins
