@@ -10,6 +10,7 @@ mod job;
 mod parse;
 mod pathsearch;
 mod repl;
+mod vm;
 
 use execenv::ExecutionEnvironment;
 use expander::ShellExpander;
