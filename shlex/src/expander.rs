@@ -55,6 +55,67 @@ pub struct ExpandableWord {
     components: Arc<Vec<WordComponent>>,
 }
 
+#[derive(Debug)]
+pub struct WordExpander {
+    components: Arc<Vec<WordComponent>>,
+    next_comp: usize,
+    fields: Vec<ShellString>,
+    accumulator: String,
+}
+
+impl WordExpander {
+    fn next_field(
+        &mut self,
+        expander: &Expander,
+        environment: &mut Environment,
+    ) -> Fallible<Option<ShellString>> {
+        if !self.fields.is_empty() {
+            return Ok(Some(self.fields.remove(0)));
+        }
+
+        match self.components.get(self.next_comp) {
+            None => return Ok(None),
+            Some(WordComponent::LiteralOs(_)) => panic!("do something with LiteralOs"),
+            Some(WordComponent::Literal(s)) | Some(WordComponent::AssignmentName(s)) => {
+                self.accumulator.push_str(s)
+            }
+            Some(WordComponent::TildeExpand(name)) => {
+                match expander.lookup_homedir(name.as_ref().map(String::as_str), environment) {
+                    Ok(ShellString::String(home)) => self.accumulator.push_str(&home),
+                    Err(_) | Ok(ShellString::Os(_)) => {
+                        self.accumulator.push('~');
+                        if let Some(name) = name {
+                            self.accumulator.push_str(name);
+                        }
+                    }
+                }
+            }
+            Some(WordComponent::FieldSplittable(s)) => {
+                if !self.accumulator.is_empty() {
+                    let field = std::mem::replace(&mut self.accumulator, String::new());
+                    self.fields.push(field.into());
+                    self.accumulator.clear();
+                }
+                let mut fields = vec![];
+                split_fields(s, environment, &mut fields)?;
+                for field in fields.drain(..) {
+                    self.fields.push(field.into());
+                }
+            }
+            Some(WordComponent::ParameterExpansion(expr))
+            | Some(WordComponent::NonSplittableParameterExpansion(expr)) => {}
+
+            comp @ Some(WordComponent::DollarExpandable(_))
+            | comp @ Some(WordComponent::CheckForQuotes(_))
+            | comp @ Some(WordComponent::TildeExpandable(_)) => {
+                bail!("should not get {:?} during expansion", comp)
+            }
+        };
+
+        Ok(None)
+    }
+}
+
 impl ExpandableWord {
     pub fn new(word: &ShellString) -> Fallible<ExpandableWord> {
         let word = match word {
@@ -314,6 +375,48 @@ impl ExpandableWord {
     }
 }
 
+fn split_fields(text: &str, env: &mut Environment, target: &mut Vec<String>) -> Fallible<()> {
+    let ifs = env.get_str("IFS")?.unwrap_or(" \t\n");
+    if ifs.is_empty() {
+        // No field splitting is needed
+        target.push(text.to_owned());
+        return Ok(());
+    }
+
+    let ifs_set: std::collections::HashSet<char> = ifs.chars().collect();
+    let mut in_quotes = false;
+    let mut start = None;
+
+    for (idx, c) in text.char_indices() {
+        if in_quotes {
+            if c == '"' {
+                in_quotes = false;
+            }
+            continue;
+        }
+
+        if c == '"' {
+            in_quotes = true;
+        }
+
+        if ifs_set.contains(&c) {
+            // Delimit a field
+            let first = start.take().unwrap_or(idx);
+            if idx > first {
+                target.push(text[first..idx].to_owned());
+            }
+        } else if start.is_none() {
+            start = Some(idx);
+        }
+    }
+
+    if let Some(start) = start {
+        target.push(text[start..].to_owned());
+    }
+
+    Ok(())
+}
+
 pub trait Expander {
     /// Look up the home directory for the specified user.
     /// If user is not specified, look it up for the current user.
@@ -335,7 +438,7 @@ pub trait Expander {
                 self.expand_word_into(&mut expanded, word, environment)?;
 
                 let mut fields = vec![];
-                self.split_fields(&expanded, environment, &mut fields)?;
+                split_fields(&expanded, environment, &mut fields)?;
 
                 // pathname expansion
                 let mut expanded = vec![];
@@ -409,53 +512,6 @@ pub trait Expander {
                     eprintln!("wzsh: while globbing {}: {}", text, e);
                 }
             }
-        }
-
-        Ok(())
-    }
-
-    fn split_fields(
-        &self,
-        text: &str,
-        env: &mut Environment,
-        target: &mut Vec<String>,
-    ) -> Fallible<()> {
-        let ifs = env.get_str("IFS")?.unwrap_or(" \t\n");
-        if ifs.is_empty() {
-            // No field splitting is needed
-            target.push(text.to_owned());
-            return Ok(());
-        }
-
-        let ifs_set: std::collections::HashSet<char> = ifs.chars().collect();
-        let mut in_quotes = false;
-        let mut start = None;
-
-        for (idx, c) in text.char_indices() {
-            if in_quotes {
-                if c == '"' {
-                    in_quotes = false;
-                }
-                continue;
-            }
-
-            if c == '"' {
-                in_quotes = true;
-            }
-
-            if ifs_set.contains(&c) {
-                // Delimit a field
-                let first = start.take().unwrap_or(idx);
-                if idx > first {
-                    target.push(text[first..idx].to_owned());
-                }
-            } else if start.is_none() {
-                start = Some(idx);
-            }
-        }
-
-        if let Some(start) = start {
-            target.push(text[start..].to_owned());
         }
 
         Ok(())
@@ -1035,8 +1091,7 @@ mod test {
             None => env.unset("IFS"),
         };
         let mut target = Vec::new();
-        let expander = MockExpander {};
-        expander.split_fields(input, &mut env, &mut target)?;
+        split_fields(input, &mut env, &mut target)?;
         Ok(target)
     }
 
