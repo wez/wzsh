@@ -2,14 +2,300 @@ use crate::environment::Environment;
 use crate::paramexp::ParamExpr;
 use crate::parse_assignment_word;
 use crate::string::ShellString;
-use failure::{bail, Fallible};
+use failure::{bail, format_err, Error, Fallible};
 use lazy_static::lazy_static;
 use regex::{Captures, Regex};
+use std::convert::{TryFrom, TryInto};
+use std::ffi::OsString;
 use std::fmt::Write;
 
 lazy_static! {
     static ref TILDE_RE: Regex =
         Regex::new(r"(~$|~/|~([a-zA-Z_][a-zA-Z0-9_]+))").expect("failed to compile TILDE_RE");
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum WordComponent {
+    Literal(String),
+    LiteralOs(OsString),
+    TildeExpand(Option<String>),
+    AssignmentName(String),
+    ParameterExpansion(ParamExpr),
+    FieldSplittable(String),
+
+    /// An internal state while producing an ExpandableWord;
+    /// the string is a candidate for ParameterExpansion and
+    /// later expansion stages
+    DollarExpandable(String),
+    CheckForQuotes(String),
+    TildeExpandable(String),
+}
+
+impl TryFrom<WordComponent> for String {
+    type Error = Error;
+    fn try_from(component: WordComponent) -> Fallible<String> {
+        match component {
+            WordComponent::Literal(s)
+            | WordComponent::AssignmentName(s)
+            | WordComponent::DollarExpandable(s)
+            | WordComponent::TildeExpandable(s)
+            | WordComponent::CheckForQuotes(s) => Ok(s),
+            _ => bail!(
+                "WordComponent {:?} is not representable as a String",
+                component
+            ),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct ExpandableWord {
+    components: Vec<WordComponent>,
+}
+
+impl ExpandableWord {
+    pub fn new(word: &ShellString) -> Fallible<Self> {
+        let word = match word {
+            ShellString::Os(s) => {
+                return Ok(Self {
+                    components: vec![WordComponent::LiteralOs(s.to_owned())],
+                })
+            }
+            ShellString::String(s) => s,
+        };
+
+        let mut components = vec![];
+        Self::check_for_quotes(word, &mut components)?;
+        Self::tilde_expansion(&mut components);
+        Self::dollar_expansion(&mut components);
+
+        Ok(Self { components })
+    }
+
+    fn find_and_remove<F: Fn(&mut WordComponent) -> bool>(
+        components: &mut Vec<WordComponent>,
+        pred: F,
+    ) -> Option<(usize, String)> {
+        for (idx, word) in components.iter_mut().enumerate() {
+            if pred(word) {
+                let word = components.remove(idx);
+                return Some((idx, word.try_into().unwrap()));
+            }
+        }
+        None
+    }
+
+    fn find_and_remove_dollar_expandable(
+        components: &mut Vec<WordComponent>,
+    ) -> Option<(usize, String)> {
+        Self::find_and_remove(components, |comp| match comp {
+            WordComponent::DollarExpandable(_) => true,
+            _ => false,
+        })
+    }
+
+    fn find_and_remove_tilde_expandable(
+        components: &mut Vec<WordComponent>,
+    ) -> Option<(usize, String)> {
+        Self::find_and_remove(components, |comp| match comp {
+            WordComponent::TildeExpandable(_) => true,
+            _ => false,
+        })
+    }
+
+    fn find_unquoted(s: &str, what: char) -> Option<usize> {
+        let mut prev = None;
+        for (idx, c) in s.char_indices() {
+            match prev.replace(c) {
+                Some('\\') => continue,
+                _ => {
+                    if c == what {
+                        return Some(idx);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn find_char_position(s: &str, what: char) -> Option<usize> {
+        for (idx, c) in s.char_indices() {
+            if c == what {
+                return Some(idx);
+            }
+        }
+        None
+    }
+
+    fn find_unquoted_single_or_double_quote(s: &str) -> Option<(usize, char)> {
+        let mut prev = None;
+        for (idx, c) in s.char_indices() {
+            match prev.replace(c) {
+                Some('\\') => continue,
+                _ => {
+                    if c == '"' || c == '\'' {
+                        return Some((idx, c));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn check_for_quotes(word: &str, components: &mut Vec<WordComponent>) -> Fallible<()> {
+        let mut remainder = word;
+        loop {
+            if let Some((quote_pos, quote)) = Self::find_unquoted_single_or_double_quote(remainder)
+            {
+                if quote_pos > 0 {
+                    components.push(WordComponent::TildeExpandable(
+                        remainder[..quote_pos].to_owned(),
+                    ));
+                    remainder = &remainder[quote_pos..];
+                }
+                // remainder always starts with the quote pos, so make sure we don't use it below
+                drop(quote_pos);
+
+                if quote == '\'' {
+                    let end_quote =
+                        Self::find_char_position(&remainder[1..], '\'').ok_or_else(|| {
+                            format_err!(
+                                "missing closing single quote in {}, components {:?}",
+                                remainder,
+                                components
+                            )
+                        })?;
+
+                    let literal = &remainder[1..=end_quote];
+                    components.push(WordComponent::Literal(literal.to_owned()));
+                    remainder = &remainder[end_quote + 2..];
+                } else if quote == '"' {
+                    let end_quote = Self::find_unquoted(&remainder[1..], '"').ok_or_else(|| {
+                        format_err!(
+                            "missing closing double quote in {}, components {:?}",
+                            remainder,
+                            components
+                        )
+                    })?;
+
+                    let literal = &remainder[1..=end_quote];
+                    // FIXME: we should tell that expansion that we are double quoted,
+                    // as it impacts word splitting and filename generation.
+                    components.push(WordComponent::DollarExpandable(literal.to_owned()));
+                    remainder = &remainder[end_quote + 2..];
+                }
+            } else {
+                // There are no more quoted portions, to the remainder is to be expanded as-is
+                components.push(WordComponent::TildeExpandable(remainder.to_owned()));
+                return Ok(());
+            }
+        }
+    }
+
+    fn dollar_expansion(components: &mut Vec<WordComponent>) {
+        while let Some((mut idx, word)) = Self::find_and_remove_dollar_expandable(components) {
+            let mut remainder = word.as_str();
+            loop {
+                if let Some(dollar_pos) = Self::find_unquoted(remainder, '$') {
+                    if dollar_pos > 0 {
+                        components.insert(
+                            idx,
+                            WordComponent::FieldSplittable(remainder[..dollar_pos].to_owned()),
+                        );
+                        idx += 1;
+                    }
+                    remainder = &remainder[dollar_pos..];
+
+                    if remainder.starts_with("$((") {
+                        // arithmetic expansion - not yet handled
+                        components.insert(idx, WordComponent::Literal("$((".to_owned()));
+                        idx += 1;
+                        remainder = &remainder[3..];
+                    } else if remainder.starts_with("$(") {
+                        // command substitution - not yet handled
+                        components.insert(idx, WordComponent::Literal("$(".to_owned()));
+                        idx += 1;
+                        remainder = &remainder[2..];
+                    } else {
+                        // parameter expansion
+                        if let Some((expr, extra)) = ParamExpr::try_parse(remainder) {
+                            components.insert(idx, WordComponent::ParameterExpansion(expr));
+                            idx += 1;
+                            remainder = extra;
+                        } else {
+                            components.insert(idx, WordComponent::Literal("$".to_owned()));
+                            idx += 1;
+                            remainder = &remainder[1..];
+                        }
+                    }
+                } else {
+                    if !remainder.is_empty() {
+                        components
+                            .insert(idx, WordComponent::FieldSplittable(remainder.to_owned()));
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    fn tilde_expansion(components: &mut Vec<WordComponent>) {
+        while let Some((mut idx, word)) = Self::find_and_remove_tilde_expandable(components) {
+            let mut tilde_components = vec![];
+            if let Some((key, value)) = parse_assignment_word(&word) {
+                tilde_components.push(WordComponent::AssignmentName(key.to_owned()));
+                tilde_components.push(WordComponent::Literal("=".to_owned()));
+                Self::tilde_expand_assign(value, &mut tilde_components);
+            } else {
+                Self::tilde_expand_single(&word, &mut tilde_components);
+            }
+            for comp in tilde_components {
+                components.insert(idx, comp);
+                idx += 1;
+            }
+        }
+    }
+
+    /// Single word tilde expansion can only occur at the start of the word
+    fn tilde_expand_single(s: &str, components: &mut Vec<WordComponent>) {
+        if let Some(caps) = TILDE_RE.captures(s) {
+            let all = caps.get(0).unwrap();
+            if all.start() == 0 {
+                let name = match caps.get(2) {
+                    None => None,
+                    Some(cap) => Some(cap.as_str().to_owned()),
+                };
+                components.push(WordComponent::TildeExpand(name.clone()));
+                if name.is_none() && caps.get(1).unwrap().as_str() == "~/" {
+                    components.push(WordComponent::Literal("/".to_owned()));
+                }
+                let remainder = &s[all.end()..];
+                if !remainder.is_empty() {
+                    components.push(WordComponent::DollarExpandable(remainder.to_owned()));
+                }
+                return;
+            }
+        }
+        components.push(WordComponent::DollarExpandable(s.to_owned()));
+    }
+
+    /// Assignment-word tilde expansion can occur either at the start of the value (after
+    /// the `=` sign) or after an *unquoted* colon character
+    fn tilde_expand_assign(s: &str, components: &mut Vec<WordComponent>) {
+        let mut prev = None;
+        for (idx, element) in s
+            .split(|c| match prev.replace(c) {
+                Some('\\') => false,
+                _ => c == ':',
+            })
+            .enumerate()
+        {
+            if idx > 0 {
+                components.push(WordComponent::Literal(":".to_owned()));
+            }
+            Self::tilde_expand_single(element, components);
+        }
+    }
 }
 
 pub trait Expander {
@@ -405,6 +691,7 @@ pub trait Expander {
 mod test {
     use super::*;
     use failure::bail;
+    use pretty_assertions::assert_eq;
 
     struct MockExpander {}
     impl Expander for MockExpander {
@@ -764,5 +1051,98 @@ mod test {
         );
 
         Ok(())
+    }
+
+    #[test]
+    fn expandable_word() {
+        assert_eq!(
+            ExpandableWord::new(&"'hello'".into()).unwrap(),
+            ExpandableWord {
+                components: vec![WordComponent::Literal("hello".to_owned())]
+            }
+        );
+
+        assert_eq!(
+            ExpandableWord::new(&"hello".into()).unwrap(),
+            ExpandableWord {
+                components: vec![WordComponent::FieldSplittable("hello".to_owned())]
+            }
+        );
+
+        assert_eq!(
+            ExpandableWord::new(&"foo=hello".into()).unwrap(),
+            ExpandableWord {
+                components: vec![
+                    WordComponent::AssignmentName("foo".to_owned()),
+                    WordComponent::Literal("=".to_owned()),
+                    WordComponent::FieldSplittable("hello".to_owned())
+                ]
+            }
+        );
+
+        assert_eq!(
+            ExpandableWord::new(&"foo=~wez/hello".into()).unwrap(),
+            ExpandableWord {
+                components: vec![
+                    WordComponent::AssignmentName("foo".to_owned()),
+                    WordComponent::Literal("=".to_owned()),
+                    WordComponent::TildeExpand(Some("wez".to_owned())),
+                    WordComponent::FieldSplittable("/hello".to_owned()),
+                ]
+            }
+        );
+
+        assert_eq!(
+            ExpandableWord::new(&"foo='~wez/hello'".into()).unwrap(),
+            ExpandableWord {
+                components: vec![
+                    WordComponent::AssignmentName("foo".to_owned()),
+                    WordComponent::Literal("=".to_owned()),
+                    WordComponent::Literal("~wez/hello".to_owned()),
+                ]
+            }
+        );
+
+        assert_eq!(
+            ExpandableWord::new(&"foo=\"~wez/hello\"".into()).unwrap(),
+            ExpandableWord {
+                components: vec![
+                    WordComponent::AssignmentName("foo".to_owned()),
+                    WordComponent::Literal("=".to_owned()),
+                    WordComponent::FieldSplittable("~wez/hello".to_owned()),
+                ]
+            }
+        );
+
+        assert_eq!(
+            ExpandableWord::new(&"~hello".into()).unwrap(),
+            ExpandableWord {
+                components: vec![WordComponent::TildeExpand(Some("hello".to_owned()))]
+            }
+        );
+
+        assert_eq!(
+            ExpandableWord::new(&"$hello there".into()).unwrap(),
+            ExpandableWord {
+                components: vec![
+                    WordComponent::ParameterExpansion(ParamExpr::Get {
+                        name: "hello".to_owned()
+                    }),
+                    WordComponent::FieldSplittable(" there".to_owned()),
+                ]
+            }
+        );
+
+        assert_eq!(
+            ExpandableWord::new(&"\"$hello\" there".into()).unwrap(),
+            ExpandableWord {
+                components: vec![
+                    WordComponent::ParameterExpansion(ParamExpr::Get {
+                        name: "hello".to_owned()
+                    }),
+                    WordComponent::FieldSplittable(" there".to_owned()),
+                ]
+            }
+        );
     }
 }

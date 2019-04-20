@@ -523,19 +523,12 @@ impl<R: std::io::Read> Lexer<R> {
     }
 
     fn single_quoted(&mut self) -> Fallible<()> {
-        let mut backslash = false;
         loop {
             let b = self.next_char_or_err(LexErrorKind::EofDuringSingleQuotedString)?;
             self.accumulate(b);
 
-            if b.c == '\'' && !backslash {
+            if b.c == '\'' {
                 return Ok(());
-            }
-
-            backslash = false;
-
-            if b.c == '\\' {
-                backslash = true;
             }
         }
     }
@@ -797,14 +790,21 @@ mod test_lex {
             )
         );
         assert_eq!(
-            lex("'hel\\'lo'"),
+            lex("'hel\\'lo"),
             (
                 vec![Token {
-                    kind: TokenKind::new_word("'hel\\'lo'"),
+                    kind: TokenKind::new_word("'hel\\'lo"),
                     start: TokenPosition { line: 0, col: 0 },
-                    end: TokenPosition { line: 0, col: 8 }
+                    end: TokenPosition { line: 0, col: 7 }
                 }],
                 None
+            )
+        );
+        assert_eq!(
+            lex("'hel\\'lo'"),
+            (
+                vec![],
+                Some("EOF while lexing single quoted string starting at line 0 column 0 ending at line 0 column 9".to_owned())
             )
         );
         assert_eq!(
