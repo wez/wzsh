@@ -8,6 +8,7 @@ use regex::{Captures, Regex};
 use std::convert::{TryFrom, TryInto};
 use std::ffi::OsString;
 use std::fmt::Write;
+use std::sync::Arc;
 
 lazy_static! {
     static ref TILDE_RE: Regex =
@@ -51,15 +52,15 @@ impl TryFrom<WordComponent> for String {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct ExpandableWord {
-    components: Vec<WordComponent>,
+    components: Arc<Vec<WordComponent>>,
 }
 
 impl ExpandableWord {
-    pub fn new(word: &ShellString) -> Fallible<Self> {
+    pub fn new(word: &ShellString) -> Fallible<ExpandableWord> {
         let word = match word {
             ShellString::Os(s) => {
                 return Ok(Self {
-                    components: vec![WordComponent::LiteralOs(s.to_owned())],
+                    components: Arc::new(vec![WordComponent::LiteralOs(s.to_owned())]),
                 })
             }
             ShellString::String(s) => s,
@@ -70,7 +71,9 @@ impl ExpandableWord {
         Self::tilde_expansion(&mut components);
         Self::dollar_expansion(&mut components);
 
-        Ok(Self { components })
+        Ok(Self {
+            components: Arc::new(components),
+        })
     }
 
     fn find_and_remove<F: Fn(&mut WordComponent) -> bool>(
@@ -1068,108 +1071,93 @@ mod test {
 
     #[test]
     fn expandable_word() {
+        fn expand(s: &str) -> Vec<WordComponent> {
+            let word = ExpandableWord::new(&s.into()).unwrap();
+            Arc::try_unwrap(word.components).unwrap()
+        }
+
         assert_eq!(
-            ExpandableWord::new(&"'hello'".into()).unwrap(),
-            ExpandableWord {
-                components: vec![WordComponent::Literal("hello".to_owned())]
-            }
+            expand("'hello'"),
+            vec![WordComponent::Literal("hello".to_owned())]
         );
 
         assert_eq!(
-            ExpandableWord::new(&"hello".into()).unwrap(),
-            ExpandableWord {
-                components: vec![WordComponent::FieldSplittable("hello".to_owned())]
-            }
+            expand("hello"),
+            vec![WordComponent::FieldSplittable("hello".to_owned())]
         );
 
         assert_eq!(
-            ExpandableWord::new(&"foo=hello".into()).unwrap(),
-            ExpandableWord {
-                components: vec![
-                    WordComponent::AssignmentName("foo".to_owned()),
-                    WordComponent::Literal("=".to_owned()),
-                    WordComponent::FieldSplittable("hello".to_owned())
-                ]
-            }
+            expand("foo=hello"),
+            vec![
+                WordComponent::AssignmentName("foo".to_owned()),
+                WordComponent::Literal("=".to_owned()),
+                WordComponent::FieldSplittable("hello".to_owned())
+            ]
         );
 
         assert_eq!(
-            ExpandableWord::new(&"foo=~wez/hello".into()).unwrap(),
-            ExpandableWord {
-                components: vec![
-                    WordComponent::AssignmentName("foo".to_owned()),
-                    WordComponent::Literal("=".to_owned()),
-                    WordComponent::TildeExpand(Some("wez".to_owned())),
-                    WordComponent::FieldSplittable("/hello".to_owned()),
-                ]
-            }
+            expand("foo=~wez/hello"),
+            vec![
+                WordComponent::AssignmentName("foo".to_owned()),
+                WordComponent::Literal("=".to_owned()),
+                WordComponent::TildeExpand(Some("wez".to_owned())),
+                WordComponent::FieldSplittable("/hello".to_owned()),
+            ]
         );
 
         assert_eq!(
-            ExpandableWord::new(&"foo='~wez/hello'".into()).unwrap(),
-            ExpandableWord {
-                components: vec![
-                    WordComponent::AssignmentName("foo".to_owned()),
-                    WordComponent::Literal("=".to_owned()),
-                    WordComponent::Literal("~wez/hello".to_owned()),
-                ]
-            }
+            expand("foo='~wez/hello'"),
+            vec![
+                WordComponent::AssignmentName("foo".to_owned()),
+                WordComponent::Literal("=".to_owned()),
+                WordComponent::Literal("~wez/hello".to_owned()),
+            ]
         );
 
         assert_eq!(
-            ExpandableWord::new(&"foo=\"~wez/hello\"".into()).unwrap(),
-            ExpandableWord {
-                components: vec![
-                    WordComponent::AssignmentName("foo".to_owned()),
-                    WordComponent::Literal("=".to_owned()),
-                    WordComponent::Literal("~wez/hello".to_owned()),
-                ]
-            }
+            expand("foo=\"~wez/hello\""),
+            vec![
+                WordComponent::AssignmentName("foo".to_owned()),
+                WordComponent::Literal("=".to_owned()),
+                WordComponent::Literal("~wez/hello".to_owned()),
+            ]
         );
 
         assert_eq!(
-            ExpandableWord::new(&"foo=\"~wez/$FOO\"".into()).unwrap(),
-            ExpandableWord {
-                components: vec![
-                    WordComponent::AssignmentName("foo".to_owned()),
-                    WordComponent::Literal("=".to_owned()),
-                    WordComponent::Literal("~wez/".to_owned()),
-                    WordComponent::NonSplittableParameterExpansion(ParamExpr::Get {
-                        name: "FOO".to_owned()
-                    }),
-                ]
-            }
+            expand("foo=\"~wez/$FOO\""),
+            vec![
+                WordComponent::AssignmentName("foo".to_owned()),
+                WordComponent::Literal("=".to_owned()),
+                WordComponent::Literal("~wez/".to_owned()),
+                WordComponent::NonSplittableParameterExpansion(ParamExpr::Get {
+                    name: "FOO".to_owned()
+                }),
+            ]
         );
 
         assert_eq!(
-            ExpandableWord::new(&"~hello".into()).unwrap(),
-            ExpandableWord {
-                components: vec![WordComponent::TildeExpand(Some("hello".to_owned()))]
-            }
+            expand("~hello"),
+            vec![WordComponent::TildeExpand(Some("hello".to_owned()))]
         );
 
         assert_eq!(
-            ExpandableWord::new(&"$hello there".into()).unwrap(),
-            ExpandableWord {
-                components: vec![
-                    WordComponent::ParameterExpansion(ParamExpr::Get {
-                        name: "hello".to_owned()
-                    }),
-                    WordComponent::FieldSplittable(" there".to_owned()),
-                ]
-            }
+            expand("$hello there"),
+            vec![
+                WordComponent::ParameterExpansion(ParamExpr::Get {
+                    name: "hello".to_owned()
+                }),
+                WordComponent::FieldSplittable(" there".to_owned()),
+            ]
         );
 
         assert_eq!(
-            ExpandableWord::new(&"\"$hello\" there".into()).unwrap(),
-            ExpandableWord {
-                components: vec![
-                    WordComponent::NonSplittableParameterExpansion(ParamExpr::Get {
-                        name: "hello".to_owned()
-                    }),
-                    WordComponent::FieldSplittable(" there".to_owned()),
-                ]
-            }
+            expand("\"$hello\" there"),
+            vec![
+                WordComponent::NonSplittableParameterExpansion(ParamExpr::Get {
+                    name: "hello".to_owned()
+                }),
+                WordComponent::FieldSplittable(" there".to_owned()),
+            ]
         );
     }
 }
