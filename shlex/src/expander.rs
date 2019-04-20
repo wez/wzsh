@@ -21,6 +21,7 @@ pub enum WordComponent {
     TildeExpand(Option<String>),
     AssignmentName(String),
     ParameterExpansion(ParamExpr),
+    NonSplittableParameterExpansion(ParamExpr),
     FieldSplittable(String),
 
     /// An internal state while producing an ExpandableWord;
@@ -179,9 +180,21 @@ impl ExpandableWord {
                     })?;
 
                     let literal = &remainder[1..=end_quote];
-                    // FIXME: we should tell that expansion that we are double quoted,
-                    // as it impacts word splitting and filename generation.
-                    components.push(WordComponent::DollarExpandable(literal.to_owned()));
+                    // Double quoting prevents field splitting and filename
+                    // generation, so we expand it here, rewriting FieldSplittable
+                    // as a Literal.
+                    let mut quoted_components =
+                        vec![WordComponent::DollarExpandable(literal.to_owned())];
+                    Self::dollar_expansion(&mut quoted_components);
+                    for comp in quoted_components.drain(..) {
+                        components.push(match comp {
+                            WordComponent::FieldSplittable(s) => WordComponent::Literal(s),
+                            WordComponent::ParameterExpansion(p) => {
+                                WordComponent::NonSplittableParameterExpansion(p)
+                            }
+                            comp => comp,
+                        });
+                    }
                     remainder = &remainder[end_quote + 2..];
                 }
             } else {
@@ -1109,7 +1122,21 @@ mod test {
                 components: vec![
                     WordComponent::AssignmentName("foo".to_owned()),
                     WordComponent::Literal("=".to_owned()),
-                    WordComponent::FieldSplittable("~wez/hello".to_owned()),
+                    WordComponent::Literal("~wez/hello".to_owned()),
+                ]
+            }
+        );
+
+        assert_eq!(
+            ExpandableWord::new(&"foo=\"~wez/$FOO\"".into()).unwrap(),
+            ExpandableWord {
+                components: vec![
+                    WordComponent::AssignmentName("foo".to_owned()),
+                    WordComponent::Literal("=".to_owned()),
+                    WordComponent::Literal("~wez/".to_owned()),
+                    WordComponent::NonSplittableParameterExpansion(ParamExpr::Get {
+                        name: "FOO".to_owned()
+                    }),
                 ]
             }
         );
@@ -1137,7 +1164,7 @@ mod test {
             ExpandableWord::new(&"\"$hello\" there".into()).unwrap(),
             ExpandableWord {
                 components: vec![
-                    WordComponent::ParameterExpansion(ParamExpr::Get {
+                    WordComponent::NonSplittableParameterExpansion(ParamExpr::Get {
                         name: "hello".to_owned()
                     }),
                     WordComponent::FieldSplittable(" there".to_owned()),
