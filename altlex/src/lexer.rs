@@ -3,7 +3,7 @@ use crate::position::{Pos, Span};
 use crate::reader::{CharReader, Next, PositionedChar};
 use crate::tokenenum::MatchResult;
 use crate::{Operator, OPERATORS};
-use failure::{bail, Fallible};
+use failure::Fallible;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::io::Read;
@@ -62,12 +62,14 @@ struct LexState {
 pub struct Lexer<R: Read> {
     reader: CharReader<R>,
     stack: Vec<LexState>,
+    last_token: Option<Token>,
 }
 
 impl<R: Read> Lexer<R> {
     pub fn new(stream: R) -> Self {
         Self {
             reader: CharReader::new(stream),
+            last_token: None,
             stack: vec![LexState {
                 state: State::Top,
                 current_word: None,
@@ -76,10 +78,9 @@ impl<R: Read> Lexer<R> {
     }
 
     pub fn next_token(&mut self) -> Fallible<Token> {
-        eprintln!("calling next_token");
+        eprintln!("calling next_token in state {:?}", self.state().state);
         match self.state().state {
-            State::Top => self.top(),
-            State::AssignmentWord => self.assignment_word(),
+            State::Top | State::AssignmentWord => self.top(),
         }
     }
 
@@ -128,17 +129,19 @@ impl<R: Read> Lexer<R> {
         Ok(None)
     }
 
-    fn assignment_word(&mut self) -> Fallible<Token> {
-        loop {
-            if let Some(token) = self.word_common()? {
-                self.pop_state();
-                return Ok(token);
-            }
-        }
+    fn unget_token(&mut self, token: Token) {
+        assert!(self.last_token.is_none());
+        eprintln!("unget_token {:?}", token);
+        self.last_token.replace(token);
     }
 
     fn top(&mut self) -> Fallible<Token> {
         loop {
+            if let Some(token) = self.last_token.take() {
+                eprintln!("using last_token {:?}", token);
+                return Ok(token);
+            }
+
             if let MatchResult::Match(..) = self.reader.matches_literal(&OPERATORS)? {
                 if let Some(token) = self.delimit_current_word() {
                     return Ok(token);
@@ -162,15 +165,15 @@ impl<R: Read> Lexer<R> {
                 }
                 let (name, span) = self.reader.next_assignment_word()?.unwrap();
                 self.push_state(State::AssignmentWord);
-                let value_token = self.assignment_word()?;
-                match value_token {
-                    Token::Word(value) => {
-                        return Ok(Token::Assignment { name, span, value });
+                let value = match self.top()? {
+                    Token::Word(value) => value,
+                    token => {
+                        self.unget_token(token);
+                        vec![]
                     }
-                    _ => {
-                        bail!("unexpected value token {:?}", value_token);
-                    }
-                }
+                };
+                self.pop_state();
+                return Ok(Token::Assignment { name, span, value });
             }
 
             if let Some(token) = self.word_common()? {
@@ -579,6 +582,39 @@ mod test {
                     remove_backslash: true
                 }]
             }]
+        );
+
+        assert_eq!(
+            tokens("FOO="),
+            vec![Token::Assignment {
+                name: "FOO".to_owned(),
+                span: Span::new_to(0, 0, 4),
+                value: vec![],
+            }]
+        );
+
+        assert_eq!(
+            tokens("FOO=\n"),
+            vec![
+                Token::Assignment {
+                    name: "FOO".to_owned(),
+                    span: Span::new_to(0, 0, 4),
+                    value: vec![],
+                },
+                Token::Newline(Pos::new(0, 4))
+            ]
+        );
+
+        assert_eq!(
+            tokens("FOO=||"),
+            vec![
+                Token::Assignment {
+                    name: "FOO".to_owned(),
+                    span: Span::new_to(0, 0, 4),
+                    value: vec![],
+                },
+                Token::Operator(Operator::OrIf, Span::new_to(0, 4, 5)),
+            ]
         );
 
         assert_eq!(
