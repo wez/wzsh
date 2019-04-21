@@ -21,6 +21,7 @@ pub enum WordComponentKind {
     Literal(String),
     TildeExpand(Option<String>),
     ParamExpand(ParamExpr),
+    CommandSubstitution(Vec<Token>),
 }
 
 impl WordComponentKind {
@@ -49,6 +50,7 @@ pub enum Token {
         span: Span,
         value: Vec<WordComponent>,
     },
+    EndCommandSubst(Pos),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -105,12 +107,14 @@ enum State {
     AssignmentWord,
     ParamExprWord,
     DoubleQuotes,
+    CommandSubstitution(char),
 }
 
 #[derive(Debug)]
 struct LexState {
     state: State,
     current_word: Option<Vec<WordComponent>>,
+    open_paren_count: usize,
 }
 
 pub struct Lexer<R: Read> {
@@ -127,6 +131,7 @@ impl<R: Read> Lexer<R> {
             stack: vec![LexState {
                 state: State::Top,
                 current_word: None,
+                open_paren_count: 0,
             }],
         }
     }
@@ -134,7 +139,10 @@ impl<R: Read> Lexer<R> {
     pub fn next_token(&mut self) -> Fallible<Token> {
         eprintln!("calling next_token in state {:?}", self.state().state);
         match self.state().state {
-            State::Top | State::AssignmentWord | State::ParamExprWord => self.top(),
+            State::CommandSubstitution(_)
+            | State::Top
+            | State::AssignmentWord
+            | State::ParamExprWord => self.top(),
             State::DoubleQuotes => bail!("invalid state for next_token {:?}", self.state().state),
         }
     }
@@ -143,6 +151,7 @@ impl<R: Read> Lexer<R> {
         self.stack.push(LexState {
             state,
             current_word: None,
+            open_paren_count: 0,
         });
     }
 
@@ -169,6 +178,21 @@ impl<R: Read> Lexer<R> {
                 }
 
                 let (op, span) = self.reader.next_literal(&OPERATORS)?.unwrap();
+
+                if let State::CommandSubstitution(')') = self.state().state {
+                    let state = self.state();
+                    match op {
+                        Operator::LeftParen => state.open_paren_count += 1,
+                        Operator::RightParen => {
+                            state.open_paren_count -= 1;
+                            if state.open_paren_count == 0 {
+                                return Ok(Token::EndCommandSubst(span.start));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+
                 return Ok(Token::Operator(op, span));
             }
 
@@ -308,6 +332,61 @@ impl<R: Read> Lexer<R> {
 
     fn dollar(&mut self, start: Pos) -> Fallible<()> {
         let c = self.next_char_or_err(LexErrorKind::EofDuringParameterExpansion)?;
+        if c.c == '(' {
+            let maybe_paren = self.next_char_or_err(LexErrorKind::EofDuringParameterExpansion)?;
+            if maybe_paren.c == '(' {
+                self.arithmetic(start)
+            } else {
+                self.reader.unget(maybe_paren);
+                self.command(start, c)
+            }
+        } else {
+            self.parameter_expansion(start, c)
+        }
+    }
+
+    fn command(&mut self, start: Pos, opener: PositionedChar) -> Fallible<()> {
+        self.push_state(State::CommandSubstitution(if opener.c == '(' {
+            ')'
+        } else {
+            '`'
+        }));
+        if opener.c == '(' {
+            self.state().open_paren_count = 1;
+        }
+        let mut tokens = vec![];
+        let mut end = start;
+        while let Ok(token) = self.top() {
+            match token {
+                Token::EndCommandSubst(pos) => {
+                    end = pos;
+                    break;
+                }
+                Token::Eof(pos) => {
+                    return Err(LexErrorKind::EofDuringCommandSubstitution
+                        .at(pos.into())
+                        .into());
+                }
+                token => tokens.push(token),
+            }
+        }
+        self.pop_state();
+        let word = WordComponent {
+            kind: WordComponentKind::CommandSubstitution(tokens),
+            span: Span::new(start, end),
+            splittable: true,
+            remove_backslash: true,
+        };
+
+        self.add_to_word(word);
+        Ok(())
+    }
+
+    fn arithmetic(&mut self, _start: Pos) -> Fallible<()> {
+        bail!("arithmetic not done");
+    }
+
+    fn parameter_expansion(&mut self, start: Pos, c: PositionedChar) -> Fallible<()> {
         let curlies = if c.c != '{' {
             self.reader.unget(c);
             false
@@ -1118,6 +1197,86 @@ mod test {
                 span: Span::new_to(0, 0, 11),
                 splittable: true,
                 remove_backslash: false,
+            },])]
+        );
+    }
+
+    #[test]
+    fn command() {
+        assert_eq!(
+            tokens("echo hello"),
+            vec![
+                Token::Word(vec![WordComponent {
+                    kind: WordComponentKind::literal("echo"),
+                    span: Span::new_to(0, 0, 3),
+                    splittable: true,
+                    remove_backslash: true
+                }]),
+                Token::Word(vec![WordComponent {
+                    kind: WordComponentKind::literal("hello"),
+                    span: Span::new_to(0, 5, 9),
+                    splittable: true,
+                    remove_backslash: true
+                }]),
+            ]
+        );
+    }
+
+    #[test]
+    fn command_subst() {
+        assert_eq!(
+            tokens("$(echo hello)"),
+            vec![Token::Word(vec![WordComponent {
+                kind: WordComponentKind::CommandSubstitution(vec![
+                    Token::Word(vec![WordComponent {
+                        kind: WordComponentKind::literal("echo"),
+                        span: Span::new_to(0, 2, 5),
+                        splittable: true,
+                        remove_backslash: true
+                    }]),
+                    Token::Word(vec![WordComponent {
+                        kind: WordComponentKind::literal("hello"),
+                        span: Span::new_to(0, 7, 11),
+                        splittable: true,
+                        remove_backslash: true
+                    }]),
+                ]),
+                span: Span::new_to(0, 0, 12),
+                splittable: true,
+                remove_backslash: true,
+            },])]
+        );
+    }
+
+    #[test]
+    fn command_subst_nest() {
+        assert_eq!(
+            tokens("$(echo $(ls))"),
+            vec![Token::Word(vec![WordComponent {
+                kind: WordComponentKind::CommandSubstitution(vec![
+                    Token::Word(vec![WordComponent {
+                        kind: WordComponentKind::literal("echo"),
+                        span: Span::new_to(0, 2, 5),
+                        splittable: true,
+                        remove_backslash: true
+                    }]),
+                    Token::Word(vec![WordComponent {
+                        kind: WordComponentKind::CommandSubstitution(vec![Token::Word(vec![
+                            WordComponent {
+                                kind: WordComponentKind::literal("ls"),
+                                span: Span::new_to(0, 9, 10),
+                                splittable: true,
+                                remove_backslash: true
+                            }
+                        ]),]),
+                        span: Span::new_to(0, 7, 11),
+                        splittable: true,
+                        remove_backslash: true
+                    }]),
+                ]),
+                span: Span::new_to(0, 0, 12),
+                splittable: true,
+                remove_backslash: true,
             },])]
         );
     }

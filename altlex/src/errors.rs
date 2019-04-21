@@ -15,6 +15,8 @@ pub enum LexErrorKind {
     EofDuringParameterExpansion,
     #[fail(display = "EOF while lexing assignment word")]
     EofDuringAssignmentWord,
+    #[fail(display = "EOF while lexing command substitution")]
+    EofDuringCommandSubstitution,
     #[fail(display = "IO Error")]
     IoError,
 }
