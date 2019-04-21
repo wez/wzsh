@@ -51,6 +51,7 @@ pub enum Token {
         value: Vec<WordComponent>,
     },
     EndCommandSubst(Pos),
+    EndParamSubst(Pos),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -98,7 +99,7 @@ pub enum ParamOper {
 pub struct ParamExpr {
     pub kind: ParamOper,
     pub name: String,
-    pub word: Vec<WordComponent>,
+    pub word: Vec<Token>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -232,7 +233,7 @@ impl<R: Read> Lexer<R> {
                 Next::Char(c) => {
                     let is_param = self.state().state == State::ParamExprWord;
 
-                    if !is_param && (c.c == ' ' || c.c == '\t' || c.c == '\r') {
+                    if c.c == ' ' || c.c == '\t' || c.c == '\r' {
                         if let Some(token) = self.delimit_current_word() {
                             return Ok(token);
                         }
@@ -298,12 +299,11 @@ impl<R: Read> Lexer<R> {
                             self.command(c.pos, c)?;
                         }
                     } else if is_param && c.c == '}' {
-                        self.reader.unget(c);
                         if let Some(token) = self.delimit_current_word() {
+                            self.reader.unget(c);
                             return Ok(token);
                         }
-                        // Force delimiting anyway
-                        return Ok(Token::Word(vec![]));
+                        return Ok(Token::EndParamSubst(c.pos));
                     } else {
                         self.add_char_to_word(c);
                     }
@@ -494,23 +494,24 @@ impl<R: Read> Lexer<R> {
 
         let word = if curlies {
             self.push_state(State::ParamExprWord);
-            let word = match self.top()? {
-                Token::Word(value) => value,
-                token => {
-                    self.unget_token(token);
-                    vec![]
-                }
-            };
-            self.pop_state();
-            let close_curly = self.next_char_or_err(LexErrorKind::EofDuringParameterExpansion)?;
-            if close_curly.c != '}' {
-                return Err(LexErrorKind::EofDuringParameterExpansion
-                    .at(close_curly.pos.into())
-                    .into());
-            }
-            end = close_curly.pos;
+            let mut tokens = vec![];
 
-            word
+            while let Ok(token) = self.top() {
+                match token {
+                    Token::EndParamSubst(pos) => {
+                        end = pos;
+                        break;
+                    }
+                    Token::Eof(pos) => {
+                        return Err(LexErrorKind::EofDuringParameterExpansion
+                            .at(pos.into())
+                            .into());
+                    }
+                    token => tokens.push(token),
+                }
+            }
+            self.pop_state();
+            tokens
         } else {
             vec![]
         };
@@ -731,6 +732,17 @@ mod test {
         }
         eprintln!("tokens: {:#?}", tokens);
         tokens
+    }
+
+    fn token_err(s: &str) -> String {
+        let mut lexer = Lexer::new(s.as_bytes());
+        loop {
+            match lexer.next_token() {
+                Err(e) => return format!("{}", e),
+                Ok(Token::Eof(_)) => panic!("got to EOF rather than an Error"),
+                _ => {}
+            }
+        }
     }
 
     #[test]
@@ -1179,12 +1191,20 @@ mod test {
                     kind: WordComponentKind::ParamExpand(ParamExpr {
                         kind: ParamOper::GetDefault { allow_null: false },
                         name: "foo".to_owned(),
-                        word: vec![WordComponent {
-                            kind: WordComponentKind::literal("hello there"),
-                            span: Span::new_to(0, 7, 17),
-                            splittable: true,
-                            remove_backslash: true
-                        }]
+                        word: vec![
+                            Token::Word(vec![WordComponent {
+                                kind: WordComponentKind::literal("hello"),
+                                span: Span::new_to(0, 7, 11),
+                                splittable: true,
+                                remove_backslash: true
+                            }]),
+                            Token::Word(vec![WordComponent {
+                                kind: WordComponentKind::literal("there"),
+                                span: Span::new_to(0, 13, 17),
+                                splittable: true,
+                                remove_backslash: true
+                            }]),
+                        ]
                     }),
                     span: Span::new_to(0, 0, 18),
                     splittable: true,
@@ -1200,13 +1220,49 @@ mod test {
         );
 
         assert_eq!(
+            tokens("${foo:-hello\nthere}bar"),
+            vec![Token::Word(vec![
+                WordComponent {
+                    kind: WordComponentKind::ParamExpand(ParamExpr {
+                        kind: ParamOper::GetDefault { allow_null: false },
+                        name: "foo".to_owned(),
+                        word: vec![
+                            Token::Word(vec![WordComponent {
+                                kind: WordComponentKind::literal("hello"),
+                                span: Span::new_to(0, 7, 11),
+                                splittable: true,
+                                remove_backslash: true
+                            }]),
+                            Token::Newline(Pos::new(0, 12)),
+                            Token::Word(vec![WordComponent {
+                                kind: WordComponentKind::literal("there"),
+                                span: Span::new_to(1, 0, 4),
+                                splittable: true,
+                                remove_backslash: true
+                            }]),
+                        ]
+                    }),
+                    span: Span::new(Pos::new(0, 0), Pos::new(1, 5)),
+                    splittable: true,
+                    remove_backslash: false,
+                },
+                WordComponent {
+                    kind: WordComponentKind::literal("bar"),
+                    span: Span::new_to(1, 6, 8),
+                    splittable: true,
+                    remove_backslash: true
+                }
+            ])]
+        );
+
+        assert_eq!(
             tokens("${foo:-${nest}}bar"),
             vec![Token::Word(vec![
                 WordComponent {
                     kind: WordComponentKind::ParamExpand(ParamExpr {
                         kind: ParamOper::GetDefault { allow_null: false },
                         name: "foo".to_owned(),
-                        word: vec![WordComponent {
+                        word: vec![Token::Word(vec![WordComponent {
                             kind: WordComponentKind::ParamExpand(ParamExpr {
                                 kind: ParamOper::Get,
                                 name: "nest".to_owned(),
@@ -1215,7 +1271,7 @@ mod test {
                             span: Span::new_to(0, 7, 13),
                             splittable: true,
                             remove_backslash: false,
-                        },]
+                        }]),]
                     }),
                     span: Span::new_to(0, 0, 14),
                     splittable: true,
@@ -1236,12 +1292,12 @@ mod test {
                 kind: WordComponentKind::ParamExpand(ParamExpr {
                     kind: ParamOper::GetDefault { allow_null: false },
                     name: "foo".to_owned(),
-                    word: vec![WordComponent {
+                    word: vec![Token::Word(vec![WordComponent {
                         kind: WordComponentKind::TildeExpand(Some("wez".to_owned())),
                         span: Span::new_to(0, 7, 10),
                         splittable: false,
                         remove_backslash: false
-                    },]
+                    }]),]
                 }),
                 span: Span::new_to(0, 0, 11),
                 splittable: true,
@@ -1291,6 +1347,30 @@ mod test {
                     }]),
                 ]),
                 span: Span::new_to(0, 0, 12),
+                splittable: true,
+                remove_backslash: true,
+            },])]
+        );
+
+        assert_eq!(
+            tokens("$(echo\nhello)"),
+            vec![Token::Word(vec![WordComponent {
+                kind: WordComponentKind::CommandSubstitution(vec![
+                    Token::Word(vec![WordComponent {
+                        kind: WordComponentKind::literal("echo"),
+                        span: Span::new_to(0, 2, 5),
+                        splittable: true,
+                        remove_backslash: true
+                    }]),
+                    Token::Newline(Pos::new(0, 6)),
+                    Token::Word(vec![WordComponent {
+                        kind: WordComponentKind::literal("hello"),
+                        span: Span::new_to(1, 0, 4),
+                        splittable: true,
+                        remove_backslash: true
+                    }]),
+                ]),
+                span: Span::new(Pos::new(0, 0), Pos::new(1, 5)),
                 splittable: true,
                 remove_backslash: true,
             },])]
@@ -1422,4 +1502,8 @@ mod test {
         );
     }
 
+    #[test]
+    fn arithmetic() {
+        assert_eq!(token_err("$(($x-1))"), "arithmetic not done");
+    }
 }
