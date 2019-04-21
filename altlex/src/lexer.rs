@@ -95,40 +95,6 @@ impl<R: Read> Lexer<R> {
         self.stack.pop();
     }
 
-    fn word_common(&mut self) -> Fallible<Option<Token>> {
-        match self.reader.next_char() {
-            Next::Eof(pos) => {
-                if let Some(token) = self.delimit_current_word() {
-                    return Ok(Some(token));
-                }
-                return Ok(Some(Token::Eof(pos)));
-            }
-            Next::Error(err, pos) => return Err(err.context(pos).into()),
-            Next::Char(c) => {
-                if c.c == ' ' || c.c == '\t' || c.c == '\r' {
-                    if let Some(token) = self.delimit_current_word() {
-                        return Ok(Some(token));
-                    }
-                } else if c.c == '\n' {
-                    if let Some(token) = self.delimit_current_word() {
-                        self.reader.unget(c);
-                        return Ok(Some(token));
-                    }
-                    return Ok(Some(Token::Newline(c.pos)));
-                } else if c.c == '\'' {
-                    self.single_quotes(c.pos)?;
-                } else if c.c == '"' {
-                    self.double_quotes(c.pos)?;
-                } else if c.c == '\\' {
-                    self.backslash(c)?;
-                } else {
-                    self.add_char_to_word(c);
-                }
-            }
-        };
-        Ok(None)
-    }
-
     fn unget_token(&mut self, token: Token) {
         assert!(self.last_token.is_none());
         eprintln!("unget_token {:?}", token);
@@ -176,8 +142,35 @@ impl<R: Read> Lexer<R> {
                 return Ok(Token::Assignment { name, span, value });
             }
 
-            if let Some(token) = self.word_common()? {
-                return Ok(token);
+            match self.reader.next_char() {
+                Next::Eof(pos) => {
+                    if let Some(token) = self.delimit_current_word() {
+                        return Ok(token);
+                    }
+                    return Ok(Token::Eof(pos));
+                }
+                Next::Error(err, pos) => return Err(err.context(pos).into()),
+                Next::Char(c) => {
+                    if c.c == ' ' || c.c == '\t' || c.c == '\r' {
+                        if let Some(token) = self.delimit_current_word() {
+                            return Ok(token);
+                        }
+                    } else if c.c == '\n' {
+                        if let Some(token) = self.delimit_current_word() {
+                            self.reader.unget(c);
+                            return Ok(token);
+                        }
+                        return Ok(Token::Newline(c.pos));
+                    } else if c.c == '\'' {
+                        self.single_quotes(c.pos)?;
+                    } else if c.c == '"' {
+                        self.double_quotes(c.pos)?;
+                    } else if c.c == '\\' {
+                        self.backslash(c)?;
+                    } else {
+                        self.add_char_to_word(c);
+                    }
+                }
             }
         }
     }
