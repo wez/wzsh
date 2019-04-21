@@ -2,7 +2,7 @@ use crate::tokenenum::{LiteralMatcher, MatchResult};
 use crate::{Pos, Span};
 use failure::{Error, Fallible};
 use lazy_static::lazy_static;
-use regex::Regex;
+use regex::{Captures, Regex};
 use std::io::{BufRead, BufReader, Read};
 
 lazy_static! {
@@ -80,6 +80,22 @@ impl<R: Read> CharReader<R> {
                 Ok(Some((value, Span::new(start, end))))
             }
         }
+    }
+
+    pub fn matches_regex(&mut self, regex: &Regex) -> Fallible<Option<(Captures, Pos)>> {
+        match self.check_and_fill_buffer() {
+            Next::Eof(_) => Ok(None),
+            Next::Error(err, pos) => return Err(err.context(pos).into()),
+            _ => Ok(regex
+                .captures(&self.line_buffer[self.line_idx..])
+                .map(|c| (c, self.position))),
+        }
+    }
+
+    /// Use this after calling matches_regex to fixup the matched length
+    pub fn fixup_matched_length(&mut self, length: usize) {
+        self.line_idx += length;
+        self.position.col += length;
     }
 
     pub fn matches_io_number(&mut self) -> Fallible<bool> {
