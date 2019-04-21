@@ -104,6 +104,7 @@ enum State {
     Top,
     AssignmentWord,
     ParamExprWord,
+    DoubleQuotes,
 }
 
 #[derive(Debug)]
@@ -134,6 +135,7 @@ impl<R: Read> Lexer<R> {
         eprintln!("calling next_token in state {:?}", self.state().state);
         match self.state().state {
             State::Top | State::AssignmentWord | State::ParamExprWord => self.top(),
+            State::DoubleQuotes => bail!("invalid state for next_token {:?}", self.state().state),
         }
     }
 
@@ -392,7 +394,7 @@ impl<R: Read> Lexer<R> {
                 word,
             }),
             span: Span::new(start, end),
-            splittable: true, // FIXME: not if in double quotes
+            splittable: true,
             remove_backslash: false,
         });
 
@@ -400,33 +402,40 @@ impl<R: Read> Lexer<R> {
     }
 
     fn double_quotes(&mut self, start: Pos) -> Fallible<()> {
-        let mut accumulator = String::new();
+        self.push_state(State::DoubleQuotes);
+
         let mut backslash = false;
-        let mut end;
+        let end;
         loop {
             let c = self.next_char_or_err(LexErrorKind::EofDuringDoubleQuotedString)?;
-            end = c.pos;
             if c.c == '"' && !backslash {
+                end = c.pos;
                 break;
+            } else if c.c == '$' && !backslash {
+                self.dollar(c.pos)?;
+            } else {
+                backslash = false;
+                if c.c == '\\' {
+                    backslash = true;
+                }
+                self.add_char_to_word(c);
             }
-            backslash = false;
-            if c.c == '\\' {
-                backslash = true;
-            }
-
-            // TODO: check for parameter and command expansion
-
-            accumulator.push(c.c);
         }
 
-        let word = WordComponent {
-            kind: WordComponentKind::Literal(accumulator),
-            span: Span::new(start, end),
-            splittable: false,
-            remove_backslash: true,
-        };
+        let word = self.state().current_word.take();
+        self.pop_state();
 
-        self.add_to_word(word);
+        if let Some(mut word) = word {
+            word.first_mut().unwrap().span.start = start;
+            word.last_mut().unwrap().span.end = end;
+
+            // Quoted strings are not subject to field splitting
+            for mut component in word {
+                component.splittable = false;
+                self.add_to_word(component);
+            }
+        }
+
         Ok(())
     }
 
@@ -939,6 +948,36 @@ mod test {
                 splittable: true,
                 remove_backslash: true
             },])]
+        );
+    }
+
+    #[test]
+    fn dollarparamexp() {
+        assert_eq!(
+            tokens("\"$foo\""),
+            vec![Token::Word(vec![WordComponent {
+                kind: WordComponentKind::ParamExpand(ParamExpr {
+                    kind: ParamOper::Get,
+                    name: "foo".to_owned(),
+                    word: vec![]
+                }),
+                span: Span::new_to(0, 0, 5),
+                splittable: false,
+                remove_backslash: false,
+            }])]
+        );
+        assert_eq!(
+            tokens("\"${foo}\""),
+            vec![Token::Word(vec![WordComponent {
+                kind: WordComponentKind::ParamExpand(ParamExpr {
+                    kind: ParamOper::Get,
+                    name: "foo".to_owned(),
+                    word: vec![]
+                }),
+                span: Span::new_to(0, 0, 7),
+                splittable: false,
+                remove_backslash: false,
+            }])]
         );
     }
 
