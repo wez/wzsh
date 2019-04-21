@@ -4,11 +4,14 @@ use crate::reader::{CharReader, Next, PositionedChar};
 use crate::tokenenum::MatchResult;
 use crate::{Operator, OPERATORS};
 use failure::Fallible;
+use lazy_static::lazy_static;
+use regex::Regex;
 use std::io::Read;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum WordComponentKind {
     Literal(String),
+    TildeExpand(Option<String>),
 }
 
 impl WordComponentKind {
@@ -44,6 +47,123 @@ pub struct Lexer<R: Read> {
     current_word: Option<Vec<WordComponent>>,
 }
 
+lazy_static! {
+    static ref TILE_EXPAND_RE: Regex =
+        Regex::new(r"^~([a-zA-Z_][a-zA-Z0-9_]+)?(/|$)").expect("failed to compile TILE_EXPAND_RE");
+}
+
+fn apply_single_tilde_expansion(word_idx: usize, words: &mut Vec<WordComponent>) {
+    eprintln!("apply_single_tilde_expansion word_idx={}", word_idx);
+    if let WordComponent {
+        kind: WordComponentKind::Literal(first_word),
+        splittable: true,
+        remove_backslash: true,
+        span,
+    } = &words[word_idx]
+    {
+        if let Some(caps) = TILE_EXPAND_RE.captures(first_word) {
+            let all = caps.get(0).unwrap();
+            let trailer = caps.get(2).unwrap();
+            let matched_len = if trailer.as_str().len() == 1 {
+                // We want to include the `/` in the remainder
+                all.end() - 1
+            } else {
+                all.end()
+            };
+            let remainder = first_word[matched_len..].to_string();
+            let name = caps.get(1).map(|cap| cap.as_str().to_owned());
+            let span = span.clone();
+
+            words.remove(word_idx);
+
+            let start = span.start;
+            let mut end = start;
+            end.col = start.col + name.as_ref().map(|n| n.len()).unwrap_or(0);
+
+            words.insert(
+                word_idx,
+                WordComponent {
+                    kind: WordComponentKind::TildeExpand(name),
+                    splittable: false,
+                    remove_backslash: false,
+                    span: Span::new(start, end),
+                },
+            );
+
+            if !remainder.is_empty() {
+                let mut rem_start = end;
+                rem_start.col += 1;
+                let mut rem_end = rem_start;
+                rem_end.col += remainder.len() - 1;
+
+                words.insert(
+                    word_idx + 1,
+                    WordComponent {
+                        kind: WordComponentKind::Literal(remainder),
+                        splittable: true,
+                        remove_backslash: true,
+                        span: Span::new(rem_start, rem_end),
+                    },
+                );
+            }
+        }
+    }
+}
+
+fn split_first_word_by_unquoted_colons(words: &mut Vec<WordComponent>) -> usize {
+    if let WordComponent {
+        kind: WordComponentKind::Literal(first_word),
+        splittable: true,
+        remove_backslash: true,
+        span,
+    } = &words[0]
+    {
+        let first_word = first_word.to_string();
+        let mut start = span.start;
+        words.remove(0);
+        let mut prev = None;
+        let mut result = 0;
+        for (idx, element) in first_word
+            .split(|c| match prev.replace(c) {
+                Some('\\') => false,
+                _ => c == ':',
+            })
+            .enumerate()
+        {
+            if idx > 0 {
+                words.insert(
+                    result,
+                    WordComponent {
+                        kind: WordComponentKind::literal(":"),
+                        splittable: false,
+                        remove_backslash: false,
+                        span: Span::new(start, start),
+                    },
+                );
+                result += 1;
+                start.col += 1;
+            }
+            let mut end = start;
+            end.col += element.len() - 1;
+            words.insert(
+                result,
+                WordComponent {
+                    kind: WordComponentKind::literal(element),
+                    splittable: true,
+                    remove_backslash: true,
+                    span: Span::new(start, end),
+                },
+            );
+            result += 1;
+            start.col = end.col + 1;
+        }
+
+        result - 1
+    } else {
+        0
+    }
+}
+
 impl<R: Read> Lexer<R> {
     pub fn new(stream: R) -> Self {
         Self {
@@ -52,8 +172,22 @@ impl<R: Read> Lexer<R> {
         }
     }
 
-    fn delimit_current_word(&mut self) -> Option<Token> {
-        if let Some(word) = self.current_word.take() {
+    fn delimit_current_word(&mut self, is_assignment_word: bool) -> Option<Token> {
+        if let Some(mut word) = self.current_word.take() {
+            // Check to see if we can apply tilde expansion before we return
+            let last = if is_assignment_word {
+                split_first_word_by_unquoted_colons(&mut word)
+            } else {
+                0
+            };
+            eprintln!(
+                "delimit: is_assignment_word={}, last={} word={:?}",
+                is_assignment_word, last, word
+            );
+            for i in (0..=last).rev() {
+                apply_single_tilde_expansion(i, &mut word);
+            }
+
             Some(Token::Word(word))
         } else {
             None
@@ -62,13 +196,13 @@ impl<R: Read> Lexer<R> {
 
     /// Read tokens until we delimit the next word; return
     /// that word.
-    fn next_word(&mut self, kind: LexErrorKind) -> Fallible<Token> {
+    fn next_word(&mut self, kind: LexErrorKind, is_assignment_word: bool) -> Fallible<Token> {
         assert!(self.current_word.is_none());
 
         loop {
             match self.reader.next_char() {
                 Next::Eof(pos) => {
-                    if let Some(token) = self.delimit_current_word() {
+                    if let Some(token) = self.delimit_current_word(is_assignment_word) {
                         return Ok(token);
                     }
                     return Err(kind.at(pos.into()).into());
@@ -76,7 +210,7 @@ impl<R: Read> Lexer<R> {
                 Next::Error(err, pos) => return Err(err.context(pos).into()),
                 Next::Char(c) => {
                     if c.c == ' ' || c.c == '\t' || c.c == '\r' || c.c == '\n' {
-                        if let Some(token) = self.delimit_current_word() {
+                        if let Some(token) = self.delimit_current_word(is_assignment_word) {
                             return Ok(token);
                         }
                         return Err(kind.at(c.pos.into()).into());
@@ -98,7 +232,7 @@ impl<R: Read> Lexer<R> {
         eprintln!("calling next_token");
         loop {
             if let MatchResult::Match(..) = self.reader.matches_literal(&OPERATORS)? {
-                if let Some(token) = self.delimit_current_word() {
+                if let Some(token) = self.delimit_current_word(false) {
                     return Ok(token);
                 }
 
@@ -107,7 +241,7 @@ impl<R: Read> Lexer<R> {
             }
 
             if self.reader.matches_io_number()? {
-                if let Some(token) = self.delimit_current_word() {
+                if let Some(token) = self.delimit_current_word(false) {
                     return Ok(token);
                 }
                 let (num, span) = self.reader.next_io_number()?.unwrap();
@@ -115,18 +249,20 @@ impl<R: Read> Lexer<R> {
             }
 
             if self.reader.matches_assignment_word()? {
-                if let Some(token) = self.delimit_current_word() {
+                if let Some(token) = self.delimit_current_word(false) {
                     return Ok(token);
                 }
                 let (name, span) = self.reader.next_assignment_word()?.unwrap();
-                if let Token::Word(value) = self.next_word(LexErrorKind::EofDuringAssignmentWord)? {
+                if let Token::Word(value) =
+                    self.next_word(LexErrorKind::EofDuringAssignmentWord, true)?
+                {
                     return Ok(Token::Assignment { name, span, value });
                 }
             }
 
             match self.reader.next_char() {
                 Next::Eof(pos) => {
-                    if let Some(token) = self.delimit_current_word() {
+                    if let Some(token) = self.delimit_current_word(false) {
                         return Ok(token);
                     }
                     return Ok(Token::Eof(pos));
@@ -134,11 +270,11 @@ impl<R: Read> Lexer<R> {
                 Next::Error(err, pos) => return Err(err.context(pos).into()),
                 Next::Char(c) => {
                     if c.c == ' ' || c.c == '\t' || c.c == '\r' {
-                        if let Some(token) = self.delimit_current_word() {
+                        if let Some(token) = self.delimit_current_word(false) {
                             return Ok(token);
                         }
                     } else if c.c == '\n' {
-                        if let Some(token) = self.delimit_current_word() {
+                        if let Some(token) = self.delimit_current_word(false) {
                             self.reader.unget(c);
                             return Ok(token);
                         }
@@ -419,6 +555,66 @@ mod test {
         );
 
         assert_eq!(
+            tokens("FOO=~bar"),
+            vec![Token::Assignment {
+                name: "FOO".to_owned(),
+                span: Span::new_to(0, 0, 4),
+                value: vec![WordComponent {
+                    kind: WordComponentKind::TildeExpand(Some("bar".to_owned())),
+                    span: Span::new_to(0, 4, 7),
+                    splittable: false,
+                    remove_backslash: false
+                }]
+            }]
+        );
+
+        assert_eq!(
+            tokens("FOO=~bar:/somewhere:~foo/baz"),
+            vec![Token::Assignment {
+                name: "FOO".to_owned(),
+                span: Span::new_to(0, 0, 4),
+                value: vec![
+                    WordComponent {
+                        kind: WordComponentKind::TildeExpand(Some("bar".to_owned())),
+                        span: Span::new_to(0, 4, 7),
+                        splittable: false,
+                        remove_backslash: false
+                    },
+                    WordComponent {
+                        kind: WordComponentKind::literal(":"),
+                        span: Span::new_to(0, 8, 8),
+                        splittable: false,
+                        remove_backslash: false,
+                    },
+                    WordComponent {
+                        kind: WordComponentKind::literal("/somewhere"),
+                        span: Span::new_to(0, 9, 18),
+                        splittable: true,
+                        remove_backslash: true,
+                    },
+                    WordComponent {
+                        kind: WordComponentKind::literal(":"),
+                        span: Span::new_to(0, 19, 19),
+                        splittable: false,
+                        remove_backslash: false,
+                    },
+                    WordComponent {
+                        kind: WordComponentKind::TildeExpand(Some("foo".to_owned())),
+                        span: Span::new_to(0, 20, 23),
+                        splittable: false,
+                        remove_backslash: false
+                    },
+                    WordComponent {
+                        kind: WordComponentKind::literal("/baz"),
+                        span: Span::new_to(0, 24, 27),
+                        splittable: true,
+                        remove_backslash: true,
+                    },
+                ]
+            }]
+        );
+
+        assert_eq!(
             tokens("FOO=bar baz"),
             vec![
                 Token::Assignment {
@@ -452,6 +648,82 @@ mod test {
                     remove_backslash: true
                 }]
             },]
+        );
+    }
+
+    #[test]
+    fn tilde() {
+        assert_eq!(
+            tokens("~"),
+            vec![Token::Word(vec![WordComponent {
+                kind: WordComponentKind::TildeExpand(None),
+                span: Span::new_to(0, 0, 0),
+                splittable: false,
+                remove_backslash: false,
+            }])]
+        );
+        assert_eq!(
+            tokens("~wez"),
+            vec![Token::Word(vec![WordComponent {
+                kind: WordComponentKind::TildeExpand(Some("wez".to_owned())),
+                span: Span::new_to(0, 0, 3),
+                splittable: false,
+                remove_backslash: false,
+            }])]
+        );
+
+        assert_eq!(
+            tokens("~/"),
+            vec![Token::Word(vec![
+                WordComponent {
+                    kind: WordComponentKind::TildeExpand(None),
+                    span: Span::new_to(0, 0, 0),
+                    splittable: false,
+                    remove_backslash: false,
+                },
+                WordComponent {
+                    kind: WordComponentKind::literal("/"),
+                    span: Span::new_to(0, 1, 1),
+                    splittable: true,
+                    remove_backslash: true
+                },
+            ])]
+        );
+        assert_eq!(
+            tokens("~wez/"),
+            vec![Token::Word(vec![
+                WordComponent {
+                    kind: WordComponentKind::TildeExpand(Some("wez".to_owned())),
+                    span: Span::new_to(0, 0, 3),
+                    splittable: false,
+                    remove_backslash: false,
+                },
+                WordComponent {
+                    kind: WordComponentKind::literal("/"),
+                    span: Span::new_to(0, 4, 4),
+                    splittable: true,
+                    remove_backslash: true
+                },
+            ])]
+        );
+
+        assert_eq!(
+            tokens("~:"),
+            vec![Token::Word(vec![WordComponent {
+                kind: WordComponentKind::literal("~:"),
+                span: Span::new_to(0, 0, 1),
+                splittable: true,
+                remove_backslash: true
+            },])]
+        );
+        assert_eq!(
+            tokens("\\~"),
+            vec![Token::Word(vec![WordComponent {
+                kind: WordComponentKind::literal("\\~"),
+                span: Span::new_to(0, 0, 1),
+                splittable: true,
+                remove_backslash: true
+            },])]
         );
     }
 }
