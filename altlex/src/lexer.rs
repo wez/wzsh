@@ -3,7 +3,7 @@ use crate::position::{Pos, Span};
 use crate::reader::{CharReader, Next, PositionedChar};
 use crate::tokenenum::MatchResult;
 use crate::{Operator, OPERATORS};
-use failure::Fallible;
+use failure::{bail, Fallible};
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::io::Read;
@@ -47,80 +47,100 @@ pub enum Token {
     },
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum State {
+    Top,
+    AssignmentWord,
+}
+
+#[derive(Debug)]
+struct LexState {
+    state: State,
+    current_word: Option<Vec<WordComponent>>,
+}
+
 pub struct Lexer<R: Read> {
     reader: CharReader<R>,
-    current_word: Option<Vec<WordComponent>>,
+    stack: Vec<LexState>,
 }
 
 impl<R: Read> Lexer<R> {
     pub fn new(stream: R) -> Self {
         Self {
             reader: CharReader::new(stream),
-            current_word: None,
-        }
-    }
-
-    fn delimit_current_word(&mut self, is_assignment_word: bool) -> Option<Token> {
-        if let Some(mut word) = self.current_word.take() {
-            // Check to see if we can apply tilde expansion before we return
-            let last = if is_assignment_word {
-                split_first_word_by_unquoted_colons(&mut word)
-            } else {
-                0
-            };
-            eprintln!(
-                "delimit: is_assignment_word={}, last={} word={:?}",
-                is_assignment_word, last, word
-            );
-            for i in (0..=last).rev() {
-                apply_single_tilde_expansion(i, &mut word);
-            }
-
-            Some(Token::Word(word))
-        } else {
-            None
-        }
-    }
-
-    /// Read tokens until we delimit the next word; return
-    /// that word.
-    fn next_word(&mut self, kind: LexErrorKind, is_assignment_word: bool) -> Fallible<Token> {
-        assert!(self.current_word.is_none());
-
-        loop {
-            match self.reader.next_char() {
-                Next::Eof(pos) => {
-                    if let Some(token) = self.delimit_current_word(is_assignment_word) {
-                        return Ok(token);
-                    }
-                    return Err(kind.at(pos.into()).into());
-                }
-                Next::Error(err, pos) => return Err(err.context(pos).into()),
-                Next::Char(c) => {
-                    if c.c == ' ' || c.c == '\t' || c.c == '\r' || c.c == '\n' {
-                        if let Some(token) = self.delimit_current_word(is_assignment_word) {
-                            return Ok(token);
-                        }
-                        return Err(kind.at(c.pos.into()).into());
-                    } else if c.c == '\'' {
-                        self.single_quotes(c.pos)?;
-                    } else if c.c == '"' {
-                        self.double_quotes(c.pos)?;
-                    } else if c.c == '\\' {
-                        self.backslash(c)?;
-                    } else {
-                        self.add_char_to_word(c);
-                    }
-                }
-            }
+            stack: vec![LexState {
+                state: State::Top,
+                current_word: None,
+            }],
         }
     }
 
     pub fn next_token(&mut self) -> Fallible<Token> {
         eprintln!("calling next_token");
+        match self.state().state {
+            State::Top => self.top(),
+            State::AssignmentWord => self.assignment_word(),
+        }
+    }
+
+    fn push_state(&mut self, state: State) {
+        self.stack.push(LexState {
+            state,
+            current_word: None,
+        });
+    }
+
+    fn pop_state(&mut self) {
+        self.stack.pop();
+    }
+
+    fn word_common(&mut self) -> Fallible<Option<Token>> {
+        match self.reader.next_char() {
+            Next::Eof(pos) => {
+                if let Some(token) = self.delimit_current_word() {
+                    return Ok(Some(token));
+                }
+                return Ok(Some(Token::Eof(pos)));
+            }
+            Next::Error(err, pos) => return Err(err.context(pos).into()),
+            Next::Char(c) => {
+                if c.c == ' ' || c.c == '\t' || c.c == '\r' {
+                    if let Some(token) = self.delimit_current_word() {
+                        return Ok(Some(token));
+                    }
+                } else if c.c == '\n' {
+                    if let Some(token) = self.delimit_current_word() {
+                        self.reader.unget(c);
+                        return Ok(Some(token));
+                    }
+                    return Ok(Some(Token::Newline(c.pos)));
+                } else if c.c == '\'' {
+                    self.single_quotes(c.pos)?;
+                } else if c.c == '"' {
+                    self.double_quotes(c.pos)?;
+                } else if c.c == '\\' {
+                    self.backslash(c)?;
+                } else {
+                    self.add_char_to_word(c);
+                }
+            }
+        };
+        Ok(None)
+    }
+
+    fn assignment_word(&mut self) -> Fallible<Token> {
+        loop {
+            if let Some(token) = self.word_common()? {
+                self.pop_state();
+                return Ok(token);
+            }
+        }
+    }
+
+    fn top(&mut self) -> Fallible<Token> {
         loop {
             if let MatchResult::Match(..) = self.reader.matches_literal(&OPERATORS)? {
-                if let Some(token) = self.delimit_current_word(false) {
+                if let Some(token) = self.delimit_current_word() {
                     return Ok(token);
                 }
 
@@ -129,7 +149,7 @@ impl<R: Read> Lexer<R> {
             }
 
             if self.reader.matches_io_number()? {
-                if let Some(token) = self.delimit_current_word(false) {
+                if let Some(token) = self.delimit_current_word() {
                     return Ok(token);
                 }
                 let (num, span) = self.reader.next_io_number()?.unwrap();
@@ -137,46 +157,24 @@ impl<R: Read> Lexer<R> {
             }
 
             if self.reader.matches_assignment_word()? {
-                if let Some(token) = self.delimit_current_word(false) {
+                if let Some(token) = self.delimit_current_word() {
                     return Ok(token);
                 }
                 let (name, span) = self.reader.next_assignment_word()?.unwrap();
-                if let Token::Word(value) =
-                    self.next_word(LexErrorKind::EofDuringAssignmentWord, true)?
-                {
-                    return Ok(Token::Assignment { name, span, value });
+                self.push_state(State::AssignmentWord);
+                let value_token = self.assignment_word()?;
+                match value_token {
+                    Token::Word(value) => {
+                        return Ok(Token::Assignment { name, span, value });
+                    }
+                    _ => {
+                        bail!("unexpected value token {:?}", value_token);
+                    }
                 }
             }
 
-            match self.reader.next_char() {
-                Next::Eof(pos) => {
-                    if let Some(token) = self.delimit_current_word(false) {
-                        return Ok(token);
-                    }
-                    return Ok(Token::Eof(pos));
-                }
-                Next::Error(err, pos) => return Err(err.context(pos).into()),
-                Next::Char(c) => {
-                    if c.c == ' ' || c.c == '\t' || c.c == '\r' {
-                        if let Some(token) = self.delimit_current_word(false) {
-                            return Ok(token);
-                        }
-                    } else if c.c == '\n' {
-                        if let Some(token) = self.delimit_current_word(false) {
-                            self.reader.unget(c);
-                            return Ok(token);
-                        }
-                        return Ok(Token::Newline(c.pos));
-                    } else if c.c == '\'' {
-                        self.single_quotes(c.pos)?;
-                    } else if c.c == '"' {
-                        self.double_quotes(c.pos)?;
-                    } else if c.c == '\\' {
-                        self.backslash(c)?;
-                    } else {
-                        self.add_char_to_word(c);
-                    }
-                }
+            if let Some(token) = self.word_common()? {
+                return Ok(token);
             }
         }
     }
@@ -186,6 +184,33 @@ impl<R: Read> Lexer<R> {
             Next::Char(b) => Ok(b),
             Next::Eof(pos) => Err(err.at(pos.into()).into()),
             Next::Error(e, pos) => Err(e.context(pos).into()),
+        }
+    }
+
+    fn state(&mut self) -> &mut LexState {
+        self.stack.last_mut().unwrap()
+    }
+
+    fn delimit_current_word(&mut self) -> Option<Token> {
+        let state = self.state();
+        if let Some(mut word) = state.current_word.take() {
+            // Check to see if we can apply tilde expansion before we return
+            let last = if state.state == State::AssignmentWord {
+                split_first_word_by_unquoted_colons(&mut word)
+            } else {
+                0
+            };
+            eprintln!(
+                "delimit: state={:?}, last={} word={:?}",
+                state.state, last, word
+            );
+            for i in (0..=last).rev() {
+                apply_single_tilde_expansion(i, &mut word);
+            }
+
+            Some(Token::Word(word))
+        } else {
+            None
         }
     }
 
@@ -251,17 +276,19 @@ impl<R: Read> Lexer<R> {
     }
 
     fn add_to_word(&mut self, word: WordComponent) {
-        if self.current_word.is_none() {
-            self.current_word = Some(vec![]);
+        let state = self.state();
+        if state.current_word.is_none() {
+            state.current_word = Some(vec![]);
         }
-        self.current_word.as_mut().unwrap().push(word);
+        state.current_word.as_mut().unwrap().push(word);
     }
 
     fn add_char_to_word(&mut self, c: PositionedChar) {
-        if self.current_word.is_none() {
-            self.current_word = Some(vec![]);
+        let state = self.state();
+        if state.current_word.is_none() {
+            state.current_word = Some(vec![]);
         }
-        let current = self.current_word.as_mut().unwrap();
+        let current = state.current_word.as_mut().unwrap();
         match current.last_mut() {
             Some(WordComponent {
                 kind: WordComponentKind::Literal(s),
