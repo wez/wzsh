@@ -13,7 +13,7 @@ lazy_static! {
         Regex::new(r"^~([a-zA-Z_][a-zA-Z0-9_]+)?(/|$)").expect("failed to compile TILE_EXPAND_RE");
     static ref PARAM_RE: Regex =
         Regex::new(r"^([0-9]|[a-zA-Z_][a-zA-Z0-9_]+)").expect("failed to compile NAME_RE");
-    static ref OPER_RE: Regex = Regex::new(r"^:?[-=?+]").expect("failed to compile OPER_RE");
+    static ref OPER_RE: Regex = Regex::new(r"^[%#:]?[%#-=?+]").expect("failed to compile OPER_RE");
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -73,7 +73,22 @@ pub enum ParamOper {
     /// `${NAME:+word}`.  If the named value is unset or null, expands
     /// to null, otherwise expands to word.
     AlternativeValue { allow_null: bool },
-    // TODO: Pattern matching notation
+    /// `${NAME%word}` word will be expanded and treated as a pattern.
+    /// $NAME shall be expanded with the smallest portion of the suffix
+    /// matched by the pattern deleted.
+    RemoveSmallestSuffixPattern,
+    /// `${NAME%%word}` word will be expanded and treated as a pattern.
+    /// $NAME shall be expanded with the largest portion of the suffix
+    /// matched by the pattern deleted.
+    RemoveLargestSuffixPattern,
+    /// `${NAME#word}` word will be expanded and treated as a pattern.
+    /// $NAME shall be expanded with the smallest portion of the prefix
+    /// matched by the pattern deleted.
+    RemoveSmallestPrefixPattern,
+    /// `${NAME##word}` word will be expanded and treated as a pattern.
+    /// $NAME shall be expanded with the largest portion of the prefix
+    /// matched by the pattern deleted.
+    RemoveLargestPrefixPattern,
 }
 
 /// Represents a parameter expansion expression
@@ -336,6 +351,10 @@ impl<R: Read> Lexer<R> {
                     "?" => ParamOper::CheckSet { allow_null: true },
                     ":+" => ParamOper::AlternativeValue { allow_null: false },
                     "+" => ParamOper::AlternativeValue { allow_null: true },
+                    "%" => ParamOper::RemoveSmallestSuffixPattern,
+                    "%%" => ParamOper::RemoveLargestSuffixPattern,
+                    "#" => ParamOper::RemoveSmallestPrefixPattern,
+                    "##" => ParamOper::RemoveLargestPrefixPattern,
                     wat => bail!("unhandled operator type {}", wat),
                 });
                 self.reader.fixup_matched_length(oper_len);
