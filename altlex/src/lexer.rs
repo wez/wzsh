@@ -8,6 +8,11 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use std::io::Read;
 
+lazy_static! {
+    static ref TILE_EXPAND_RE: Regex =
+        Regex::new(r"^~([a-zA-Z_][a-zA-Z0-9_]+)?(/|$)").expect("failed to compile TILE_EXPAND_RE");
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum WordComponentKind {
     Literal(String),
@@ -45,123 +50,6 @@ pub enum Token {
 pub struct Lexer<R: Read> {
     reader: CharReader<R>,
     current_word: Option<Vec<WordComponent>>,
-}
-
-lazy_static! {
-    static ref TILE_EXPAND_RE: Regex =
-        Regex::new(r"^~([a-zA-Z_][a-zA-Z0-9_]+)?(/|$)").expect("failed to compile TILE_EXPAND_RE");
-}
-
-fn apply_single_tilde_expansion(word_idx: usize, words: &mut Vec<WordComponent>) {
-    eprintln!("apply_single_tilde_expansion word_idx={}", word_idx);
-    if let WordComponent {
-        kind: WordComponentKind::Literal(first_word),
-        splittable: true,
-        remove_backslash: true,
-        span,
-    } = &words[word_idx]
-    {
-        if let Some(caps) = TILE_EXPAND_RE.captures(first_word) {
-            let all = caps.get(0).unwrap();
-            let trailer = caps.get(2).unwrap();
-            let matched_len = if trailer.as_str().len() == 1 {
-                // We want to include the `/` in the remainder
-                all.end() - 1
-            } else {
-                all.end()
-            };
-            let remainder = first_word[matched_len..].to_string();
-            let name = caps.get(1).map(|cap| cap.as_str().to_owned());
-            let span = span.clone();
-
-            words.remove(word_idx);
-
-            let start = span.start;
-            let mut end = start;
-            end.col = start.col + name.as_ref().map(|n| n.len()).unwrap_or(0);
-
-            words.insert(
-                word_idx,
-                WordComponent {
-                    kind: WordComponentKind::TildeExpand(name),
-                    splittable: false,
-                    remove_backslash: false,
-                    span: Span::new(start, end),
-                },
-            );
-
-            if !remainder.is_empty() {
-                let mut rem_start = end;
-                rem_start.col += 1;
-                let mut rem_end = rem_start;
-                rem_end.col += remainder.len() - 1;
-
-                words.insert(
-                    word_idx + 1,
-                    WordComponent {
-                        kind: WordComponentKind::Literal(remainder),
-                        splittable: true,
-                        remove_backslash: true,
-                        span: Span::new(rem_start, rem_end),
-                    },
-                );
-            }
-        }
-    }
-}
-
-fn split_first_word_by_unquoted_colons(words: &mut Vec<WordComponent>) -> usize {
-    if let WordComponent {
-        kind: WordComponentKind::Literal(first_word),
-        splittable: true,
-        remove_backslash: true,
-        span,
-    } = &words[0]
-    {
-        let first_word = first_word.to_string();
-        let mut start = span.start;
-        words.remove(0);
-        let mut prev = None;
-        let mut result = 0;
-        for (idx, element) in first_word
-            .split(|c| match prev.replace(c) {
-                Some('\\') => false,
-                _ => c == ':',
-            })
-            .enumerate()
-        {
-            if idx > 0 {
-                words.insert(
-                    result,
-                    WordComponent {
-                        kind: WordComponentKind::literal(":"),
-                        splittable: false,
-                        remove_backslash: false,
-                        span: Span::new(start, start),
-                    },
-                );
-                result += 1;
-                start.col += 1;
-            }
-            let mut end = start;
-            end.col += element.len() - 1;
-            words.insert(
-                result,
-                WordComponent {
-                    kind: WordComponentKind::literal(element),
-                    splittable: true,
-                    remove_backslash: true,
-                    span: Span::new(start, end),
-                },
-            );
-            result += 1;
-            start.col = end.col + 1;
-        }
-
-        result - 1
-    } else {
-        0
-    }
 }
 
 impl<R: Read> Lexer<R> {
@@ -393,6 +281,118 @@ impl<R: Read> Lexer<R> {
                 });
             }
         }
+    }
+}
+
+fn apply_single_tilde_expansion(word_idx: usize, words: &mut Vec<WordComponent>) {
+    eprintln!("apply_single_tilde_expansion word_idx={}", word_idx);
+    if let WordComponent {
+        kind: WordComponentKind::Literal(first_word),
+        splittable: true,
+        remove_backslash: true,
+        span,
+    } = &words[word_idx]
+    {
+        if let Some(caps) = TILE_EXPAND_RE.captures(first_word) {
+            let all = caps.get(0).unwrap();
+            let trailer = caps.get(2).unwrap();
+            let matched_len = if trailer.as_str().len() == 1 {
+                // We want to include the `/` in the remainder
+                all.end() - 1
+            } else {
+                all.end()
+            };
+            let remainder = first_word[matched_len..].to_string();
+            let name = caps.get(1).map(|cap| cap.as_str().to_owned());
+            let span = span.clone();
+
+            words.remove(word_idx);
+
+            let start = span.start;
+            let mut end = start;
+            end.col = start.col + name.as_ref().map(|n| n.len()).unwrap_or(0);
+
+            words.insert(
+                word_idx,
+                WordComponent {
+                    kind: WordComponentKind::TildeExpand(name),
+                    splittable: false,
+                    remove_backslash: false,
+                    span: Span::new(start, end),
+                },
+            );
+
+            if !remainder.is_empty() {
+                let mut rem_start = end;
+                rem_start.col += 1;
+                let mut rem_end = rem_start;
+                rem_end.col += remainder.len() - 1;
+
+                words.insert(
+                    word_idx + 1,
+                    WordComponent {
+                        kind: WordComponentKind::Literal(remainder),
+                        splittable: true,
+                        remove_backslash: true,
+                        span: Span::new(rem_start, rem_end),
+                    },
+                );
+            }
+        }
+    }
+}
+
+fn split_first_word_by_unquoted_colons(words: &mut Vec<WordComponent>) -> usize {
+    if let WordComponent {
+        kind: WordComponentKind::Literal(first_word),
+        splittable: true,
+        remove_backslash: true,
+        span,
+    } = &words[0]
+    {
+        let first_word = first_word.to_string();
+        let mut start = span.start;
+        words.remove(0);
+        let mut prev = None;
+        let mut result = 0;
+        for (idx, element) in first_word
+            .split(|c| match prev.replace(c) {
+                Some('\\') => false,
+                _ => c == ':',
+            })
+            .enumerate()
+        {
+            if idx > 0 {
+                words.insert(
+                    result,
+                    WordComponent {
+                        kind: WordComponentKind::literal(":"),
+                        splittable: false,
+                        remove_backslash: false,
+                        span: Span::new(start, start),
+                    },
+                );
+                result += 1;
+                start.col += 1;
+            }
+            let mut end = start;
+            end.col += element.len() - 1;
+            words.insert(
+                result,
+                WordComponent {
+                    kind: WordComponentKind::literal(element),
+                    splittable: true,
+                    remove_backslash: true,
+                    span: Span::new(start, end),
+                },
+            );
+            result += 1;
+            start.col = end.col + 1;
+        }
+
+        result - 1
+    } else {
+        0
     }
 }
 
