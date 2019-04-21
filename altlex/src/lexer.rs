@@ -247,9 +247,56 @@ impl<R: Read> Lexer<R> {
                     } else if c.c == '"' {
                         self.double_quotes(c.pos)?;
                     } else if c.c == '\\' {
-                        self.backslash(c)?;
+                        // Nesting backtick command substitution makes this a bit gross :-/
+                        match self.state().state {
+                            // Are we in backtick command substitution?  If the closer is
+                            // not a close paren, then we are.
+                            State::CommandSubstitution(closer) if closer != ')' => {
+                                let maybe_backtick = self
+                                    .next_char_or_err(LexErrorKind::EofDuringCommandSubstitution)?;
+                                // If we get "\\`" as a sequence then we are either starting
+                                // or finishing a nested backtick sequence depending on our
+                                // current state.
+                                if maybe_backtick.c == '`' {
+                                    if closer == '\\' {
+                                        // Closing nested backtick
+                                        if let Some(token) = self.delimit_current_word() {
+                                            self.reader.unget(maybe_backtick);
+                                            self.reader.unget(c);
+                                            return Ok(token);
+                                        }
+                                        return Ok(Token::EndCommandSubst(maybe_backtick.pos));
+                                    } else if closer == '`' {
+                                        // Opening nested backtick
+                                        self.command(
+                                            c.pos,
+                                            PositionedChar {
+                                                c: '\\',
+                                                pos: c.pos,
+                                            },
+                                        )?;
+                                    } else {
+                                        bail!("unexpected backtick closer {}", closer);
+                                    }
+                                } else {
+                                    self.reader.unget(maybe_backtick);
+                                    self.backslash(c)?;
+                                }
+                            }
+                            _ => self.backslash(c)?,
+                        };
                     } else if c.c == '$' {
                         self.dollar(c.pos)?;
+                    } else if c.c == '`' {
+                        if let State::CommandSubstitution('`') = self.state().state {
+                            if let Some(token) = self.delimit_current_word() {
+                                self.reader.unget(c);
+                                return Ok(token);
+                            }
+                            return Ok(Token::EndCommandSubst(c.pos));
+                        } else {
+                            self.command(c.pos, c)?;
+                        }
                     } else if is_param && c.c == '}' {
                         self.reader.unget(c);
                         if let Some(token) = self.delimit_current_word() {
@@ -346,11 +393,13 @@ impl<R: Read> Lexer<R> {
     }
 
     fn command(&mut self, start: Pos, opener: PositionedChar) -> Fallible<()> {
-        self.push_state(State::CommandSubstitution(if opener.c == '(' {
-            ')'
-        } else {
-            '`'
-        }));
+        let closer = match opener.c {
+            '(' => ')',
+            '`' => '`',
+            '\\' => '\\',
+            _ => bail!("unhandled opener: {:?}", opener),
+        };
+        self.push_state(State::CommandSubstitution(closer));
         if opener.c == '(' {
             self.state().open_paren_count = 1;
         }
@@ -1280,4 +1329,97 @@ mod test {
             },])]
         );
     }
+
+    #[test]
+    fn command_subst_backtick() {
+        assert_eq!(
+            tokens("`echo hello`"),
+            vec![Token::Word(vec![WordComponent {
+                kind: WordComponentKind::CommandSubstitution(vec![
+                    Token::Word(vec![WordComponent {
+                        kind: WordComponentKind::literal("echo"),
+                        span: Span::new_to(0, 1, 4),
+                        splittable: true,
+                        remove_backslash: true
+                    }]),
+                    Token::Word(vec![WordComponent {
+                        kind: WordComponentKind::literal("hello"),
+                        span: Span::new_to(0, 6, 10),
+                        splittable: true,
+                        remove_backslash: true
+                    }]),
+                ]),
+                span: Span::new_to(0, 0, 11),
+                splittable: true,
+                remove_backslash: true,
+            },])]
+        );
+    }
+
+    #[test]
+    fn command_subst_backtick_paren_nest() {
+        assert_eq!(
+            tokens("`echo $(ls)`"),
+            vec![Token::Word(vec![WordComponent {
+                kind: WordComponentKind::CommandSubstitution(vec![
+                    Token::Word(vec![WordComponent {
+                        kind: WordComponentKind::literal("echo"),
+                        span: Span::new_to(0, 1, 4),
+                        splittable: true,
+                        remove_backslash: true
+                    }]),
+                    Token::Word(vec![WordComponent {
+                        kind: WordComponentKind::CommandSubstitution(vec![Token::Word(vec![
+                            WordComponent {
+                                kind: WordComponentKind::literal("ls"),
+                                span: Span::new_to(0, 8, 9),
+                                splittable: true,
+                                remove_backslash: true
+                            }
+                        ]),]),
+                        span: Span::new_to(0, 6, 10),
+                        splittable: true,
+                        remove_backslash: true
+                    }]),
+                ]),
+                span: Span::new_to(0, 0, 11),
+                splittable: true,
+                remove_backslash: true,
+            },])]
+        );
+    }
+
+    #[test]
+    fn command_subst_backtick_nest() {
+        assert_eq!(
+            tokens("`echo \\`ls\\``"),
+            vec![Token::Word(vec![WordComponent {
+                kind: WordComponentKind::CommandSubstitution(vec![
+                    Token::Word(vec![WordComponent {
+                        kind: WordComponentKind::literal("echo"),
+                        span: Span::new_to(0, 1, 4),
+                        splittable: true,
+                        remove_backslash: true
+                    }]),
+                    Token::Word(vec![WordComponent {
+                        kind: WordComponentKind::CommandSubstitution(vec![Token::Word(vec![
+                            WordComponent {
+                                kind: WordComponentKind::literal("ls"),
+                                span: Span::new_to(0, 8, 9),
+                                splittable: true,
+                                remove_backslash: true
+                            }
+                        ]),]),
+                        span: Span::new_to(0, 6, 11),
+                        splittable: true,
+                        remove_backslash: true
+                    }]),
+                ]),
+                span: Span::new_to(0, 0, 12),
+                splittable: true,
+                remove_backslash: true,
+            },])]
+        );
+    }
+
 }
