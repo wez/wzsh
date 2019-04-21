@@ -1,3 +1,5 @@
+/// With reference to https://pubs.opengroup.org/onlinepubs/9699919799/utilities/V3_chap02.html
+/// This module implements a lexer for the Shell Command Language.
 use crate::errors::LexErrorKind;
 use crate::position::{Pos, Span};
 use crate::reader::{CharReader, Next, PositionedChar};
