@@ -138,7 +138,6 @@ impl<R: Read> Lexer<R> {
     }
 
     pub fn next_token(&mut self) -> Fallible<Token> {
-        eprintln!("calling next_token in state {:?}", self.state().state);
         match self.state().state {
             State::CommandSubstitution(_)
             | State::Top
@@ -162,14 +161,12 @@ impl<R: Read> Lexer<R> {
 
     fn unget_token(&mut self, token: Token) {
         assert!(self.last_token.is_none());
-        eprintln!("unget_token {:?}", token);
         self.last_token.replace(token);
     }
 
     fn top(&mut self) -> Fallible<Token> {
         loop {
             if let Some(token) = self.last_token.take() {
-                eprintln!("using last_token {:?}", token);
                 return Ok(token);
             }
 
@@ -333,10 +330,6 @@ impl<R: Read> Lexer<R> {
             } else {
                 0
             };
-            eprintln!(
-                "delimit: state={:?}, last={} word={:?}",
-                state.state, last, word
-            );
             for i in (0..=last).rev() {
                 apply_single_tilde_expansion(i, &mut word);
             }
@@ -605,7 +598,6 @@ impl<R: Read> Lexer<R> {
 }
 
 fn apply_single_tilde_expansion(word_idx: usize, words: &mut Vec<WordComponent>) {
-    eprintln!("apply_single_tilde_expansion word_idx={}", word_idx);
     if let WordComponent {
         kind: WordComponentKind::Literal(first_word),
         splittable: true,
