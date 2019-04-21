@@ -13,6 +13,8 @@ pub enum LexErrorKind {
     EofDuringDoubleQuotedString,
     #[fail(display = "EOF while lexing parameter expansion")]
     EofDuringParameterExpansion,
+    #[fail(display = "EOF while lexing assignment word")]
+    EofDuringAssignmentWord,
     #[fail(display = "IO Error")]
     IoError,
 }

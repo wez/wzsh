@@ -32,7 +32,11 @@ pub enum Token {
     Eof(Pos),
     Newline(Pos),
     IoNumber(usize, Span),
-    AssignmentName(String, Span),
+    Assignment {
+        name: String,
+        span: Span,
+        value: Vec<WordComponent>,
+    },
 }
 
 pub struct Lexer<R: Read> {
@@ -53,6 +57,40 @@ impl<R: Read> Lexer<R> {
             Some(Token::Word(word))
         } else {
             None
+        }
+    }
+
+    /// Read tokens until we delimit the next word; return
+    /// that word.
+    fn next_word(&mut self, kind: LexErrorKind) -> Fallible<Token> {
+        assert!(self.current_word.is_none());
+
+        loop {
+            match self.reader.next_char() {
+                Next::Eof(pos) => {
+                    if let Some(token) = self.delimit_current_word() {
+                        return Ok(token);
+                    }
+                    return Err(kind.at(pos.into()).into());
+                }
+                Next::Error(err, pos) => return Err(err.context(pos).into()),
+                Next::Char(c) => {
+                    if c.c == ' ' || c.c == '\t' || c.c == '\r' || c.c == '\n' {
+                        if let Some(token) = self.delimit_current_word() {
+                            return Ok(token);
+                        }
+                        return Err(kind.at(c.pos.into()).into());
+                    } else if c.c == '\'' {
+                        self.single_quotes(c.pos)?;
+                    } else if c.c == '"' {
+                        self.double_quotes(c.pos)?;
+                    } else if c.c == '\\' {
+                        self.backslash(c)?;
+                    } else {
+                        self.add_char_to_word(c);
+                    }
+                }
+            }
         }
     }
 
@@ -81,7 +119,9 @@ impl<R: Read> Lexer<R> {
                     return Ok(token);
                 }
                 let (name, span) = self.reader.next_assignment_word()?.unwrap();
-                return Ok(Token::AssignmentName(name, span));
+                if let Token::Word(value) = self.next_word(LexErrorKind::EofDuringAssignmentWord)? {
+                    return Ok(Token::Assignment { name, span, value });
+                }
             }
 
             match self.reader.next_char() {
@@ -366,27 +406,31 @@ mod test {
     fn assignment_word() {
         assert_eq!(
             tokens("FOO=bar"),
-            vec![
-                Token::AssignmentName("FOO".to_owned(), Span::new_to(0, 0, 4)),
-                Token::Word(vec![WordComponent {
+            vec![Token::Assignment {
+                name: "FOO".to_owned(),
+                span: Span::new_to(0, 0, 4),
+                value: vec![WordComponent {
                     kind: WordComponentKind::literal("bar"),
                     span: Span::new_to(0, 4, 6),
                     splittable: true,
                     remove_backslash: true
-                },]),
-            ]
+                }]
+            }]
         );
 
         assert_eq!(
             tokens("FOO=bar baz"),
             vec![
-                Token::AssignmentName("FOO".to_owned(), Span::new_to(0, 0, 4)),
-                Token::Word(vec![WordComponent {
-                    kind: WordComponentKind::literal("bar"),
-                    span: Span::new_to(0, 4, 6),
-                    splittable: true,
-                    remove_backslash: true
-                },]),
+                Token::Assignment {
+                    name: "FOO".to_owned(),
+                    span: Span::new_to(0, 0, 4),
+                    value: vec![WordComponent {
+                        kind: WordComponentKind::literal("bar"),
+                        span: Span::new_to(0, 4, 6),
+                        splittable: true,
+                        remove_backslash: true
+                    }]
+                },
                 Token::Word(vec![WordComponent {
                     kind: WordComponentKind::literal("baz"),
                     span: Span::new_to(0, 8, 10),
@@ -398,15 +442,16 @@ mod test {
 
         assert_eq!(
             tokens("FOO=\"bar baz\""),
-            vec![
-                Token::AssignmentName("FOO".to_owned(), Span::new_to(0, 0, 4)),
-                Token::Word(vec![WordComponent {
+            vec![Token::Assignment {
+                name: "FOO".to_owned(),
+                span: Span::new_to(0, 0, 4),
+                value: vec![WordComponent {
                     kind: WordComponentKind::literal("bar baz"),
                     span: Span::new_to(0, 4, 12),
                     splittable: false,
                     remove_backslash: true
-                },]),
-            ]
+                }]
+            },]
         );
     }
 }
