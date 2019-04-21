@@ -68,6 +68,10 @@ impl<T: Copy> LiteralMatcher<T> {
         }
     }
 
+    pub fn lookup(&self, text: &str) -> Option<T> {
+        self.map.get(text).map(|v| *v)
+    }
+
     pub fn matches(&self, text: &str) -> MatchResult<T> {
         if let Some(m) = self.re.find(text) {
             MatchResult::Match(*self.map.get(m.as_str()).unwrap(), m.as_str().len())

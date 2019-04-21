@@ -6,7 +6,7 @@ mod reader;
 mod tokenenum;
 
 pub use errors::LexErrorKind;
-pub use lexer::Lexer;
+pub use lexer::{Assignment, Lexer, Token, WordComponent, WordComponentKind};
 pub use position::{Pos, Span};
 pub use reader::CharReader;
 pub use tokenenum::LiteralMatcher;

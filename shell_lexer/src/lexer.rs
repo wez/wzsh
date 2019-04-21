@@ -4,7 +4,7 @@ use crate::errors::LexErrorKind;
 use crate::position::{Pos, Span};
 use crate::reader::{CharReader, Next, PositionedChar};
 use crate::tokenenum::MatchResult;
-use crate::{Operator, OPERATORS};
+use crate::{Operator, ReservedWord, OPERATORS, RESERVED_WORDS};
 use failure::{bail, Fallible};
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -18,7 +18,7 @@ lazy_static! {
     static ref OPER_RE: Regex = Regex::new(r"^[%#:]?[%#-=?+]").expect("failed to compile OPER_RE");
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WordComponentKind {
     Literal(String),
     TildeExpand(Option<String>),
@@ -32,7 +32,7 @@ impl WordComponentKind {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WordComponent {
     pub kind: WordComponentKind,
     pub span: Span,
@@ -40,23 +40,50 @@ pub struct WordComponent {
     pub remove_backslash: bool,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Assignment {
+    name: String,
+    span: Span,
+    value: Vec<WordComponent>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token {
     Word(Vec<WordComponent>),
     Operator(Operator, Span),
     Eof(Pos),
     Newline(Pos),
     IoNumber(usize, Span),
-    Assignment {
-        name: String,
-        span: Span,
-        value: Vec<WordComponent>,
-    },
+    Assignment(Assignment), // FIXME: lex both ways
     EndCommandSubst(Pos),
     EndParamSubst(Pos),
 }
 
-#[derive(Debug, PartialEq, Eq)]
+impl Token {
+    /// If the token is a single literal word string, return a
+    /// reference to that string.
+    pub fn as_single_literal_word_string(&self) -> Option<&str> {
+        if let Token::Word(ref word) = self {
+            if word.len() == 1 {
+                if let WordComponentKind::Literal(ref first_word) = &word[0].kind {
+                    return Some(first_word);
+                }
+            }
+        }
+        None
+    }
+
+    pub fn is_reserved_word(&self, reserved: ReservedWord) -> bool {
+        if let Some(literal) = self.as_single_literal_word_string() {
+            if let Some(word) = RESERVED_WORDS.lookup(literal) {
+                return word == reserved;
+            }
+        }
+        false
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParamOper {
     /// `${NAME}` or `$NAME`, returns the value of parameter named NAME
     Get,
@@ -97,7 +124,7 @@ pub enum ParamOper {
 }
 
 /// Represents a parameter expansion expression
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParamExpr {
     pub kind: ParamOper,
     pub name: String,
@@ -218,7 +245,7 @@ impl<R: Read> Lexer<R> {
                     }
                 };
                 self.pop_state();
-                return Ok(Token::Assignment { name, span, value });
+                return Ok(Token::Assignment(Assignment { name, span, value }));
             }
 
             match self.reader.next_char() {
@@ -867,7 +894,7 @@ mod test {
     fn assignment_word() {
         assert_eq!(
             tokens("FOO=bar"),
-            vec![Token::Assignment {
+            vec![Token::Assignment(Assignment {
                 name: "FOO".to_owned(),
                 span: Span::new_to(0, 0, 4),
                 value: vec![WordComponent {
@@ -876,26 +903,26 @@ mod test {
                     splittable: true,
                     remove_backslash: true
                 }]
-            }]
+            })]
         );
 
         assert_eq!(
             tokens("FOO="),
-            vec![Token::Assignment {
+            vec![Token::Assignment(Assignment {
                 name: "FOO".to_owned(),
                 span: Span::new_to(0, 0, 4),
                 value: vec![],
-            }]
+            })]
         );
 
         assert_eq!(
             tokens("FOO=\n"),
             vec![
-                Token::Assignment {
+                Token::Assignment(Assignment {
                     name: "FOO".to_owned(),
                     span: Span::new_to(0, 0, 4),
                     value: vec![],
-                },
+                }),
                 Token::Newline(Pos::new(0, 4))
             ]
         );
@@ -903,18 +930,18 @@ mod test {
         assert_eq!(
             tokens("FOO=||"),
             vec![
-                Token::Assignment {
+                Token::Assignment(Assignment {
                     name: "FOO".to_owned(),
                     span: Span::new_to(0, 0, 4),
                     value: vec![],
-                },
+                }),
                 Token::Operator(Operator::OrIf, Span::new_to(0, 4, 5)),
             ]
         );
 
         assert_eq!(
             tokens("FOO=~bar"),
-            vec![Token::Assignment {
+            vec![Token::Assignment(Assignment {
                 name: "FOO".to_owned(),
                 span: Span::new_to(0, 0, 4),
                 value: vec![WordComponent {
@@ -923,12 +950,12 @@ mod test {
                     splittable: false,
                     remove_backslash: false
                 }]
-            }]
+            })]
         );
 
         assert_eq!(
             tokens("FOO=~bar:/somewhere:~foo/baz"),
-            vec![Token::Assignment {
+            vec![Token::Assignment(Assignment {
                 name: "FOO".to_owned(),
                 span: Span::new_to(0, 0, 4),
                 value: vec![
@@ -969,13 +996,13 @@ mod test {
                         remove_backslash: true,
                     },
                 ]
-            }]
+            })]
         );
 
         assert_eq!(
             tokens("FOO=bar baz"),
             vec![
-                Token::Assignment {
+                Token::Assignment(Assignment {
                     name: "FOO".to_owned(),
                     span: Span::new_to(0, 0, 4),
                     value: vec![WordComponent {
@@ -984,7 +1011,7 @@ mod test {
                         splittable: true,
                         remove_backslash: true
                     }]
-                },
+                }),
                 Token::Word(vec![WordComponent {
                     kind: WordComponentKind::literal("baz"),
                     span: Span::new_to(0, 8, 10),
@@ -996,7 +1023,7 @@ mod test {
 
         assert_eq!(
             tokens("FOO=\"bar baz\""),
-            vec![Token::Assignment {
+            vec![Token::Assignment(Assignment {
                 name: "FOO".to_owned(),
                 span: Span::new_to(0, 0, 4),
                 value: vec![WordComponent {
@@ -1005,7 +1032,7 @@ mod test {
                     splittable: false,
                     remove_backslash: true
                 }]
-            },]
+            }),]
         );
     }
 

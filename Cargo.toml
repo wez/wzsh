@@ -11,6 +11,7 @@ libc = "0.2"
 rustyline = "3.0"
 shlex = { path = "shlex" }
 shell_lexer = { path = "shell_lexer" }
+shell_parser = { path = "shell_parser" }
 structopt = "0.2"
 
 [dev-dependencies]
