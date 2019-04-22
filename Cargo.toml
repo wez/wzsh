@@ -12,6 +12,7 @@ rustyline = "3.0"
 shlex = { path = "shlex" }
 shell_lexer = { path = "shell_lexer" }
 shell_parser = { path = "shell_parser" }
+shell_vm = { path = "shell_vm" }
 structopt = "0.2"
 
 [dev-dependencies]
