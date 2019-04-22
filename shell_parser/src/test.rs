@@ -38,13 +38,13 @@ fn test_assign() {
             ],
             redirections: vec![],
             words: vec![
-                Token::Word(vec![WordComponent {
+                vec![WordComponent {
                     kind: WordComponentKind::literal("echo"),
                     span: Span::new_to(0, 16, 19),
                     splittable: true,
                     remove_backslash: true
-                }]),
-                Token::Word(vec![
+                }],
+                vec![
                     WordComponent {
                         kind: WordComponentKind::literal("WOOT="),
                         span: Span::new_to(0, 21, 26),
@@ -57,7 +57,7 @@ fn test_assign() {
                         splittable: true,
                         remove_backslash: true
                     },
-                ]),
+                ],
             ]
         }))
     );
@@ -72,24 +72,24 @@ fn test_parse() {
             assignments: vec![],
             redirections: vec![],
             words: vec![
-                Token::Word(vec![WordComponent {
+                vec![WordComponent {
                     kind: WordComponentKind::literal("ls"),
                     span: Span::new_to(0, 0, 1),
                     splittable: true,
                     remove_backslash: true
-                }]),
-                Token::Word(vec![WordComponent {
+                }],
+                vec![WordComponent {
                     kind: WordComponentKind::literal("-l"),
                     span: Span::new_to(0, 3, 4),
                     splittable: true,
                     remove_backslash: true
-                }]),
-                Token::Word(vec![WordComponent {
+                }],
+                vec![WordComponent {
                     kind: WordComponentKind::literal("foo"),
                     span: Span::new_to(0, 6, 8),
                     splittable: true,
                     remove_backslash: true
-                }]),
+                }],
             ]
         }))
     );
@@ -105,22 +105,22 @@ fn test_two_lines() {
                 Command::from(CommandType::SimpleCommand(SimpleCommand {
                     assignments: vec![],
                     redirections: vec![],
-                    words: vec![Token::Word(vec![WordComponent {
+                    words: vec![vec![WordComponent {
                         kind: WordComponentKind::literal("false"),
                         span: Span::new_to(0, 0, 4),
                         splittable: true,
                         remove_backslash: true
-                    }]),]
+                    }],]
                 })),
                 Command::from(CommandType::SimpleCommand(SimpleCommand {
                     assignments: vec![],
                     redirections: vec![],
-                    words: vec![Token::Word(vec![WordComponent {
+                    words: vec![vec![WordComponent {
                         kind: WordComponentKind::literal("true"),
                         span: Span::new_to(1, 0, 3),
                         splittable: true,
                         remove_backslash: true
-                    }]),]
+                    }],]
                 }))
             ]
         }))
@@ -136,23 +136,23 @@ fn redirect_out() {
             assignments: vec![],
             redirections: vec![Redirection::File(FileRedirection {
                 fd_number: 1,
-                file_name: Token::Word(vec![WordComponent {
+                file_name: vec![WordComponent {
                     kind: WordComponentKind::literal("foo"),
                     span: Span::new_to(0, 6, 8),
                     remove_backslash: true,
                     splittable: true,
-                }]),
+                }],
                 input: false,
                 output: true,
                 clobber: false,
                 append: false
             })],
-            words: vec![Token::Word(vec![WordComponent {
+            words: vec![vec![WordComponent {
                 kind: WordComponentKind::literal("echo"),
                 span: Span::new_to(0, 0, 3),
                 splittable: true,
                 remove_backslash: true
-            }]),]
+            }],]
         }))
     );
 }
@@ -166,23 +166,23 @@ fn redirect_append() {
             assignments: vec![],
             redirections: vec![Redirection::File(FileRedirection {
                 fd_number: 1,
-                file_name: Token::Word(vec![WordComponent {
+                file_name: vec![WordComponent {
                     kind: WordComponentKind::literal("foo"),
                     span: Span::new_to(0, 7, 9),
                     remove_backslash: true,
                     splittable: true,
-                }]),
+                }],
                 input: false,
                 output: true,
                 clobber: false,
                 append: true
             })],
-            words: vec![Token::Word(vec![WordComponent {
+            words: vec![vec![WordComponent {
                 kind: WordComponentKind::literal("echo"),
                 span: Span::new_to(0, 0, 3),
                 splittable: true,
                 remove_backslash: true
-            }]),]
+            }],]
         }))
     );
 }
@@ -196,23 +196,23 @@ fn redirect_clobber() {
             assignments: vec![],
             redirections: vec![Redirection::File(FileRedirection {
                 fd_number: 1,
-                file_name: Token::Word(vec![WordComponent {
+                file_name: vec![WordComponent {
                     kind: WordComponentKind::literal("foo"),
                     span: Span::new_to(0, 7, 9),
                     remove_backslash: true,
                     splittable: true,
-                }]),
+                }],
                 input: false,
                 output: true,
                 clobber: true,
                 append: false,
             })],
-            words: vec![Token::Word(vec![WordComponent {
+            words: vec![vec![WordComponent {
                 kind: WordComponentKind::literal("echo"),
                 span: Span::new_to(0, 0, 3),
                 splittable: true,
                 remove_backslash: true
-            }]),]
+            }],]
         }))
     );
 }
@@ -226,23 +226,23 @@ fn redirect_input() {
             assignments: vec![],
             redirections: vec![Redirection::File(FileRedirection {
                 fd_number: 0,
-                file_name: Token::Word(vec![WordComponent {
+                file_name: vec![WordComponent {
                     kind: WordComponentKind::literal("foo"),
                     span: Span::new_to(0, 6, 8),
                     remove_backslash: true,
                     splittable: true,
-                }]),
+                }],
                 input: true,
                 output: false,
                 clobber: false,
                 append: false,
             })],
-            words: vec![Token::Word(vec![WordComponent {
+            words: vec![vec![WordComponent {
                 kind: WordComponentKind::literal("echo"),
                 span: Span::new_to(0, 0, 3),
                 splittable: true,
                 remove_backslash: true
-            }]),]
+            }],]
         }))
     );
 }
@@ -258,12 +258,12 @@ fn redirect_stderr_stdout() {
                 src_fd_number: 1,
                 dest_fd_number: 2
             })],
-            words: vec![Token::Word(vec![WordComponent {
+            words: vec![vec![WordComponent {
                 kind: WordComponentKind::literal("echo"),
                 span: Span::new_to(0, 0, 3),
                 splittable: true,
                 remove_backslash: true
-            }]),]
+            }],]
         }))
     );
 }
@@ -279,12 +279,12 @@ fn redirect_dup_for_input() {
                 src_fd_number: 1,
                 dest_fd_number: 0
             })],
-            words: vec![Token::Word(vec![WordComponent {
+            words: vec![vec![WordComponent {
                 kind: WordComponentKind::literal("echo"),
                 span: Span::new_to(0, 0, 3),
                 splittable: true,
                 remove_backslash: true
-            }]),]
+            }],]
         }))
     );
 }
@@ -298,23 +298,23 @@ fn redirect_input_and_output() {
             assignments: vec![],
             redirections: vec![Redirection::File(FileRedirection {
                 fd_number: 0,
-                file_name: Token::Word(vec![WordComponent {
+                file_name: vec![WordComponent {
                     kind: WordComponentKind::literal("file"),
                     span: Span::new_to(0, 7, 10),
                     remove_backslash: true,
                     splittable: true,
-                }]),
+                }],
                 input: true,
                 output: true,
                 clobber: false,
                 append: false,
             })],
-            words: vec![Token::Word(vec![WordComponent {
+            words: vec![vec![WordComponent {
                 kind: WordComponentKind::literal("echo"),
                 span: Span::new_to(0, 0, 3),
                 splittable: true,
                 remove_backslash: true
-            }]),]
+            }],]
         }))
     );
 }
@@ -361,12 +361,12 @@ fn subshell() {
             commands: vec![Command::from(CommandType::SimpleCommand(SimpleCommand {
                 assignments: vec![],
                 redirections: vec![],
-                words: vec![Token::Word(vec![WordComponent {
+                words: vec![vec![WordComponent {
                     kind: WordComponentKind::literal("echo"),
                     span: Span::new_to(0, 1, 4),
                     splittable: true,
                     remove_backslash: true
-                }]),]
+                }],]
             }))]
         }))
     );
@@ -382,12 +382,12 @@ fn subshell_redirected() {
             redirects: Some(RedirectList {
                 redirections: vec![Redirection::File(FileRedirection {
                     fd_number: 1,
-                    file_name: Token::Word(vec![WordComponent {
+                    file_name: vec![WordComponent {
                         kind: WordComponentKind::literal("foo"),
                         span: Span::new_to(0, 7, 9),
                         remove_backslash: true,
                         splittable: true,
-                    }]),
+                    }],
                     input: false,
                     output: true,
                     clobber: false,
@@ -398,12 +398,12 @@ fn subshell_redirected() {
                 commands: vec![Command::from(CommandType::SimpleCommand(SimpleCommand {
                     assignments: vec![],
                     redirections: vec![],
-                    words: vec![Token::Word(vec![WordComponent {
+                    words: vec![vec![WordComponent {
                         kind: WordComponentKind::literal("echo"),
                         span: Span::new_to(0, 1, 4),
                         splittable: true,
                         remove_backslash: true
-                    }]),]
+                    }],]
                 }))]
             })
         }
@@ -423,12 +423,12 @@ fn brace_group_no_spaces() {
         Command::from(CommandType::SimpleCommand(SimpleCommand {
             assignments: vec![],
             redirections: vec![],
-            words: vec![Token::Word(vec![WordComponent {
+            words: vec![vec![WordComponent {
                 kind: WordComponentKind::literal("{echo}"),
                 span: Span::new_to(0, 0, 5),
                 splittable: true,
                 remove_backslash: true
-            }]),]
+            }],]
         }))
     );
 }
@@ -456,12 +456,12 @@ fn brace_group() {
             commands: vec![Command::from(CommandType::SimpleCommand(SimpleCommand {
                 assignments: vec![],
                 redirections: vec![],
-                words: vec![Token::Word(vec![WordComponent {
+                words: vec![vec![WordComponent {
                     kind: WordComponentKind::literal("echo"),
                     span: Span::new_to(0, 2, 5),
                     splittable: true,
                     remove_backslash: true
-                }]),]
+                }],]
             }))]
         }))
     );
@@ -477,22 +477,22 @@ fn brace_group_sep_list() {
                 Command::from(CommandType::SimpleCommand(SimpleCommand {
                     assignments: vec![],
                     redirections: vec![],
-                    words: vec![Token::Word(vec![WordComponent {
+                    words: vec![vec![WordComponent {
                         kind: WordComponentKind::literal("echo"),
                         span: Span::new_to(0, 2, 5),
                         splittable: true,
                         remove_backslash: true
-                    }]),]
+                    }],]
                 })),
                 Command::from(CommandType::SimpleCommand(SimpleCommand {
                     assignments: vec![],
                     redirections: vec![],
-                    words: vec![Token::Word(vec![WordComponent {
+                    words: vec![vec![WordComponent {
                         kind: WordComponentKind::literal("boo"),
                         span: Span::new_to(0, 9, 11),
                         splittable: true,
                         remove_backslash: true
-                    }]),]
+                    }],]
                 })),
             ]
         }))
@@ -509,22 +509,22 @@ fn brace_group_sep_newlien() {
                 Command::from(CommandType::SimpleCommand(SimpleCommand {
                     assignments: vec![],
                     redirections: vec![],
-                    words: vec![Token::Word(vec![WordComponent {
+                    words: vec![vec![WordComponent {
                         kind: WordComponentKind::literal("echo"),
                         span: Span::new_to(1, 1, 4),
                         splittable: true,
                         remove_backslash: true
-                    }]),]
+                    }],]
                 })),
                 Command::from(CommandType::SimpleCommand(SimpleCommand {
                     assignments: vec![],
                     redirections: vec![],
-                    words: vec![Token::Word(vec![WordComponent {
+                    words: vec![vec![WordComponent {
                         kind: WordComponentKind::literal("boo"),
                         span: Span::new_to(2, 1, 3),
                         splittable: true,
                         remove_backslash: true
-                    }]),]
+                    }],]
                 })),
             ]
         }))
