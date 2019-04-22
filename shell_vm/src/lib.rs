@@ -132,6 +132,17 @@ pub enum Operation {
 
     /// Pop the current frame
     PopFrame,
+
+    /// Clone the current output and environment variables and
+    /// push them on the environment stack.  Subsequent command
+    /// invocations will use the top of the environment stack.
+    PushIoAndEnvironment,
+
+    /// Pop the top of the environment stack
+    PopIoAndEnvironment,
+
+    /// Set a variable in the current environment
+    SetEnv { name: Operand, value: Operand },
 }
 
 #[derive(Debug, Default)]
