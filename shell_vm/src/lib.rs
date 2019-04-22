@@ -13,6 +13,24 @@ pub enum Value {
     Integer(isize),
 }
 
+impl<T: ?Sized + AsRef<str>> From<&T> for Value {
+    fn from(s: &T) -> Value {
+        Value::String(s.as_ref().to_owned())
+    }
+}
+
+impl From<isize> for Value {
+    fn from(s: isize) -> Value {
+        Value::Integer(s)
+    }
+}
+
+impl From<Vec<Value>> for Value {
+    fn from(s: Vec<Value>) -> Value {
+        Value::List(s)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Operand {
     /// A value known at compilation time

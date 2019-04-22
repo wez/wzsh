@@ -10,6 +10,7 @@ lazy_static = "1.3"
 libc = "0.2"
 rustyline = "3.0"
 shlex = { path = "shlex" }
+shell_compiler = { path = "shell_compiler" }
 shell_lexer = { path = "shell_lexer" }
 shell_parser = { path = "shell_parser" }
 shell_vm = { path = "shell_vm" }

@@ -1,10 +1,10 @@
 /// https://pubs.opengroup.org/onlinepubs/9699919799/utilities/V3_chap02.html#tag_18_10_02
-use shell_lexer::{Assignment, Token};
+use shell_lexer::{Assignment, WordComponent};
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct SimpleCommand {
     pub assignments: Vec<Assignment>,
-    pub words: Vec<Token>,
+    pub words: Vec<Vec<WordComponent>>,
     pub redirections: Vec<Redirection>,
 }
 
@@ -67,7 +67,7 @@ pub struct WhileLoop {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ForEach {
-    pub wordlist: Vec<Token>,
+    pub wordlist: Vec<Vec<WordComponent>>,
     pub body: CompoundList,
 }
 
@@ -80,7 +80,7 @@ pub enum Redirection {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileRedirection {
     pub fd_number: usize,
-    pub file_name: Token,
+    pub file_name: Vec<WordComponent>,
     /// `<` or `<>`
     pub input: bool,
     /// `>` or `<>`

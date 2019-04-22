@@ -367,7 +367,7 @@ impl<R: Read> Parser<R> {
         }
 
         let file_name = self.next_token()?;
-        if let Token::Word(_) = &file_name {
+        if let Token::Word(file_name) = file_name {
             Ok(Some(match oper {
                 Operator::Less => Redirection::File(FileRedirection {
                     fd_number: fd_number.unwrap_or(0),
@@ -434,15 +434,15 @@ impl<R: Read> Parser<R> {
                     if words.is_empty() {
                         assignments.push(assign.clone());
                     } else {
-                        words.push(Token::Word(assign.into()));
+                        words.push(assign.into());
                     }
                 }
-                Token::Word(_) => {
+                Token::Word(word) => {
                     if token.is_reserved_word(ReservedWord::RightBrace) {
                         self.unget_token(token);
                         break;
                     }
-                    words.push(token);
+                    words.push(word.clone());
                 }
 
                 _ => {
