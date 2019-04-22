@@ -212,13 +212,13 @@ impl<R: Read> Parser<R> {
             Ok(Some(Command {
                 command: CommandType::Subshell(group),
                 asynchronous: false,
-                redirects: None,
+                redirects: vec![],
             }))
         } else if let Some(command) = self.simple_command()? {
             Ok(Some(Command {
                 command: CommandType::SimpleCommand(command),
                 asynchronous: false,
-                redirects: None,
+                redirects: vec![],
             }))
         } else {
             // TODO: function_definition
@@ -231,13 +231,13 @@ impl<R: Read> Parser<R> {
             Command {
                 command: CommandType::BraceGroup(group),
                 asynchronous: false,
-                redirects: None,
+                redirects: vec![],
             }
         } else if let Some(group) = self.subshell()? {
             Command {
                 command: CommandType::Subshell(group),
                 asynchronous: false,
-                redirects: None,
+                redirects: vec![],
             }
         } else {
             // TODO: for_clause, case_clause, if_clause, while_clause, until_clause
@@ -300,15 +300,13 @@ impl<R: Read> Parser<R> {
         }
     }
 
-    fn redirect_list(&mut self) -> Fallible<Option<RedirectList>> {
+    fn redirect_list(&mut self) -> Fallible<Vec<Redirection>> {
         let mut redirections = vec![];
         loop {
             if let Some(redir) = self.io_redirect()? {
                 redirections.push(redir);
-            } else if redirections.is_empty() {
-                return Ok(None);
             } else {
-                return Ok(Some(RedirectList { redirections }));
+                return Ok(redirections);
             }
         }
     }
@@ -420,11 +418,11 @@ impl<R: Read> Parser<R> {
     fn simple_command(&mut self) -> Fallible<Option<SimpleCommand>> {
         let mut assignments = vec![];
         let mut words = vec![];
-        let mut redirections = vec![];
+        let mut redirects = vec![];
 
         loop {
             if let Some(redir) = self.io_redirect()? {
-                redirections.push(redir);
+                redirects.push(redir);
                 continue;
             }
 
@@ -452,13 +450,13 @@ impl<R: Read> Parser<R> {
             }
         }
 
-        if assignments.is_empty() && words.is_empty() && redirections.is_empty() {
+        if assignments.is_empty() && words.is_empty() && redirects.is_empty() {
             return Ok(None);
         }
 
         Ok(Some(SimpleCommand {
             assignments,
-            redirections,
+            redirects,
             words,
         }))
     }

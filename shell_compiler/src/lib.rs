@@ -1,7 +1,7 @@
 #![allow(dead_code, unused_imports)]
 use failure::{bail, err_msg, Fallible};
 use shell_lexer::{WordComponent, WordComponentKind};
-use shell_parser::{Command, CommandType};
+use shell_parser::{Command, CommandType, Redirection};
 pub use shell_vm::*;
 use std::collections::VecDeque;
 
@@ -132,6 +132,10 @@ impl Compiler {
 
         self.frame()?.free(expanded_word);
         Ok(())
+    }
+
+    fn apply_redirection(&mut self, redir: &Vec<Redirection>) -> Fallible<bool> {
+        bail!("boo");
     }
 
     pub fn compile_command(&mut self, command: &Command) -> Fallible<()> {

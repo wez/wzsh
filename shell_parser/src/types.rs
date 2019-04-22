@@ -5,19 +5,14 @@ use shell_lexer::{Assignment, WordComponent};
 pub struct SimpleCommand {
     pub assignments: Vec<Assignment>,
     pub words: Vec<Vec<WordComponent>>,
-    pub redirections: Vec<Redirection>,
+    pub redirects: Vec<Redirection>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Command {
     pub asynchronous: bool,
     pub command: CommandType,
-    pub redirects: Option<RedirectList>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RedirectList {
-    pub redirections: Vec<Redirection>,
+    pub redirects: Vec<Redirection>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,7 +98,7 @@ impl From<CommandType> for Command {
     fn from(command: CommandType) -> Command {
         Command {
             command,
-            redirects: None,
+            redirects: vec![],
             asynchronous: false,
         }
     }

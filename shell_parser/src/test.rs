@@ -36,7 +36,7 @@ fn test_assign() {
                     }]
                 },
             ],
-            redirections: vec![],
+            redirects: vec![],
             words: vec![
                 vec![WordComponent {
                     kind: WordComponentKind::literal("echo"),
@@ -70,7 +70,7 @@ fn test_parse() {
         list,
         Command::from(CommandType::SimpleCommand(SimpleCommand {
             assignments: vec![],
-            redirections: vec![],
+            redirects: vec![],
             words: vec![
                 vec![WordComponent {
                     kind: WordComponentKind::literal("ls"),
@@ -104,7 +104,7 @@ fn test_two_lines() {
             commands: vec![
                 Command::from(CommandType::SimpleCommand(SimpleCommand {
                     assignments: vec![],
-                    redirections: vec![],
+                    redirects: vec![],
                     words: vec![vec![WordComponent {
                         kind: WordComponentKind::literal("false"),
                         span: Span::new_to(0, 0, 4),
@@ -114,7 +114,7 @@ fn test_two_lines() {
                 })),
                 Command::from(CommandType::SimpleCommand(SimpleCommand {
                     assignments: vec![],
-                    redirections: vec![],
+                    redirects: vec![],
                     words: vec![vec![WordComponent {
                         kind: WordComponentKind::literal("true"),
                         span: Span::new_to(1, 0, 3),
@@ -134,7 +134,7 @@ fn redirect_out() {
         list,
         Command::from(CommandType::SimpleCommand(SimpleCommand {
             assignments: vec![],
-            redirections: vec![Redirection::File(FileRedirection {
+            redirects: vec![Redirection::File(FileRedirection {
                 fd_number: 1,
                 file_name: vec![WordComponent {
                     kind: WordComponentKind::literal("foo"),
@@ -164,7 +164,7 @@ fn redirect_append() {
         list,
         Command::from(CommandType::SimpleCommand(SimpleCommand {
             assignments: vec![],
-            redirections: vec![Redirection::File(FileRedirection {
+            redirects: vec![Redirection::File(FileRedirection {
                 fd_number: 1,
                 file_name: vec![WordComponent {
                     kind: WordComponentKind::literal("foo"),
@@ -194,7 +194,7 @@ fn redirect_clobber() {
         list,
         Command::from(CommandType::SimpleCommand(SimpleCommand {
             assignments: vec![],
-            redirections: vec![Redirection::File(FileRedirection {
+            redirects: vec![Redirection::File(FileRedirection {
                 fd_number: 1,
                 file_name: vec![WordComponent {
                     kind: WordComponentKind::literal("foo"),
@@ -224,7 +224,7 @@ fn redirect_input() {
         list,
         Command::from(CommandType::SimpleCommand(SimpleCommand {
             assignments: vec![],
-            redirections: vec![Redirection::File(FileRedirection {
+            redirects: vec![Redirection::File(FileRedirection {
                 fd_number: 0,
                 file_name: vec![WordComponent {
                     kind: WordComponentKind::literal("foo"),
@@ -254,7 +254,7 @@ fn redirect_stderr_stdout() {
         list,
         Command::from(CommandType::SimpleCommand(SimpleCommand {
             assignments: vec![],
-            redirections: vec![Redirection::Fd(FdDuplication {
+            redirects: vec![Redirection::Fd(FdDuplication {
                 src_fd_number: 1,
                 dest_fd_number: 2
             })],
@@ -275,7 +275,7 @@ fn redirect_dup_for_input() {
         list,
         Command::from(CommandType::SimpleCommand(SimpleCommand {
             assignments: vec![],
-            redirections: vec![Redirection::Fd(FdDuplication {
+            redirects: vec![Redirection::Fd(FdDuplication {
                 src_fd_number: 1,
                 dest_fd_number: 0
             })],
@@ -296,7 +296,7 @@ fn redirect_input_and_output() {
         list,
         Command::from(CommandType::SimpleCommand(SimpleCommand {
             assignments: vec![],
-            redirections: vec![Redirection::File(FileRedirection {
+            redirects: vec![Redirection::File(FileRedirection {
                 fd_number: 0,
                 file_name: vec![WordComponent {
                     kind: WordComponentKind::literal("file"),
@@ -360,7 +360,7 @@ fn subshell() {
         Command::from(CommandType::Subshell(CompoundList {
             commands: vec![Command::from(CommandType::SimpleCommand(SimpleCommand {
                 assignments: vec![],
-                redirections: vec![],
+                redirects: vec![],
                 words: vec![vec![WordComponent {
                     kind: WordComponentKind::literal("echo"),
                     span: Span::new_to(0, 1, 4),
@@ -379,25 +379,23 @@ fn subshell_redirected() {
         list,
         Command {
             asynchronous: false,
-            redirects: Some(RedirectList {
-                redirections: vec![Redirection::File(FileRedirection {
-                    fd_number: 1,
-                    file_name: vec![WordComponent {
-                        kind: WordComponentKind::literal("foo"),
-                        span: Span::new_to(0, 7, 9),
-                        remove_backslash: true,
-                        splittable: true,
-                    }],
-                    input: false,
-                    output: true,
-                    clobber: false,
-                    append: false,
-                })]
-            }),
+            redirects: vec![Redirection::File(FileRedirection {
+                fd_number: 1,
+                file_name: vec![WordComponent {
+                    kind: WordComponentKind::literal("foo"),
+                    span: Span::new_to(0, 7, 9),
+                    remove_backslash: true,
+                    splittable: true,
+                }],
+                input: false,
+                output: true,
+                clobber: false,
+                append: false,
+            })],
             command: CommandType::Subshell(CompoundList {
                 commands: vec![Command::from(CommandType::SimpleCommand(SimpleCommand {
                     assignments: vec![],
-                    redirections: vec![],
+                    redirects: vec![],
                     words: vec![vec![WordComponent {
                         kind: WordComponentKind::literal("echo"),
                         span: Span::new_to(0, 1, 4),
@@ -422,7 +420,7 @@ fn brace_group_no_spaces() {
         list,
         Command::from(CommandType::SimpleCommand(SimpleCommand {
             assignments: vec![],
-            redirections: vec![],
+            redirects: vec![],
             words: vec![vec![WordComponent {
                 kind: WordComponentKind::literal("{echo}"),
                 span: Span::new_to(0, 0, 5),
@@ -455,7 +453,7 @@ fn brace_group() {
         Command::from(CommandType::BraceGroup(CompoundList {
             commands: vec![Command::from(CommandType::SimpleCommand(SimpleCommand {
                 assignments: vec![],
-                redirections: vec![],
+                redirects: vec![],
                 words: vec![vec![WordComponent {
                     kind: WordComponentKind::literal("echo"),
                     span: Span::new_to(0, 2, 5),
@@ -476,7 +474,7 @@ fn brace_group_sep_list() {
             commands: vec![
                 Command::from(CommandType::SimpleCommand(SimpleCommand {
                     assignments: vec![],
-                    redirections: vec![],
+                    redirects: vec![],
                     words: vec![vec![WordComponent {
                         kind: WordComponentKind::literal("echo"),
                         span: Span::new_to(0, 2, 5),
@@ -486,7 +484,7 @@ fn brace_group_sep_list() {
                 })),
                 Command::from(CommandType::SimpleCommand(SimpleCommand {
                     assignments: vec![],
-                    redirections: vec![],
+                    redirects: vec![],
                     words: vec![vec![WordComponent {
                         kind: WordComponentKind::literal("boo"),
                         span: Span::new_to(0, 9, 11),
@@ -508,7 +506,7 @@ fn brace_group_sep_newlien() {
             commands: vec![
                 Command::from(CommandType::SimpleCommand(SimpleCommand {
                     assignments: vec![],
-                    redirections: vec![],
+                    redirects: vec![],
                     words: vec![vec![WordComponent {
                         kind: WordComponentKind::literal("echo"),
                         span: Span::new_to(1, 1, 4),
@@ -518,7 +516,7 @@ fn brace_group_sep_newlien() {
                 })),
                 Command::from(CommandType::SimpleCommand(SimpleCommand {
                     assignments: vec![],
-                    redirections: vec![],
+                    redirects: vec![],
                     words: vec![vec![WordComponent {
                         kind: WordComponentKind::literal("boo"),
                         span: Span::new_to(2, 1, 3),

@@ -59,7 +59,9 @@ pub enum Operation {
     },
 
     /// Terminate the program and return the specified value
-    Exit { value: Operand },
+    Exit {
+        value: Operand,
+    },
 
     /// Append the string value from the source to
     /// the string value at the destination.
@@ -70,7 +72,10 @@ pub enum Operation {
 
     /// Append the value from the source to the list
     /// value at the destination.
-    ListAppend { value: Operand, list: Operand },
+    ListAppend {
+        value: Operand,
+        list: Operand,
+    },
 
     /// Insert the source value to the destination list
     /// at the specified index.
@@ -82,7 +87,10 @@ pub enum Operation {
 
     /// Remove the value from the destination list at
     /// the specified index.
-    ListRemove { list: Operand, index: Operand },
+    ListRemove {
+        list: Operand,
+        index: Operand,
+    },
 
     /// destination = a + b
     Add {
@@ -113,7 +121,9 @@ pub enum Operation {
     },
 
     /// Unconditional jump
-    Jump { target: InstructionAddress },
+    Jump {
+        target: InstructionAddress,
+    },
 
     /// If the operand is zero, jump.
     JumpIfZero {
@@ -128,7 +138,9 @@ pub enum Operation {
     },
 
     /// Reserve space for and push a new frame
-    PushFrame { size: usize },
+    PushFrame {
+        size: usize,
+    },
 
     /// Pop the current frame
     PopFrame,
@@ -136,13 +148,18 @@ pub enum Operation {
     /// Clone the current output and environment variables and
     /// push them on the environment stack.  Subsequent command
     /// invocations will use the top of the environment stack.
-    PushIoAndEnvironment,
+    PushEnvironment,
+    PushIo,
 
     /// Pop the top of the environment stack
-    PopIoAndEnvironment,
+    PopEnvironment,
+    PopIo,
 
     /// Set a variable in the current environment
-    SetEnv { name: Operand, value: Operand },
+    SetEnv {
+        name: Operand,
+        value: Operand,
+    },
 }
 
 #[derive(Debug, Default)]
