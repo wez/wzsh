@@ -65,6 +65,7 @@ pub enum Operation {
 
     /// Append the string value from the source to
     /// the string value at the destination.
+    /// Appending Value::None is allowed and is a NOP.
     StringAppend {
         source: Operand,
         destination: Operand,
@@ -177,6 +178,14 @@ pub enum Operation {
         value: Operand,
     },
 
+    /// Get a variable from the current environment and store it
+    /// into the destination.  If the variable isn't present,
+    /// Value::None is stored instead.
+    GetEnv {
+        name: Operand,
+        target: Operand,
+    },
+
     /// Perform tilde expansion on the input and store in the output.
     TildeExpand {
         name: Operand,
@@ -284,6 +293,7 @@ impl Machine {
             } => {
                 let src = match self.operand(source)? {
                     Value::String(s) => s.clone(),
+                    Value::None => return Ok(Status::Running),
                     _ => bail!("cannot StringAppend from non-string"),
                 };
                 match self.operand_mut(destination)? {

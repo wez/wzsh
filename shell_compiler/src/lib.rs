@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_imports)]
 use failure::{bail, err_msg, Fallible};
-use shell_lexer::{Assignment, WordComponent, WordComponentKind};
+use shell_lexer::{Assignment, ParamExpr, ParamOper, WordComponent, WordComponentKind};
 use shell_parser::{Command, CommandType, Redirection};
 pub use shell_vm::*;
 use std::collections::VecDeque;
@@ -102,6 +102,22 @@ impl Compiler {
         Ok(slot)
     }
 
+    fn parameter_expand(&mut self, target_string: usize, expr: &ParamExpr) -> Fallible<()> {
+        let slot = self.frame()?.allocate();
+        self.program.push(Operation::GetEnv {
+            name: Operand::Immediate(expr.name.as_str().into()),
+            target: Operand::FrameRelative(slot),
+        });
+        match expr.kind {
+            ParamOper::Get => self.program.push(Operation::Copy {
+                source: Operand::FrameRelative(slot),
+                destination: Operand::FrameRelative(target_string),
+            }),
+            _ => bail!("{:?} not implemented", expr),
+        }
+        Ok(())
+    }
+
     /// Perform word expansion on word.
     /// Word is a list of components that are logically all part of the
     /// same field and thus are emitted into a string value together.
@@ -135,7 +151,15 @@ impl Compiler {
                     });
                     self.frame()?.free(expanded);
                 }
-                WordComponentKind::ParamExpand(_) => bail!("param expansion not implemented"),
+                WordComponentKind::ParamExpand(expr) => {
+                    let expanded = self.allocate_string()?;
+                    self.parameter_expand(expanded, expr)?;
+                    self.program.push(Operation::StringAppend {
+                        source: Operand::FrameRelative(expanded),
+                        destination: Operand::FrameRelative(expanded_word),
+                    });
+                    self.frame()?.free(expanded);
+                }
                 WordComponentKind::CommandSubstitution(_) => bail!("command subst not implemented"),
             }
         }
