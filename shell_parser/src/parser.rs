@@ -1,5 +1,5 @@
 use crate::types::*;
-use failure::{bail, ensure, Error, Fail, Fallible};
+use failure::{bail, Error, Fail, Fallible};
 use shell_lexer::{Lexer, Operator, ReservedWord, Token};
 use std::io::Read;
 
@@ -432,11 +432,11 @@ impl<R: Read> Parser<R> {
             let token = self.next_token()?;
             match &token {
                 Token::Assignment(assign) => {
-                    ensure!(
-                        words.is_empty(),
-                        "FIXME: interpret in non-assignment context"
-                    );
-                    assignments.push(assign.clone());
+                    if words.is_empty() {
+                        assignments.push(assign.clone());
+                    } else {
+                        words.push(Token::Word(assign.into()));
+                    }
                 }
                 Token::Word(_) => {
                     if token.is_reserved_word(ReservedWord::RightBrace) {

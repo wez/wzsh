@@ -47,6 +47,43 @@ pub struct Assignment {
     value: Vec<WordComponent>,
 }
 
+impl From<&Assignment> for Vec<WordComponent> {
+    /// Convert from an assignment word to a regular word.
+    /// This is essentially prepending NAME= on the front,
+    /// but also de-tilde expanding any word components we
+    /// find in the RHS.
+    fn from(assignment: &Assignment) -> Vec<WordComponent> {
+        let mut components = vec![];
+        components.push(WordComponent {
+            kind: WordComponentKind::Literal(format!("{}=", assignment.name)),
+            span: assignment.span,
+            splittable: true,
+            remove_backslash: false,
+        });
+
+        for comp in &assignment.value {
+            match comp {
+                WordComponent {
+                    kind: WordComponentKind::TildeExpand(name),
+                    span,
+                    ..
+                } => components.push(WordComponent {
+                    kind: WordComponentKind::Literal(format!(
+                        "~{}",
+                        name.as_ref().map(String::as_str).unwrap_or("")
+                    )),
+                    span: *span,
+                    splittable: true,
+                    remove_backslash: false,
+                }),
+                comp => components.push(comp.clone()),
+            }
+        }
+
+        components
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token {
     Word(Vec<WordComponent>),
@@ -953,8 +990,9 @@ mod test {
             })]
         );
 
+        let tilde_tokens = tokens("FOO=~bar:/somewhere:~foo/baz");
         assert_eq!(
-            tokens("FOO=~bar:/somewhere:~foo/baz"),
+            tilde_tokens,
             vec![Token::Assignment(Assignment {
                 name: "FOO".to_owned(),
                 span: Span::new_to(0, 0, 4),
@@ -998,6 +1036,57 @@ mod test {
                 ]
             })]
         );
+
+        if let Token::Assignment(assignment) = &tilde_tokens[0] {
+            let components: Vec<WordComponent> = assignment.into();
+            assert_eq!(
+                components,
+                vec![
+                    WordComponent {
+                        kind: WordComponentKind::literal("FOO="),
+                        span: Span::new_to(0, 0, 4),
+                        splittable: true,
+                        remove_backslash: false
+                    },
+                    WordComponent {
+                        kind: WordComponentKind::literal("~bar"),
+                        span: Span::new_to(0, 4, 7),
+                        splittable: true,
+                        remove_backslash: false
+                    },
+                    WordComponent {
+                        kind: WordComponentKind::literal(":"),
+                        span: Span::new_to(0, 8, 8),
+                        splittable: false,
+                        remove_backslash: false,
+                    },
+                    WordComponent {
+                        kind: WordComponentKind::literal("/somewhere"),
+                        span: Span::new_to(0, 9, 18),
+                        splittable: true,
+                        remove_backslash: true,
+                    },
+                    WordComponent {
+                        kind: WordComponentKind::literal(":"),
+                        span: Span::new_to(0, 19, 19),
+                        splittable: false,
+                        remove_backslash: false,
+                    },
+                    WordComponent {
+                        kind: WordComponentKind::literal("~foo"),
+                        span: Span::new_to(0, 20, 23),
+                        splittable: true,
+                        remove_backslash: false
+                    },
+                    WordComponent {
+                        kind: WordComponentKind::literal("/baz"),
+                        span: Span::new_to(0, 24, 27),
+                        splittable: true,
+                        remove_backslash: true,
+                    },
+                ]
+            );
+        }
 
         assert_eq!(
             tokens("FOO=bar baz"),
