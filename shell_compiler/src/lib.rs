@@ -121,7 +121,22 @@ impl Compiler {
                         destination: Operand::FrameRelative(expanded_word),
                     });
                 }
-                _ => bail!("unhandled word component in word_expand: {:?}", component),
+                WordComponentKind::TildeExpand(name) => {
+                    let expanded = self.allocate_string()?;
+                    self.program.push(Operation::TildeExpand {
+                        name: Operand::Immediate(
+                            name.as_ref().map(|s| s.into()).unwrap_or(Value::None),
+                        ),
+                        destination: Operand::FrameRelative(expanded),
+                    });
+                    self.program.push(Operation::StringAppend {
+                        source: Operand::FrameRelative(expanded),
+                        destination: Operand::FrameRelative(expanded_word),
+                    });
+                    self.frame()?.free(expanded);
+                }
+                WordComponentKind::ParamExpand(_) => bail!("param expansion not implemented"),
+                WordComponentKind::CommandSubstitution(_) => bail!("command subst not implemented"),
             }
         }
 

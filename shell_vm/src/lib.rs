@@ -176,6 +176,12 @@ pub enum Operation {
         name: Operand,
         value: Operand,
     },
+
+    /// Perform tilde expansion on the input and store in the output.
+    TildeExpand {
+        name: Operand,
+        destination: Operand,
+    },
 }
 
 #[derive(Debug, Default)]
