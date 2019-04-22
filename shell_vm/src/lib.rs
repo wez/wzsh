@@ -143,6 +143,23 @@ pub struct Machine {
     program_counter: usize,
 }
 
+/// This enum is essentially why this vm exists; it allows stepping
+/// through a program and returning control to the host application
+/// in the event that a process being waited upon is stopped.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Status {
+    /// The program is still running; call step() again to make
+    /// or check for progress.
+    Running,
+    /// The program is waiting on a process that has been put into
+    /// the background and stopped.  Calling step() again will
+    /// continue to return Stopped until the status of that process
+    /// has changed.
+    Stopped,
+    /// The program has completed and yielded a value.
+    Complete(Value),
+}
+
 impl Machine {
     pub fn new(program: &Arc<Program>) -> Self {
         Self {
@@ -151,7 +168,8 @@ impl Machine {
         }
     }
 
-    pub fn step(&mut self) -> Fallible<Option<Value>> {
+    /// Attempt to make a single step of progress with the program.
+    pub fn step(&mut self) -> Fallible<Status> {
         let program = Arc::clone(&self.program);
         let op = program
             .opcodes
@@ -184,21 +202,25 @@ impl Machine {
                 *self.operand_mut(destination)? = copy;
             }
             Operation::Exit { value } => {
-                return Ok(Some(self.operand(value)?.clone()));
+                return Ok(Status::Complete(self.operand(value)?.clone()));
             }
             _ => bail!("unhandled op: {:?}", op),
         };
-        Ok(None)
+        Ok(Status::Running)
     }
 
-    pub fn run(&mut self) -> Fallible<Option<Value>> {
+    /// Continually invoke step() while the status == Running.
+    /// Returns either Stopped or Complete at the appropriate time.
+    pub fn run(&mut self) -> Fallible<Status> {
         loop {
-            if let Some(result) = self.step()? {
-                return Ok(Some(result));
+            match self.step()? {
+                Status::Running => continue,
+                done => return Ok(done),
             }
         }
     }
 
+    /// Resolve an operand for write.
     pub fn operand_mut(&mut self, operand: &Operand) -> Fallible<&mut Value> {
         match operand {
             Operand::Immediate(_) => bail!("cannot mutably reference an Immediate operand"),
@@ -215,6 +237,7 @@ impl Machine {
         }
     }
 
+    /// Resolve an operand for read.
     pub fn operand<'a>(&'a self, operand: &'a Operand) -> Fallible<&'a Value> {
         match operand {
             Operand::Immediate(value) => Ok(value),
@@ -256,7 +279,7 @@ mod test {
         let mut m = machine(&[Operation::Exit {
             value: Operand::Immediate(Value::None),
         }]);
-        assert_eq!(m.step()?, Some(Value::None));
+        assert_eq!(m.step()?, Status::Complete(Value::None));
         Ok(())
     }
 
@@ -315,7 +338,7 @@ mod test {
                 value: Operand::FrameRelative(1),
             },
         ]);
-        assert_eq!(m.run()?, Some(Value::Integer(42)));
+        assert_eq!(m.run()?, Status::Complete(Value::Integer(42)));
         Ok(())
     }
 }
