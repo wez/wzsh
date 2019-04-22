@@ -42,9 +42,9 @@ pub struct WordComponent {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Assignment {
-    name: String,
-    span: Span,
-    value: Vec<WordComponent>,
+    pub name: String,
+    pub span: Span,
+    pub value: Vec<WordComponent>,
 }
 
 impl From<&Assignment> for Vec<WordComponent> {

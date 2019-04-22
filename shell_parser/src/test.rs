@@ -1,11 +1,66 @@
 use super::*;
 use failure::Fallible;
 use pretty_assertions::assert_eq;
-use shell_lexer::{Pos, Span, Token, WordComponent, WordComponentKind};
+use shell_lexer::{Assignment, Pos, Span, Token, WordComponent, WordComponentKind};
 
 fn parse(text: &str) -> Fallible<Command> {
     let mut parser = Parser::new(text.as_bytes());
     parser.parse()
+}
+
+#[test]
+fn test_assign() {
+    let list = parse("FOO=bar BAR=baz echo WOOT=woot").unwrap();
+    assert_eq!(
+        list,
+        Command::from(CommandType::SimpleCommand(SimpleCommand {
+            assignments: vec![
+                Assignment {
+                    name: "FOO".to_owned(),
+                    span: Span::new_to(0, 0, 4),
+                    value: vec![WordComponent {
+                        kind: WordComponentKind::literal("bar"),
+                        span: Span::new_to(0, 4, 6),
+                        splittable: true,
+                        remove_backslash: true
+                    }]
+                },
+                Assignment {
+                    name: "BAR".to_owned(),
+                    span: Span::new_to(0, 8, 12),
+                    value: vec![WordComponent {
+                        kind: WordComponentKind::literal("baz"),
+                        span: Span::new_to(0, 12, 14),
+                        splittable: true,
+                        remove_backslash: true
+                    }]
+                },
+            ],
+            redirections: vec![],
+            words: vec![
+                Token::Word(vec![WordComponent {
+                    kind: WordComponentKind::literal("echo"),
+                    span: Span::new_to(0, 16, 19),
+                    splittable: true,
+                    remove_backslash: true
+                }]),
+                Token::Word(vec![
+                    WordComponent {
+                        kind: WordComponentKind::literal("WOOT="),
+                        span: Span::new_to(0, 21, 26),
+                        splittable: true,
+                        remove_backslash: false
+                    },
+                    WordComponent {
+                        kind: WordComponentKind::literal("woot"),
+                        span: Span::new_to(0, 26, 29),
+                        splittable: true,
+                        remove_backslash: true
+                    },
+                ]),
+            ]
+        }))
+    );
 }
 
 #[test]
