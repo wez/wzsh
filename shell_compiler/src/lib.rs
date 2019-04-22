@@ -102,7 +102,7 @@ impl Compiler {
         Ok(slot)
     }
 
-    /// Perform word expanion on word.
+    /// Perform word expansion on word.
     /// Word is a list of components that are logically all part of the
     /// same field and thus are emitted into a string value together.
     /// However, some elements may be splittable which means that they
