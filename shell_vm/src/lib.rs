@@ -145,15 +145,31 @@ pub enum Operation {
     /// Pop the current frame
     PopFrame,
 
+    PushIo,
+    PopIo,
+    DupFd {
+        src_fd: usize,
+        dest_fd: usize,
+    },
+    OpenFile {
+        /// The file to open.  Can either be an immediate string
+        /// value, or a list.  If a list, only a list with a single
+        /// string element is permitted.
+        name: Operand,
+        fd_number: usize,
+        input: bool,
+        output: bool,
+        clobber: bool,
+        append: bool,
+    },
+
     /// Clone the current output and environment variables and
     /// push them on the environment stack.  Subsequent command
     /// invocations will use the top of the environment stack.
     PushEnvironment,
-    PushIo,
 
     /// Pop the top of the environment stack
     PopEnvironment,
-    PopIo,
 
     /// Set a variable in the current environment
     SetEnv {

@@ -135,24 +135,66 @@ impl Compiler {
     }
 
     fn apply_redirection(&mut self, redir: &Vec<Redirection>) -> Fallible<bool> {
-        bail!("boo");
+        if redir.is_empty() {
+            return Ok(false);
+        }
+        self.program.push(Operation::PushIo);
+
+        for r in redir {
+            match r {
+                Redirection::File(f) => {
+                    let filename = self.allocate_list()?;
+                    self.word_expand(filename, &f.file_name)?;
+                    self.program.push(Operation::OpenFile {
+                        name: Operand::FrameRelative(filename),
+                        fd_number: f.fd_number,
+                        input: f.input,
+                        output: f.output,
+                        clobber: f.clobber,
+                        append: f.append,
+                    });
+                    self.frame()?.free(filename);
+                }
+                Redirection::Fd(f) => {
+                    self.program.push(Operation::DupFd {
+                        src_fd: f.src_fd_number,
+                        dest_fd: f.dest_fd_number,
+                    });
+                }
+            }
+        }
+
+        Ok(true)
+    }
+
+    fn pop_redirection(&mut self, do_pop: bool) {
+        if do_pop {
+            self.program.push(Operation::PopIo);
+        }
     }
 
     pub fn compile_command(&mut self, command: &Command) -> Fallible<()> {
         self.reserve_frame();
+        let pop_outer_redir = self.apply_redirection(&command.redirects)?;
+
         match &command.command {
             CommandType::SimpleCommand(simple) => {
                 // Goal: build up an argument list and then invoke it
                 let argv = self.allocate_list()?;
+                let pop_redir = self.apply_redirection(&simple.redirects)?;
                 for word in &simple.words {
                     self.word_expand(argv, word)?;
                 }
                 self.program.push(Operation::Exit {
                     value: Operand::FrameRelative(argv),
                 });
+
+                self.pop_redirection(pop_redir);
             }
             _ => bail!("unhandled command type: {:?}", command),
         };
+
+        self.pop_redirection(pop_outer_redir);
         self.commit_frame()?;
         Ok(())
     }
