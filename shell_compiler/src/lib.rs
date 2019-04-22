@@ -159,6 +159,7 @@ mod test {
     use super::*;
     use pretty_assertions::assert_eq;
     use shell_parser::Parser;
+    use std::sync::Arc;
 
     fn compile(prog: &str) -> Fallible<Vec<Operation>> {
         let mut parser = Parser::new(prog.as_bytes());
@@ -168,10 +169,16 @@ mod test {
         Ok(compiler.finish())
     }
 
+    fn run(prog: Vec<Operation>) -> Fallible<Status> {
+        let mut machine = Machine::new(&Program::new(prog));
+        machine.run()
+    }
+
     #[test]
     fn basic_echo() -> Fallible<()> {
+        let ops = compile("echo hello")?;
         assert_eq!(
-            compile("echo")?,
+            ops,
             vec![
                 Operation::PushFrame { size: 2 },
                 Operation::Copy {
@@ -190,11 +197,27 @@ mod test {
                     value: Operand::FrameRelative(2),
                     list: Operand::FrameRelative(1)
                 },
+                Operation::Copy {
+                    source: Operand::Immediate("".into()),
+                    destination: Operand::FrameRelative(2)
+                },
+                Operation::StringAppend {
+                    source: Operand::Immediate("hello".into()),
+                    destination: Operand::FrameRelative(2)
+                },
+                Operation::ListAppend {
+                    value: Operand::FrameRelative(2),
+                    list: Operand::FrameRelative(1)
+                },
                 Operation::Exit {
                     value: Operand::FrameRelative(1)
                 },
                 Operation::PopFrame
             ]
+        );
+        assert_eq!(
+            run(ops)?,
+            Status::Complete(Value::List(vec!["echo".into(), "hello".into()]))
         );
         Ok(())
     }

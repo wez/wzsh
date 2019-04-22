@@ -139,6 +139,12 @@ pub struct Program {
     opcodes: Vec<Operation>,
 }
 
+impl Program {
+    pub fn new(opcodes: Vec<Operation>) -> Arc<Program> {
+        Arc::new(Self { opcodes })
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct Frame {
     /// Absolute index to the top of the stack including the
@@ -222,6 +228,26 @@ impl Machine {
             Operation::Exit { value } => {
                 return Ok(Status::Complete(self.operand(value)?.clone()));
             }
+            Operation::StringAppend {
+                source,
+                destination,
+            } => {
+                let src = match self.operand(source)? {
+                    Value::String(s) => s.clone(),
+                    _ => bail!("cannot StringAppend from non-string"),
+                };
+                match self.operand_mut(destination)? {
+                    Value::String(dest) => dest.push_str(&src),
+                    _ => bail!("cannot StringAppend to non-string"),
+                }
+            }
+            Operation::ListAppend { value, list } => {
+                let src = self.operand(value)?.clone();
+                match self.operand_mut(list)? {
+                    Value::List(dest) => dest.push(src),
+                    _ => bail!("cannot ListAppend to non-list"),
+                }
+            }
             _ => bail!("unhandled op: {:?}", op),
         };
         Ok(Status::Running)
@@ -279,9 +305,7 @@ mod test {
     use pretty_assertions::assert_eq;
 
     fn prog(ops: &[Operation]) -> Arc<Program> {
-        Arc::new(Program {
-            opcodes: ops.to_vec(),
-        })
+        Program::new(ops.to_vec())
     }
 
     fn machine(ops: &[Operation]) -> Machine {
