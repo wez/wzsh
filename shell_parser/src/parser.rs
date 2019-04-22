@@ -6,7 +6,6 @@ use std::io::Read;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParseErrorContext {
     List,
-    SimpleCommand,
     PipelineStartingWithBang,
     PipeSequence,
     IoFileAfterIoNumber,

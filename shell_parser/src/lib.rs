@@ -1,2 +1,8 @@
-pub mod parser;
-pub mod types;
+mod parser;
+mod types;
+
+pub use parser::*;
+pub use types::*;
+
+#[cfg(test)]
+mod test;
