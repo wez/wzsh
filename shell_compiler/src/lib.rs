@@ -1,6 +1,6 @@
 #![allow(dead_code, unused_imports)]
 use failure::{bail, err_msg, Fallible};
-use shell_lexer::{WordComponent, WordComponentKind};
+use shell_lexer::{Assignment, WordComponent, WordComponentKind};
 use shell_parser::{Command, CommandType, Redirection};
 pub use shell_vm::*;
 use std::collections::VecDeque;
@@ -173,6 +173,20 @@ impl Compiler {
         }
     }
 
+    fn process_assignments(&mut self, assignments: &Vec<Assignment>) -> Fallible<()> {
+        for a in assignments {
+            let value = self.allocate_list()?;
+            self.word_expand(value, &a.value)?;
+            self.program.push(Operation::SetEnv {
+                name: Operand::Immediate(a.name.as_str().into()),
+                value: Operand::FrameRelative(value),
+            });
+
+            self.frame()?.free(value);
+        }
+        Ok(())
+    }
+
     pub fn compile_command(&mut self, command: &Command) -> Fallible<()> {
         self.reserve_frame();
         let pop_outer_redir = self.apply_redirection(&command.redirects)?;
@@ -182,6 +196,19 @@ impl Compiler {
                 // Goal: build up an argument list and then invoke it
                 let argv = self.allocate_list()?;
                 let pop_redir = self.apply_redirection(&simple.redirects)?;
+                let pop_env = if !simple.words.is_empty() && !simple.assignments.is_empty() {
+                    // Assignments are applicable only to the command we're
+                    // setting up here, so push a new context.
+                    self.program.push(Operation::PushEnvironment);
+                    true
+                } else {
+                    // Either there are no assignments, or they are supposed
+                    // to last for longer than the current command invocation.
+                    false
+                };
+
+                self.process_assignments(&simple.assignments)?;
+
                 for word in &simple.words {
                     self.word_expand(argv, word)?;
                 }
@@ -189,6 +216,9 @@ impl Compiler {
                     value: Operand::FrameRelative(argv),
                 });
 
+                if pop_env {
+                    self.program.push(Operation::PopEnvironment);
+                }
                 self.pop_redirection(pop_redir);
             }
             _ => bail!("unhandled command type: {:?}", command),
