@@ -1,4 +1,6 @@
 use super::*;
+use failure::ResultExt;
+use filedescriptor::FileDescriptor;
 
 /// The Dispatch trait is implemented by the individual operation
 /// types, and via the Operation enum that encompasses all possible
@@ -356,6 +358,52 @@ impl Dispatch for DupFd {
     }
 }
 
+impl Dispatch for OpenFile {
+    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+        let file_name = match machine.operand(&self.name)? {
+            Value::OsString(s) => s.clone(),
+            Value::String(s) => OsStr::new(s).to_os_string(),
+            Value::List(list) if list.is_empty() => bail!("redirection matched 0 items"),
+            Value::List(list) if list.len() > 1 => bail!("ambiguous redirection"),
+            Value::List(list) => {
+                if let Some(os) = list[0].as_os_str() {
+                    os.to_os_string()
+                } else {
+                    bail!("invalid redirection to {:?}", list)
+                }
+            }
+            invalid => bail!("invalid redirection to {:?}", invalid),
+        };
+        let file_name = PathBuf::from(file_name);
+        let file_name = if file_name.is_absolute() {
+            file_name
+        } else {
+            machine.cwd.join(file_name)
+        };
+        let mut options = std::fs::OpenOptions::new();
+        options
+            .read(self.input)
+            .write(self.output || self.append || self.clobber)
+            .append(self.append)
+            .truncate(self.output && !self.append)
+            // TODO: if a noclobber option is set, and !self.clobber,
+            // then we should look at .create_new() instead
+            .create(self.output || self.append || self.clobber);
+        let file = options.open(&file_name).context(format!(
+            "opening '{}' using {:#?}",
+            file_name.display(),
+            options
+        ))?;
+        let fd = FileDescriptor::dup(file).context(format!(
+            "duplicating open file handle from '{}",
+            file_name.display()
+        ))?;
+
+        machine.io_env_mut()?.assign_fd(self.fd_number, fd);
+        Ok(Status::Running)
+    }
+}
+
 macro_rules! notyet {
     ($($name:ty),* $(,)?) => {
         $(
@@ -381,7 +429,6 @@ notyet!(
     ListInsert,
     ListRemove,
     Multiply,
-    OpenFile,
     Subtract,
     TildeExpand,
 );
