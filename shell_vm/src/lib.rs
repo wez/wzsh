@@ -193,112 +193,14 @@ impl Machine {
             .get(self.program_counter)
             .ok_or_else(|| err_msg("walked off the end of the program"))?;
         self.program_counter += 1;
-        match op {
-            Operation::PushFrame(PushFrame { size }) => {
-                let new_size = self.stack.len() + size;
-                self.stack.resize(new_size, Value::None);
-
-                self.frames.push_back(Frame {
-                    frame_pointer: new_size,
-                    frame_size: *size,
-                });
+        match op.dispatch(self) {
+            status @ Ok(Status::Stopped) => {
+                // Rewind so that we retry this same op next time around
+                self.program_counter -= 1;
+                status
             }
-            Operation::PopFrame(_) => {
-                let frame = self
-                    .frames
-                    .pop_back()
-                    .ok_or_else(|| err_msg("frame underflow"))?;
-                let new_size = frame.frame_pointer - frame.frame_size;
-                self.stack.resize(new_size, Value::None);
-            }
-            Operation::PushEnvironment(_) => {
-                let cloned = self.environment()?.clone();
-                self.environment.push_back(cloned);
-            }
-            Operation::PopEnvironment(_) => {
-                self.environment
-                    .pop_back()
-                    .ok_or_else(|| err_msg("environment underflow"))?;
-            }
-            Operation::PushIo(_) => {
-                let cloned = self.io_env()?.clone();
-                self.io_env.push_back(cloned);
-            }
-            Operation::PopIo(_) => {
-                self.io_env
-                    .pop_back()
-                    .ok_or_else(|| err_msg("IoEnvironment underflow"))?;
-            }
-            Operation::GetEnv(GetEnv { name, target }) => {
-                let value = self
-                    .environment()?
-                    .get(self.operand_as_os_str(name)?)
-                    .map(|x| Value::OsString(x.into()))
-                    .unwrap_or(Value::None);
-                *self.operand_mut(target)? = value;
-            }
-            Operation::SetEnv(SetEnv { name, value }) => {
-                let name = self.operand_as_os_str(name)?.to_os_string();
-                let value = self.operand_as_os_str(value)?.to_os_string();
-                self.environment_mut()?.set(name, value);
-            }
-            Operation::Copy(Copy {
-                source,
-                destination,
-            }) => {
-                let copy = self.operand(source)?.clone();
-                *self.operand_mut(destination)? = copy;
-            }
-            Operation::Exit(Exit { value }) => {
-                return Ok(Status::Complete(self.operand(value)?.clone()));
-            }
-            Operation::StringAppend(StringAppend {
-                source,
-                destination,
-            }) => {
-                let src = match self.operand(source)? {
-                    Value::String(s) => s.clone(),
-                    Value::None => return Ok(Status::Running),
-                    _ => bail!("cannot StringAppend from non-string"),
-                };
-                match self.operand_mut(destination)? {
-                    Value::String(dest) => dest.push_str(&src),
-                    _ => bail!("cannot StringAppend to non-string"),
-                }
-            }
-            Operation::ListAppend(ListAppend {
-                value,
-                list,
-                split,
-                glob,
-            }) => {
-                let ifs = self
-                    .environment()?
-                    .get_str("IFS")?
-                    .unwrap_or(" \t\n")
-                    .to_owned();
-                let src = self.operand(value)?.clone();
-                let list = match self.operand_mut(list)? {
-                    Value::List(dest) => dest,
-                    _ => bail!("cannot ListAppend to non-list"),
-                };
-
-                if *split && !ifs.is_empty() {
-                    match src {
-                        Value::String(src) => {
-                            for word in split_by_ifs(&src, &ifs) {
-                                Self::push_with_glob(list, *glob, word.into());
-                            }
-                        }
-                        _ => Self::push_with_glob(list, *glob, src),
-                    };
-                } else {
-                    Self::push_with_glob(list, *glob, src);
-                }
-            }
-            _ => bail!("unhandled op: {:?}", op),
-        };
-        Ok(Status::Running)
+            status => status,
+        }
     }
 
     /// Continually invoke step() while the status == Running.
