@@ -6,8 +6,11 @@ use std::sync::Arc;
 
 mod environment;
 mod ioenv;
+pub mod op;
 pub use environment::*;
 pub use ioenv::*;
+pub use op::Operation;
+use op::*;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Value {
@@ -62,179 +65,6 @@ pub enum InstructionAddress {
     Absolute(usize),
     /// Relative to the current program position
     Relative(isize),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Operation {
-    /// Copy the source to the destination, replacing the
-    /// destination value.
-    Copy {
-        source: Operand,
-        destination: Operand,
-    },
-
-    /// Terminate the program and return the specified value
-    Exit {
-        value: Operand,
-    },
-
-    /// Append the string value from the source to
-    /// the string value at the destination.
-    /// Appending Value::None is allowed and is a NOP.
-    StringAppend {
-        source: Operand,
-        destination: Operand,
-    },
-
-    /// Append the value from the source to the list
-    /// value at the destination.
-    /// If split is true, split value using the current IFS value
-    /// before appending, and append the generated elements instead.
-    /// If glob is true and the element(s) are
-    /// subject to filename generation (which may yield additional fields)
-    /// prior to being appended to the list.
-    ListAppend {
-        value: Operand,
-        list: Operand,
-        split: bool,
-        glob: bool,
-    },
-
-    /// Insert the source value to the destination list
-    /// at the specified index.
-    ListInsert {
-        value: Operand,
-        list: Operand,
-        insertion_index: Operand,
-    },
-
-    /// Remove the value from the destination list at
-    /// the specified index.
-    ListRemove {
-        list: Operand,
-        index: Operand,
-    },
-
-    /// destination = a + b
-    Add {
-        a: Operand,
-        b: Operand,
-        destination: Operand,
-    },
-
-    /// destination = a - b
-    Subtract {
-        a: Operand,
-        b: Operand,
-        destination: Operand,
-    },
-
-    /// destination = a * b
-    Multiply {
-        a: Operand,
-        b: Operand,
-        destination: Operand,
-    },
-
-    /// destination = a / b
-    Divide {
-        a: Operand,
-        b: Operand,
-        destination: Operand,
-    },
-
-    /// Unconditional jump
-    Jump {
-        target: InstructionAddress,
-    },
-
-    /// If the operand is zero, jump.
-    JumpIfZero {
-        condition: Operand,
-        target: InstructionAddress,
-    },
-
-    /// If the operand is non-zero, jump
-    JumpIfNonZero {
-        condition: Operand,
-        target: InstructionAddress,
-    },
-
-    /// Reserve space for and push a new frame
-    PushFrame {
-        size: usize,
-    },
-
-    /// Pop the current frame
-    PopFrame,
-
-    PushIo,
-    PopIo,
-    DupFd {
-        src_fd: usize,
-        dest_fd: usize,
-    },
-    OpenFile {
-        /// The file to open.  Can either be an immediate string
-        /// value, or a list.  If a list, only a list with a single
-        /// string element is permitted.
-        name: Operand,
-        fd_number: usize,
-        input: bool,
-        output: bool,
-        clobber: bool,
-        append: bool,
-    },
-
-    /// Clone the current output and environment variables and
-    /// push them on the environment stack.  Subsequent command
-    /// invocations will use the top of the environment stack.
-    PushEnvironment,
-
-    /// Pop the top of the environment stack
-    PopEnvironment,
-
-    /// Set a variable in the current environment
-    SetEnv {
-        name: Operand,
-        value: Operand,
-    },
-
-    /// Get a variable from the current environment and store it
-    /// into the destination.  If the variable isn't present,
-    /// Value::None is stored instead.
-    GetEnv {
-        name: Operand,
-        target: Operand,
-    },
-
-    /// Perform tilde expansion on the input and store in the output.
-    TildeExpand {
-        name: Operand,
-        destination: Operand,
-    },
-
-    /// Test whether the source operand is Value::None.  If so, stores
-    /// Integer(1) into destination, else stores Integer(0).
-    IsNone {
-        source: Operand,
-        destination: Operand,
-    },
-
-    /// Test whether the source operand is Value::None, or is Value::String("").
-    /// If so, stores Integer(1) into destination, else stores Integer(0).
-    IsNoneOrEmptyString {
-        source: Operand,
-        destination: Operand,
-    },
-
-    /// The target list is joined into a single string using the first character
-    /// of the IFS variable in the current environment.  The result is placed
-    /// in destination
-    JoinList {
-        list: Operand,
-        destination: Operand,
-    },
 }
 
 #[derive(Debug, Default)]
@@ -364,7 +194,7 @@ impl Machine {
             .ok_or_else(|| err_msg("walked off the end of the program"))?;
         self.program_counter += 1;
         match op {
-            Operation::PushFrame { size } => {
+            Operation::PushFrame(PushFrame { size }) => {
                 let new_size = self.stack.len() + size;
                 self.stack.resize(new_size, Value::None);
 
@@ -373,7 +203,7 @@ impl Machine {
                     frame_size: *size,
                 });
             }
-            Operation::PopFrame => {
+            Operation::PopFrame(_) => {
                 let frame = self
                     .frames
                     .pop_back()
@@ -381,25 +211,25 @@ impl Machine {
                 let new_size = frame.frame_pointer - frame.frame_size;
                 self.stack.resize(new_size, Value::None);
             }
-            Operation::PushEnvironment => {
+            Operation::PushEnvironment(_) => {
                 let cloned = self.environment()?.clone();
                 self.environment.push_back(cloned);
             }
-            Operation::PopEnvironment => {
+            Operation::PopEnvironment(_) => {
                 self.environment
                     .pop_back()
                     .ok_or_else(|| err_msg("environment underflow"))?;
             }
-            Operation::PushIo => {
+            Operation::PushIo(_) => {
                 let cloned = self.io_env()?.clone();
                 self.io_env.push_back(cloned);
             }
-            Operation::PopIo => {
+            Operation::PopIo(_) => {
                 self.io_env
                     .pop_back()
                     .ok_or_else(|| err_msg("IoEnvironment underflow"))?;
             }
-            Operation::GetEnv { name, target } => {
+            Operation::GetEnv(GetEnv { name, target }) => {
                 let value = self
                     .environment()?
                     .get(self.operand_as_os_str(name)?)
@@ -407,25 +237,25 @@ impl Machine {
                     .unwrap_or(Value::None);
                 *self.operand_mut(target)? = value;
             }
-            Operation::SetEnv { name, value } => {
+            Operation::SetEnv(SetEnv { name, value }) => {
                 let name = self.operand_as_os_str(name)?.to_os_string();
                 let value = self.operand_as_os_str(value)?.to_os_string();
                 self.environment_mut()?.set(name, value);
             }
-            Operation::Copy {
+            Operation::Copy(Copy {
                 source,
                 destination,
-            } => {
+            }) => {
                 let copy = self.operand(source)?.clone();
                 *self.operand_mut(destination)? = copy;
             }
-            Operation::Exit { value } => {
+            Operation::Exit(Exit { value }) => {
                 return Ok(Status::Complete(self.operand(value)?.clone()));
             }
-            Operation::StringAppend {
+            Operation::StringAppend(StringAppend {
                 source,
                 destination,
-            } => {
+            }) => {
                 let src = match self.operand(source)? {
                     Value::String(s) => s.clone(),
                     Value::None => return Ok(Status::Running),
@@ -436,12 +266,12 @@ impl Machine {
                     _ => bail!("cannot StringAppend to non-string"),
                 }
             }
-            Operation::ListAppend {
+            Operation::ListAppend(ListAppend {
                 value,
                 list,
                 split,
                 glob,
-            } => {
+            }) => {
                 let ifs = self
                     .environment()?
                     .get_str("IFS")?
@@ -547,44 +377,44 @@ mod test {
 
     #[test]
     fn test_exit() -> Fallible<()> {
-        let mut m = machine(&[Operation::Exit {
+        let mut m = machine(&[Operation::Exit(Exit {
             value: Operand::Immediate(Value::None),
-        }]);
+        })]);
         assert_eq!(m.step()?, Status::Complete(Value::None));
         Ok(())
     }
 
     #[test]
     fn test_read_invalid_operand_no_frame() {
-        let mut m = machine(&[Operation::Exit {
+        let mut m = machine(&[Operation::Exit(Exit {
             value: Operand::FrameRelative(0),
-        }]);
+        })]);
         assert_eq!(run_err(&mut m), "no frame?");
     }
 
     #[test]
     fn test_pop_too_many_frames() {
-        let mut m = machine(&[Operation::PopFrame]);
+        let mut m = machine(&[Operation::PopFrame(PopFrame {})]);
         assert_eq!(run_err(&mut m), "frame underflow");
     }
 
     #[test]
     fn test_read_invalid_operand() {
         let mut m = machine(&[
-            Operation::PushFrame { size: 1 },
-            Operation::Exit {
+            Operation::PushFrame(PushFrame { size: 1 }),
+            Operation::Exit(Exit {
                 value: Operand::FrameRelative(0),
-            },
+            }),
         ]);
         assert_eq!(run_err(&mut m), "FrameRelative offset out of range");
     }
 
     #[test]
     fn test_write_invalid_operand() {
-        let mut m = machine(&[Operation::Copy {
+        let mut m = machine(&[Operation::Copy(Copy {
             source: Operand::Immediate(Value::None),
             destination: Operand::Immediate(Value::Integer(1)),
-        }]);
+        })]);
         assert_eq!(
             run_err(&mut m),
             "cannot mutably reference an Immediate operand"
@@ -600,14 +430,14 @@ mod test {
     #[test]
     fn test_copy() -> Fallible<()> {
         let mut m = machine(&[
-            Operation::PushFrame { size: 1 },
-            Operation::Copy {
+            Operation::PushFrame(PushFrame { size: 1 }),
+            Operation::Copy(Copy {
                 source: Operand::Immediate(Value::Integer(42)),
                 destination: Operand::FrameRelative(1),
-            },
-            Operation::Exit {
+            }),
+            Operation::Exit(Exit {
                 value: Operand::FrameRelative(1),
-            },
+            }),
         ]);
         assert_eq!(m.run()?, Status::Complete(Value::Integer(42)));
         Ok(())
