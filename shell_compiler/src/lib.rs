@@ -102,6 +102,60 @@ impl Compiler {
         Ok(slot)
     }
 
+    /// For what is logically:
+    /// `if (condition) { THEN } else { ELSE }`
+    /// Emit a sequence like:
+    ///
+    /// ```norun
+    ///   JumpIfZero .ELSE
+    ///   {THEN}
+    ///   Jump .DONE
+    /// .ELSE
+    ///   {ELSE}
+    /// .DONE
+    /// ```
+    fn if_then_else<
+        THEN: FnMut(&mut Compiler) -> Fallible<()>,
+        ELSE: FnMut(&mut Compiler) -> Fallible<()>,
+    >(
+        &mut self,
+        condition: Operand,
+        mut then_: THEN,
+        mut else_: ELSE,
+    ) -> Fallible<()> {
+        // Remember the opcode that we need to patch
+        let first_jump = self.program.len();
+        self.program.push(Operation::JumpIfZero {
+            condition,
+            target: InstructionAddress::Absolute(0),
+        });
+
+        then_(self)?;
+        let second_jump = self.program.len();
+        self.program.push(Operation::Jump {
+            target: InstructionAddress::Absolute(0),
+        });
+
+        match self.program.get_mut(first_jump) {
+            Some(Operation::JumpIfNonZero { ref mut target, .. }) => {
+                *target = InstructionAddress::Absolute(second_jump + 1)
+            }
+            _ => bail!("opcode mismatch while patching jump"),
+        };
+
+        else_(self)?;
+
+        let after = self.program.len();
+        match self.program.get_mut(second_jump) {
+            Some(Operation::JumpIfNonZero { ref mut target, .. }) => {
+                *target = InstructionAddress::Absolute(after)
+            }
+            _ => bail!("opcode mismatch while patching jump"),
+        };
+
+        Ok(())
+    }
+
     fn parameter_expand(&mut self, target_string: usize, expr: &ParamExpr) -> Fallible<()> {
         let slot = self.frame()?.allocate();
         self.program.push(Operation::GetEnv {
@@ -113,6 +167,44 @@ impl Compiler {
                 source: Operand::FrameRelative(slot),
                 destination: Operand::FrameRelative(target_string),
             }),
+            ParamOper::GetDefault { allow_null } => {
+                let test = self.frame()?.allocate();
+                if allow_null {
+                    self.program.push(Operation::IsNone {
+                        source: Operand::FrameRelative(slot),
+                        destination: Operand::FrameRelative(test),
+                    });
+                } else {
+                    self.program.push(Operation::IsNoneOrEmptyString {
+                        source: Operand::FrameRelative(slot),
+                        destination: Operand::FrameRelative(test),
+                    });
+                }
+                self.if_then_else(
+                    Operand::FrameRelative(test),
+                    |me| {
+                        let argv = me.allocate_list()?;
+                        for w in &expr.word {
+                            me.word_expand(argv, w)?;
+                        }
+                        me.program.push(Operation::JoinList {
+                            list: Operand::FrameRelative(argv),
+                            destination: Operand::FrameRelative(target_string),
+                        });
+                        me.frame()?.free(argv);
+
+                        Ok(())
+                    },
+                    |me| {
+                        me.program.push(Operation::Copy {
+                            source: Operand::FrameRelative(slot),
+                            destination: Operand::FrameRelative(target_string),
+                        });
+                        Ok(())
+                    },
+                )?;
+                self.frame()?.free(test);
+            }
             _ => bail!("{:?} not implemented", expr),
         }
         Ok(())

@@ -165,7 +165,7 @@ pub enum ParamOper {
 pub struct ParamExpr {
     pub kind: ParamOper,
     pub name: String,
-    pub word: Vec<Token>,
+    pub word: Vec<Vec<WordComponent>>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -566,7 +566,9 @@ impl<R: Read> Lexer<R> {
                             .at(pos.into())
                             .into());
                     }
-                    token => tokens.push(token),
+                    Token::Word(word) => tokens.push(word),
+                    Token::Newline(_) => {}
+                    _ => bail!("invalid token in parameter expansion"),
                 }
             }
             self.pop_state();
@@ -1302,18 +1304,18 @@ mod test {
                         kind: ParamOper::GetDefault { allow_null: false },
                         name: "foo".to_owned(),
                         word: vec![
-                            Token::Word(vec![WordComponent {
+                            vec![WordComponent {
                                 kind: WordComponentKind::literal("hello"),
                                 span: Span::new_to(0, 7, 11),
                                 splittable: true,
                                 remove_backslash: true
-                            }]),
-                            Token::Word(vec![WordComponent {
+                            }],
+                            vec![WordComponent {
                                 kind: WordComponentKind::literal("there"),
                                 span: Span::new_to(0, 13, 17),
                                 splittable: true,
                                 remove_backslash: true
-                            }]),
+                            }],
                         ]
                     }),
                     span: Span::new_to(0, 0, 18),
@@ -1337,19 +1339,18 @@ mod test {
                         kind: ParamOper::GetDefault { allow_null: false },
                         name: "foo".to_owned(),
                         word: vec![
-                            Token::Word(vec![WordComponent {
+                            vec![WordComponent {
                                 kind: WordComponentKind::literal("hello"),
                                 span: Span::new_to(0, 7, 11),
                                 splittable: true,
                                 remove_backslash: true
-                            }]),
-                            Token::Newline(Pos::new(0, 12)),
-                            Token::Word(vec![WordComponent {
+                            }],
+                            vec![WordComponent {
                                 kind: WordComponentKind::literal("there"),
                                 span: Span::new_to(1, 0, 4),
                                 splittable: true,
                                 remove_backslash: true
-                            }]),
+                            }],
                         ]
                     }),
                     span: Span::new(Pos::new(0, 0), Pos::new(1, 5)),
@@ -1372,7 +1373,7 @@ mod test {
                     kind: WordComponentKind::ParamExpand(ParamExpr {
                         kind: ParamOper::GetDefault { allow_null: false },
                         name: "foo".to_owned(),
-                        word: vec![Token::Word(vec![WordComponent {
+                        word: vec![vec![WordComponent {
                             kind: WordComponentKind::ParamExpand(ParamExpr {
                                 kind: ParamOper::Get,
                                 name: "nest".to_owned(),
@@ -1381,7 +1382,7 @@ mod test {
                             span: Span::new_to(0, 7, 13),
                             splittable: true,
                             remove_backslash: false,
-                        }]),]
+                        }],]
                     }),
                     span: Span::new_to(0, 0, 14),
                     splittable: true,
@@ -1402,12 +1403,12 @@ mod test {
                 kind: WordComponentKind::ParamExpand(ParamExpr {
                     kind: ParamOper::GetDefault { allow_null: false },
                     name: "foo".to_owned(),
-                    word: vec![Token::Word(vec![WordComponent {
+                    word: vec![vec![WordComponent {
                         kind: WordComponentKind::TildeExpand(Some("wez".to_owned())),
                         span: Span::new_to(0, 7, 10),
                         splittable: false,
                         remove_backslash: false
-                    }]),]
+                    }],]
                 }),
                 span: Span::new_to(0, 0, 11),
                 splittable: true,

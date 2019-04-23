@@ -191,6 +191,28 @@ pub enum Operation {
         name: Operand,
         destination: Operand,
     },
+
+    /// Test whether the source operand is Value::None.  If so, stores
+    /// Integer(1) into destination, else stores Integer(0).
+    IsNone {
+        source: Operand,
+        destination: Operand,
+    },
+
+    /// Test whether the source operand is Value::None, or is Value::String("").
+    /// If so, stores Integer(1) into destination, else stores Integer(0).
+    IsNoneOrEmptyString {
+        source: Operand,
+        destination: Operand,
+    },
+
+    /// The target list is joined into a single string using the first character
+    /// of the IFS variable in the current environment.  The result is placed
+    /// in destination
+    JoinList {
+        list: Operand,
+        destination: Operand,
+    },
 }
 
 #[derive(Debug, Default)]
