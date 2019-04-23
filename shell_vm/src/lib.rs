@@ -1,8 +1,11 @@
 #![allow(dead_code)]
 use failure::{bail, err_msg, Fallible};
 use std::collections::VecDeque;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::sync::Arc;
+
+mod environment;
+pub use environment::*;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Value {
@@ -11,6 +14,16 @@ pub enum Value {
     OsString(OsString),
     List(Vec<Value>),
     Integer(isize),
+}
+
+impl Value {
+    fn as_os_str(&self) -> Option<&OsStr> {
+        match self {
+            Value::String(s) => Some(s.as_ref()),
+            Value::OsString(s) => Some(s.as_os_str()),
+            _ => None,
+        }
+    }
 }
 
 impl<T: ?Sized + AsRef<str>> From<&T> for Value {
@@ -250,6 +263,7 @@ pub struct Frame {
 pub struct Machine {
     stack: VecDeque<Value>,
     frames: VecDeque<Frame>,
+    environment: VecDeque<Environment>,
 
     program: Arc<Program>,
     program_counter: usize,
@@ -300,10 +314,26 @@ fn split_by_ifs<'a>(value: &'a str, ifs: &str) -> Vec<&'a str> {
 
 impl Machine {
     pub fn new(program: &Arc<Program>) -> Self {
+        let mut environment = VecDeque::new();
+        environment.push_back(Environment::new());
+
         Self {
             program: Arc::clone(program),
+            environment,
             ..Default::default()
         }
+    }
+
+    fn environment(&self) -> Fallible<&Environment> {
+        self.environment
+            .back()
+            .ok_or_else(|| err_msg("no current environment"))
+    }
+
+    fn environment_mut(&mut self) -> Fallible<&mut Environment> {
+        self.environment
+            .back_mut()
+            .ok_or_else(|| err_msg("no current environment"))
     }
 
     /// Attempt to make a single step of progress with the program.
@@ -331,6 +361,28 @@ impl Machine {
                     .ok_or_else(|| err_msg("frame underflow"))?;
                 let new_size = frame.frame_pointer - frame.frame_size;
                 self.stack.resize(new_size, Value::None);
+            }
+            Operation::PushEnvironment => {
+                let cloned = self.environment()?.clone();
+                self.environment.push_back(cloned);
+            }
+            Operation::PopEnvironment => {
+                self.environment
+                    .pop_back()
+                    .ok_or_else(|| err_msg("environment underflow"))?;
+            }
+            Operation::GetEnv { name, target } => {
+                let value = self
+                    .environment()?
+                    .get(self.operand_as_os_str(name)?)
+                    .map(|x| Value::OsString(x.into()))
+                    .unwrap_or(Value::None);
+                *self.operand_mut(target)? = value;
+            }
+            Operation::SetEnv { name, value } => {
+                let name = self.operand_as_os_str(name)?.to_os_string();
+                let value = self.operand_as_os_str(value)?.to_os_string();
+                self.environment_mut()?.set(name, value);
             }
             Operation::Copy {
                 source,
@@ -362,17 +414,21 @@ impl Machine {
                 split,
                 glob,
             } => {
+                let ifs = self
+                    .environment()?
+                    .get_str("IFS")?
+                    .unwrap_or(" \t\n")
+                    .to_owned();
                 let src = self.operand(value)?.clone();
                 let list = match self.operand_mut(list)? {
                     Value::List(dest) => dest,
                     _ => bail!("cannot ListAppend to non-list"),
                 };
 
-                let ifs = " \t\n"; // FIXME: lookup from env
                 if *split && !ifs.is_empty() {
                     match src {
                         Value::String(src) => {
-                            for word in split_by_ifs(&src, ifs) {
+                            for word in split_by_ifs(&src, &ifs) {
                                 Self::push_with_glob(list, *glob, word.into());
                             }
                         }
@@ -430,6 +486,12 @@ impl Machine {
                 )
                 .ok_or_else(|| err_msg("FrameRelative offset out of range")),
         }
+    }
+
+    pub fn operand_as_os_str<'a>(&'a self, operand: &'a Operand) -> Fallible<&'a OsStr> {
+        self.operand(operand)?
+            .as_os_str()
+            .ok_or_else(|| err_msg("operand is not representable as OsStr"))
     }
 
     fn push_with_glob(list: &mut Vec<Value>, _glob: bool, v: Value) {
