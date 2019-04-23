@@ -5,7 +5,6 @@ mod errorprint;
 mod execenv;
 mod exitstatus;
 mod expander;
-mod filedescriptor;
 mod job;
 mod parse;
 mod pathsearch;

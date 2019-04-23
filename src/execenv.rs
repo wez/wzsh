@@ -1,6 +1,5 @@
 use crate::builtins::{lookup_builtin, BuiltinFunc};
 use crate::exitstatus::{ExitStatus, WaitableExitStatus};
-use crate::filedescriptor::FileDescriptor;
 use crate::job::{make_foreground_process_group, make_own_process_group, Job, JobList};
 use crate::parse::{
     Command as ShellCommand, CommandType, FileRedirection, If, Redirection, SimpleCommand,
@@ -8,6 +7,7 @@ use crate::parse::{
 use crate::pathsearch::PathSearcher;
 use crate::ShellExpander;
 use failure::{bail, ensure, Fail, Fallible, ResultExt};
+use filedescriptor::FileDescriptor;
 use shlex::string::ShellString;
 use shlex::{Aliases, Environment, Expander, Token, TokenKind};
 use std::cell::{Ref, RefCell, RefMut};
