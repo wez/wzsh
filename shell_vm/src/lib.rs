@@ -5,7 +5,9 @@ use std::ffi::{OsStr, OsString};
 use std::sync::Arc;
 
 mod environment;
+mod ioenv;
 pub use environment::*;
+pub use ioenv::*;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Value {
