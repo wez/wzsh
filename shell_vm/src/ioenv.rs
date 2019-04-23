@@ -8,6 +8,12 @@ pub struct IoEnvironment {
     fds: HashMap<usize, Arc<Mutex<FileDescriptor>>>,
 }
 
+impl std::fmt::Debug for IoEnvironment {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        fmt.debug_struct("IoEnvironment").finish()
+    }
+}
+
 pub struct Readable {
     fd: Arc<Mutex<FileDescriptor>>,
 }

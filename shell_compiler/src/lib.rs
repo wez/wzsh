@@ -383,7 +383,7 @@ mod test {
     }
 
     fn run(prog: Vec<Operation>) -> Fallible<Status> {
-        let mut machine = Machine::new(&Program::new(prog));
+        let mut machine = Machine::new(&Program::new(prog))?;
         machine.run()
     }
 

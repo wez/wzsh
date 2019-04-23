@@ -266,6 +266,7 @@ pub struct Machine {
     stack: VecDeque<Value>,
     frames: VecDeque<Frame>,
     environment: VecDeque<Environment>,
+    io_env: VecDeque<IoEnvironment>,
 
     program: Arc<Program>,
     program_counter: usize,
@@ -315,15 +316,19 @@ fn split_by_ifs<'a>(value: &'a str, ifs: &str) -> Vec<&'a str> {
 }
 
 impl Machine {
-    pub fn new(program: &Arc<Program>) -> Self {
+    pub fn new(program: &Arc<Program>) -> Fallible<Self> {
         let mut environment = VecDeque::new();
         environment.push_back(Environment::new());
 
-        Self {
+        let mut io_env = VecDeque::new();
+        io_env.push_back(IoEnvironment::new()?);
+
+        Ok(Self {
             program: Arc::clone(program),
             environment,
+            io_env,
             ..Default::default()
-        }
+        })
     }
 
     fn environment(&self) -> Fallible<&Environment> {
@@ -336,6 +341,18 @@ impl Machine {
         self.environment
             .back_mut()
             .ok_or_else(|| err_msg("no current environment"))
+    }
+
+    fn io_env(&self) -> Fallible<&IoEnvironment> {
+        self.io_env
+            .back()
+            .ok_or_else(|| err_msg("no current IoEnvironment"))
+    }
+
+    fn io_env_mut(&mut self) -> Fallible<&mut IoEnvironment> {
+        self.io_env
+            .back_mut()
+            .ok_or_else(|| err_msg("no current IoEnvironment"))
     }
 
     /// Attempt to make a single step of progress with the program.
@@ -372,6 +389,15 @@ impl Machine {
                 self.environment
                     .pop_back()
                     .ok_or_else(|| err_msg("environment underflow"))?;
+            }
+            Operation::PushIo => {
+                let cloned = self.io_env()?.clone();
+                self.io_env.push_back(cloned);
+            }
+            Operation::PopIo => {
+                self.io_env
+                    .pop_back()
+                    .ok_or_else(|| err_msg("IoEnvironment underflow"))?;
             }
             Operation::GetEnv { name, target } => {
                 let value = self
@@ -512,7 +538,7 @@ mod test {
     }
 
     fn machine(ops: &[Operation]) -> Machine {
-        Machine::new(&prog(ops))
+        Machine::new(&prog(ops)).unwrap()
     }
 
     fn run_err(m: &mut Machine) -> String {
