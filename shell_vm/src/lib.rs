@@ -2,6 +2,7 @@
 use failure::{bail, err_msg, Fallible};
 use std::collections::VecDeque;
 use std::ffi::{OsStr, OsString};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 mod environment;
@@ -97,6 +98,7 @@ pub struct Machine {
     frames: VecDeque<Frame>,
     environment: VecDeque<Environment>,
     io_env: VecDeque<IoEnvironment>,
+    cwd: PathBuf,
 
     program: Arc<Program>,
     program_counter: usize,
@@ -153,10 +155,13 @@ impl Machine {
         let mut io_env = VecDeque::new();
         io_env.push_back(IoEnvironment::new()?);
 
+        let cwd = std::env::current_dir()?;
+
         Ok(Self {
             program: Arc::clone(program),
             environment,
             io_env,
+            cwd,
             ..Default::default()
         })
     }
