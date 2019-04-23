@@ -27,6 +27,12 @@ pub struct $name {
     )*
 }
 
+impl Into<Operation> for $name {
+    fn into(self) -> Operation {
+        Operation::$name(self)
+    }
+}
+
 )*
 
 #[derive(Debug, Clone, PartialEq, Eq)]

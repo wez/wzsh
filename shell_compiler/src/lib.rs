@@ -52,7 +52,7 @@ impl Compiler {
         let frame_start_program_address = self.program.len();
         // Use a dummy frame size; we'll patch this once we know the
         // full frame size.
-        self.program.push(Operation::PushFrame { size: 0 });
+        self.push(op::PushFrame { size: 0 });
         self.frames.push_back(FrameCompiler {
             allocator: RegisterAllocator::new(),
             frame_start_program_address,
@@ -69,10 +69,11 @@ impl Compiler {
             .frames
             .pop_back()
             .ok_or_else(|| err_msg("no frame to commit"))?;
-        self.program[frame.frame_start_program_address] = Operation::PushFrame {
+        self.program[frame.frame_start_program_address] = op::PushFrame {
             size: frame.frame_size(),
-        };
-        self.program.push(Operation::PopFrame);
+        }
+        .into();
+        self.push(op::PopFrame {});
         Ok(())
     }
 
@@ -84,18 +85,22 @@ impl Compiler {
     /// slot associated with it.
     fn allocate_list(&mut self) -> Fallible<usize> {
         let slot = self.frame()?.allocate();
-        self.program.push(Operation::Copy {
+        self.push(op::Copy {
             source: Operand::Immediate(Value::List(vec![])),
             destination: Operand::FrameRelative(slot),
         });
         Ok(slot)
     }
 
+    fn push<OP: Into<Operation>>(&mut self, op: OP) {
+        self.program.push(op.into());
+    }
+
     /// Allocate a new empty string and return the frame relative
     /// slot associated with it.
     fn allocate_string(&mut self) -> Fallible<usize> {
         let slot = self.frame()?.allocate();
-        self.program.push(Operation::Copy {
+        self.push(op::Copy {
             source: Operand::Immediate(Value::String(String::new())),
             destination: Operand::FrameRelative(slot),
         });
@@ -125,19 +130,19 @@ impl Compiler {
     ) -> Fallible<()> {
         // Remember the opcode that we need to patch
         let first_jump = self.program.len();
-        self.program.push(Operation::JumpIfZero {
+        self.push(op::JumpIfZero {
             condition,
             target: InstructionAddress::Absolute(0),
         });
 
         then_(self)?;
         let second_jump = self.program.len();
-        self.program.push(Operation::Jump {
+        self.push(op::Jump {
             target: InstructionAddress::Absolute(0),
         });
 
         match self.program.get_mut(first_jump) {
-            Some(Operation::JumpIfNonZero { ref mut target, .. }) => {
+            Some(Operation::JumpIfZero(op::JumpIfZero { ref mut target, .. })) => {
                 *target = InstructionAddress::Absolute(second_jump + 1)
             }
             _ => bail!("opcode mismatch while patching jump"),
@@ -147,7 +152,7 @@ impl Compiler {
 
         let after = self.program.len();
         match self.program.get_mut(second_jump) {
-            Some(Operation::JumpIfNonZero { ref mut target, .. }) => {
+            Some(Operation::Jump(op::Jump { ref mut target, .. })) => {
                 *target = InstructionAddress::Absolute(after)
             }
             _ => bail!("opcode mismatch while patching jump"),
@@ -158,24 +163,24 @@ impl Compiler {
 
     fn parameter_expand(&mut self, target_string: usize, expr: &ParamExpr) -> Fallible<()> {
         let slot = self.frame()?.allocate();
-        self.program.push(Operation::GetEnv {
+        self.push(op::GetEnv {
             name: Operand::Immediate(expr.name.as_str().into()),
             target: Operand::FrameRelative(slot),
         });
         match expr.kind {
-            ParamOper::Get => self.program.push(Operation::Copy {
+            ParamOper::Get => self.push(op::Copy {
                 source: Operand::FrameRelative(slot),
                 destination: Operand::FrameRelative(target_string),
             }),
             ParamOper::GetDefault { allow_null } => {
                 let test = self.frame()?.allocate();
                 if allow_null {
-                    self.program.push(Operation::IsNone {
+                    self.push(op::IsNone {
                         source: Operand::FrameRelative(slot),
                         destination: Operand::FrameRelative(test),
                     });
                 } else {
-                    self.program.push(Operation::IsNoneOrEmptyString {
+                    self.push(op::IsNoneOrEmptyString {
                         source: Operand::FrameRelative(slot),
                         destination: Operand::FrameRelative(test),
                     });
@@ -187,7 +192,7 @@ impl Compiler {
                         for w in &expr.word {
                             me.word_expand(argv, w)?;
                         }
-                        me.program.push(Operation::JoinList {
+                        me.push(op::JoinList {
                             list: Operand::FrameRelative(argv),
                             destination: Operand::FrameRelative(target_string),
                         });
@@ -196,7 +201,7 @@ impl Compiler {
                         Ok(())
                     },
                     |me| {
-                        me.program.push(Operation::Copy {
+                        me.push(op::Copy {
                             source: Operand::FrameRelative(slot),
                             destination: Operand::FrameRelative(target_string),
                         });
@@ -228,20 +233,20 @@ impl Compiler {
             }
             match &component.kind {
                 WordComponentKind::Literal(literal) => {
-                    self.program.push(Operation::StringAppend {
+                    self.push(op::StringAppend {
                         source: Operand::Immediate(Value::String(literal.to_owned())),
                         destination: Operand::FrameRelative(expanded_word),
                     });
                 }
                 WordComponentKind::TildeExpand(name) => {
                     let expanded = self.allocate_string()?;
-                    self.program.push(Operation::TildeExpand {
+                    self.push(op::TildeExpand {
                         name: Operand::Immediate(
                             name.as_ref().map(|s| s.into()).unwrap_or(Value::None),
                         ),
                         destination: Operand::FrameRelative(expanded),
                     });
-                    self.program.push(Operation::StringAppend {
+                    self.push(op::StringAppend {
                         source: Operand::FrameRelative(expanded),
                         destination: Operand::FrameRelative(expanded_word),
                     });
@@ -250,7 +255,7 @@ impl Compiler {
                 WordComponentKind::ParamExpand(expr) => {
                     let expanded = self.allocate_string()?;
                     self.parameter_expand(expanded, expr)?;
-                    self.program.push(Operation::StringAppend {
+                    self.push(op::StringAppend {
                         source: Operand::FrameRelative(expanded),
                         destination: Operand::FrameRelative(expanded_word),
                     });
@@ -260,7 +265,7 @@ impl Compiler {
             }
         }
 
-        self.program.push(Operation::ListAppend {
+        self.push(op::ListAppend {
             value: Operand::FrameRelative(expanded_word),
             list: Operand::FrameRelative(argv),
             split,
@@ -275,14 +280,14 @@ impl Compiler {
         if redir.is_empty() {
             return Ok(false);
         }
-        self.program.push(Operation::PushIo);
+        self.push(op::PushIo {});
 
         for r in redir {
             match r {
                 Redirection::File(f) => {
                     let filename = self.allocate_list()?;
                     self.word_expand(filename, &f.file_name)?;
-                    self.program.push(Operation::OpenFile {
+                    self.push(op::OpenFile {
                         name: Operand::FrameRelative(filename),
                         fd_number: f.fd_number,
                         input: f.input,
@@ -293,7 +298,7 @@ impl Compiler {
                     self.frame()?.free(filename);
                 }
                 Redirection::Fd(f) => {
-                    self.program.push(Operation::DupFd {
+                    self.push(op::DupFd {
                         src_fd: f.src_fd_number,
                         dest_fd: f.dest_fd_number,
                     });
@@ -306,7 +311,7 @@ impl Compiler {
 
     fn pop_redirection(&mut self, do_pop: bool) {
         if do_pop {
-            self.program.push(Operation::PopIo);
+            self.push(op::PopIo {});
         }
     }
 
@@ -314,7 +319,7 @@ impl Compiler {
         for a in assignments {
             let value = self.allocate_list()?;
             self.word_expand(value, &a.value)?;
-            self.program.push(Operation::SetEnv {
+            self.push(op::SetEnv {
                 name: Operand::Immediate(a.name.as_str().into()),
                 value: Operand::FrameRelative(value),
             });
@@ -336,7 +341,7 @@ impl Compiler {
                 let pop_env = if !simple.words.is_empty() && !simple.assignments.is_empty() {
                     // Assignments are applicable only to the command we're
                     // setting up here, so push a new context.
-                    self.program.push(Operation::PushEnvironment);
+                    self.push(op::PushEnvironment {});
                     true
                 } else {
                     // Either there are no assignments, or they are supposed
@@ -349,12 +354,12 @@ impl Compiler {
                 for word in &simple.words {
                     self.word_expand(argv, word)?;
                 }
-                self.program.push(Operation::Exit {
+                self.push(op::Exit {
                     value: Operand::FrameRelative(argv),
                 });
 
                 if pop_env {
-                    self.program.push(Operation::PopEnvironment);
+                    self.push(op::PopEnvironment {});
                 }
                 self.pop_redirection(pop_redir);
             }
@@ -393,43 +398,43 @@ mod test {
         assert_eq!(
             ops,
             vec![
-                Operation::PushFrame { size: 2 },
-                Operation::Copy {
+                Operation::PushFrame(op::PushFrame { size: 2 }),
+                Operation::Copy(op::Copy {
                     source: Operand::Immediate(Value::List(vec![])),
                     destination: Operand::FrameRelative(1)
-                },
-                Operation::Copy {
+                }),
+                Operation::Copy(op::Copy {
                     source: Operand::Immediate("".into()),
                     destination: Operand::FrameRelative(2)
-                },
-                Operation::StringAppend {
+                }),
+                Operation::StringAppend(op::StringAppend {
                     source: Operand::Immediate("echo".into()),
                     destination: Operand::FrameRelative(2)
-                },
-                Operation::ListAppend {
+                }),
+                Operation::ListAppend(op::ListAppend {
                     value: Operand::FrameRelative(2),
                     list: Operand::FrameRelative(1),
                     split: true,
                     glob: true,
-                },
-                Operation::Copy {
+                }),
+                Operation::Copy(op::Copy {
                     source: Operand::Immediate("".into()),
                     destination: Operand::FrameRelative(2)
-                },
-                Operation::StringAppend {
+                }),
+                Operation::StringAppend(op::StringAppend {
                     source: Operand::Immediate("hello".into()),
                     destination: Operand::FrameRelative(2)
-                },
-                Operation::ListAppend {
+                }),
+                Operation::ListAppend(op::ListAppend {
                     value: Operand::FrameRelative(2),
                     list: Operand::FrameRelative(1),
                     split: true,
                     glob: true,
-                },
-                Operation::Exit {
+                }),
+                Operation::Exit(op::Exit {
                     value: Operand::FrameRelative(1)
-                },
-                Operation::PopFrame
+                }),
+                Operation::PopFrame(op::PopFrame {}),
             ]
         );
         assert_eq!(
