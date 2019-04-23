@@ -220,8 +220,12 @@ impl Compiler {
         let expanded_word = self.allocate_string()?;
 
         // TODO: field splitting, backslashes
-
+        let mut split = true;
+        let glob = true;
         for component in word {
+            if !component.splittable {
+                split = false;
+            }
             match &component.kind {
                 WordComponentKind::Literal(literal) => {
                     self.program.push(Operation::StringAppend {
@@ -259,6 +263,8 @@ impl Compiler {
         self.program.push(Operation::ListAppend {
             value: Operand::FrameRelative(expanded_word),
             list: Operand::FrameRelative(argv),
+            split,
+            glob,
         });
 
         self.frame()?.free(expanded_word);
@@ -402,7 +408,9 @@ mod test {
                 },
                 Operation::ListAppend {
                     value: Operand::FrameRelative(2),
-                    list: Operand::FrameRelative(1)
+                    list: Operand::FrameRelative(1),
+                    split: true,
+                    glob: true,
                 },
                 Operation::Copy {
                     source: Operand::Immediate("".into()),
@@ -414,7 +422,9 @@ mod test {
                 },
                 Operation::ListAppend {
                     value: Operand::FrameRelative(2),
-                    list: Operand::FrameRelative(1)
+                    list: Operand::FrameRelative(1),
+                    split: true,
+                    glob: true,
                 },
                 Operation::Exit {
                     value: Operand::FrameRelative(1)

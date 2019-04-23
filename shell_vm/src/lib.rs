@@ -73,9 +73,16 @@ pub enum Operation {
 
     /// Append the value from the source to the list
     /// value at the destination.
+    /// If split is true, split value using the current IFS value
+    /// before appending, and append the generated elements instead.
+    /// If glob is true and the element(s) are
+    /// subject to filename generation (which may yield additional fields)
+    /// prior to being appended to the list.
     ListAppend {
         value: Operand,
         list: Operand,
+        split: bool,
+        glob: bool,
     },
 
     /// Insert the source value to the destination list
@@ -265,6 +272,32 @@ pub enum Status {
     Complete(Value),
 }
 
+fn split_by_ifs<'a>(value: &'a str, ifs: &str) -> Vec<&'a str> {
+    let ifs: std::collections::HashSet<char> = ifs.chars().collect();
+    let mut split = vec![];
+    let mut run_start = None;
+
+    for (idx, c) in value.char_indices() {
+        if ifs.contains(&c) {
+            if let Some(start) = run_start.take() {
+                if idx > start + 1 {
+                    split.push(&value[start..idx]);
+                }
+            }
+            continue;
+        }
+        if run_start.is_none() {
+            run_start = Some(idx);
+        }
+    }
+
+    if let Some(start) = run_start.take() {
+        split.push(&value[start..]);
+    }
+
+    split
+}
+
 impl Machine {
     pub fn new(program: &Arc<Program>) -> Self {
         Self {
@@ -323,11 +356,30 @@ impl Machine {
                     _ => bail!("cannot StringAppend to non-string"),
                 }
             }
-            Operation::ListAppend { value, list } => {
+            Operation::ListAppend {
+                value,
+                list,
+                split,
+                glob,
+            } => {
                 let src = self.operand(value)?.clone();
-                match self.operand_mut(list)? {
-                    Value::List(dest) => dest.push(src),
+                let list = match self.operand_mut(list)? {
+                    Value::List(dest) => dest,
                     _ => bail!("cannot ListAppend to non-list"),
+                };
+
+                let ifs = " \t\n"; // FIXME: lookup from env
+                if *split && !ifs.is_empty() {
+                    match src {
+                        Value::String(src) => {
+                            for word in split_by_ifs(&src, ifs) {
+                                Self::push_with_glob(list, *glob, word.into());
+                            }
+                        }
+                        _ => Self::push_with_glob(list, *glob, src),
+                    };
+                } else {
+                    Self::push_with_glob(list, *glob, src);
                 }
             }
             _ => bail!("unhandled op: {:?}", op),
@@ -378,6 +430,11 @@ impl Machine {
                 )
                 .ok_or_else(|| err_msg("FrameRelative offset out of range")),
         }
+    }
+
+    fn push_with_glob(list: &mut Vec<Value>, _glob: bool, v: Value) {
+        // FIXME: implement glob.  We need to lookup the cwd for correctness.
+        list.push(v);
     }
 }
 
@@ -464,5 +521,14 @@ mod test {
         ]);
         assert_eq!(m.run()?, Status::Complete(Value::Integer(42)));
         Ok(())
+    }
+
+    #[test]
+    fn test_split_by_ifs() {
+        let ifs = " \t\n";
+        assert_eq!(split_by_ifs("foo", ifs), vec!["foo"]);
+        assert_eq!(split_by_ifs("foo bar", ifs), vec!["foo", "bar"]);
+        assert_eq!(split_by_ifs("foo  bar ", ifs), vec!["foo", "bar"]);
+        assert_eq!(split_by_ifs("\t foo  bar ", ifs), vec!["foo", "bar"]);
     }
 }
