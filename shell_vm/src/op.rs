@@ -347,6 +347,15 @@ impl Dispatch for ListAppend {
     }
 }
 
+impl Dispatch for DupFd {
+    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+        machine
+            .io_env_mut()?
+            .duplicate_to(self.src_fd, self.dest_fd)?;
+        Ok(Status::Running)
+    }
+}
+
 macro_rules! notyet {
     ($($name:ty),* $(,)?) => {
         $(
@@ -363,7 +372,6 @@ impl Dispatch for $name {
 notyet!(
     Add,
     Divide,
-    DupFd,
     IsNone,
     IsNoneOrEmptyString,
     JoinList,
