@@ -469,6 +469,33 @@ impl Dispatch for JumpIfNonZero {
     }
 }
 
+impl Dispatch for IsNone {
+    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+        let is_none = match machine.operand(&self.source)? {
+            Value::None => 1,
+            _ => 0,
+        };
+
+        *machine.operand_mut(&self.destination)? = is_none.into();
+
+        Ok(Status::Running)
+    }
+}
+
+impl Dispatch for IsNoneOrEmptyString {
+    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+        let is_none = match machine.operand(&self.source)? {
+            Value::None => 1,
+            Value::String(s) if s.is_empty() => 1,
+            _ => 0,
+        };
+
+        *machine.operand_mut(&self.destination)? = is_none.into();
+
+        Ok(Status::Running)
+    }
+}
+
 macro_rules! notyet {
     ($($name:ty),* $(,)?) => {
         $(
@@ -485,8 +512,6 @@ impl Dispatch for $name {
 notyet!(
     Add,
     Divide,
-    IsNone,
-    IsNoneOrEmptyString,
     JoinList,
     ListInsert,
     ListRemove,
