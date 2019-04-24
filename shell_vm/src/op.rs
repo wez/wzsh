@@ -320,13 +320,40 @@ impl Dispatch for StringAppend {
     }
 }
 
+impl JoinList {
+    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+        let mut dest = String::new();
+        let ifs = machine.ifs()?.to_owned();
+        let join_str = if ifs.is_empty() { "" } else { &ifs[0..1] };
+
+        let list = machine.operand(&self.list)?;
+        let list = match list {
+            Value::List(list) => list,
+            _ => bail!("JoinList called on non-list value {:?}", list),
+        };
+
+        for element in list {
+            if !dest.is_empty() {
+                dest.push_str(join_str);
+            }
+            match element {
+                Value::String(s) => dest.push_str(s),
+                Value::OsString(s) => {
+                    let s = s.to_str().ok_or_else(|| format_err!("JoinList: element is OsString value {:?} that is no representable as String", element))?;
+                    dest.push_str(s);
+                }
+                _ => bail!("JoinList: element is non-string value {:?}", element),
+            }
+        }
+
+        *machine.operand_mut(&self.destination)? = dest.into();
+        Ok(Status::Running)
+    }
+}
+
 impl Dispatch for ListAppend {
     fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
-        let ifs = machine
-            .environment()?
-            .get_str("IFS")?
-            .unwrap_or(" \t\n")
-            .to_owned();
+        let ifs = machine.ifs()?.to_owned();
         let src = machine.operand(&self.value)?.clone();
         let list = match machine.operand_mut(&self.list)? {
             Value::List(dest) => dest,
@@ -512,7 +539,6 @@ impl Dispatch for $name {
 notyet!(
     Add,
     Divide,
-    JoinList,
     ListInsert,
     ListRemove,
     Multiply,

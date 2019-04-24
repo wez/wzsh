@@ -38,6 +38,18 @@ impl<T: ?Sized + AsRef<str>> From<&T> for Value {
     }
 }
 
+impl From<String> for Value {
+    fn from(s: String) -> Value {
+        Value::String(s)
+    }
+}
+
+impl From<OsString> for Value {
+    fn from(s: OsString) -> Value {
+        Value::OsString(s)
+    }
+}
+
 impl From<isize> for Value {
     fn from(s: isize) -> Value {
         Value::Integer(s)
@@ -176,6 +188,11 @@ impl Machine {
         self.environment
             .back_mut()
             .ok_or_else(|| err_msg("no current environment"))
+    }
+
+    /// Compute the effective value of IFS
+    fn ifs(&self) -> Fallible<&str> {
+        Ok(self.environment()?.get_str("IFS")?.unwrap_or(" \t\n"))
     }
 
     fn io_env(&self) -> Fallible<&IoEnvironment> {
