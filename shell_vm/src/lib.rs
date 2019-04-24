@@ -6,9 +6,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 mod environment;
+mod host;
 mod ioenv;
+
 pub mod op;
 pub use environment::*;
+pub use host::*;
 pub use ioenv::*;
 pub use op::Operation;
 use op::*;
@@ -111,6 +114,7 @@ pub struct Machine {
     environment: VecDeque<Environment>,
     io_env: VecDeque<IoEnvironment>,
     cwd: PathBuf,
+    host: Option<Arc<ShellHost>>,
 
     program: Arc<Program>,
     program_counter: usize,

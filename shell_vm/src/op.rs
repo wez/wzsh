@@ -523,6 +523,38 @@ impl Dispatch for IsNoneOrEmptyString {
     }
 }
 
+impl Dispatch for TildeExpand {
+    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+        let name = match machine.operand(&self.name)? {
+            Value::None => None,
+            Value::String(s) => Some(s.to_owned()),
+            name => bail!("invalid name {:?} for TildeExpand", name),
+        };
+
+        if name.is_none() {
+            if let Some(home) = machine.environment()?.get("HOME") {
+                *machine.operand_mut(&self.destination)? = home.to_os_string().into();
+                return Ok(Status::Running);
+            }
+        }
+
+        let host = machine.host.as_ref().ok_or_else(|| {
+            format_err!(
+                "unable to TildeExpand {:?} because no shell host has been configured",
+                name
+            )
+        })?;
+
+        let home = host
+            .lookup_homedir(name.as_ref().map(String::as_str))
+            .context(format!("TildeExpand {:?} failed", name))?;
+
+        *machine.operand_mut(&self.destination)? = home.into();
+
+        Ok(Status::Running)
+    }
+}
+
 macro_rules! notyet {
     ($($name:ty),* $(,)?) => {
         $(
@@ -536,12 +568,4 @@ impl Dispatch for $name {
     }
 }
 
-notyet!(
-    Add,
-    Divide,
-    ListInsert,
-    ListRemove,
-    Multiply,
-    Subtract,
-    TildeExpand,
-);
+notyet!(Add, Divide, ListInsert, ListRemove, Multiply, Subtract,);
