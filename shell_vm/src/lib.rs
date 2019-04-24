@@ -259,6 +259,18 @@ impl Machine {
             .ok_or_else(|| err_msg("operand is not representable as OsStr"))
     }
 
+    /// Resolve an operand for read, and return true if its value
+    /// evaluates as true in a trutihness test.
+    pub fn operand_truthy(&self, operand: &Operand) -> Fallible<bool> {
+        Ok(match self.operand(operand)? {
+            Value::None => false,
+            Value::String(s) => !s.is_empty(),
+            Value::OsString(s) => !s.is_empty(),
+            Value::List(list) => !list.is_empty(),
+            Value::Integer(n) => *n != 0,
+        })
+    }
+
     fn push_with_glob(list: &mut Vec<Value>, _glob: bool, v: Value) {
         // FIXME: implement glob.  We need to lookup the cwd for correctness.
         list.push(v);

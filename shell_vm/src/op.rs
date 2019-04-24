@@ -449,6 +449,26 @@ impl Dispatch for Jump {
     }
 }
 
+impl Dispatch for JumpIfZero {
+    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+        if !machine.operand_truthy(&self.condition)? {
+            let target = compute_jump_target(machine, self.target)?;
+            machine.program_counter = target;
+        }
+        Ok(Status::Running)
+    }
+}
+
+impl Dispatch for JumpIfNonZero {
+    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+        if machine.operand_truthy(&self.condition)? {
+            let target = compute_jump_target(machine, self.target)?;
+            machine.program_counter = target;
+        }
+        Ok(Status::Running)
+    }
+}
+
 macro_rules! notyet {
     ($($name:ty),* $(,)?) => {
         $(
@@ -468,8 +488,6 @@ notyet!(
     IsNone,
     IsNoneOrEmptyString,
     JoinList,
-    JumpIfNonZero,
-    JumpIfZero,
     ListInsert,
     ListRemove,
     Multiply,
