@@ -1,5 +1,5 @@
 use super::*;
-use failure::ResultExt;
+use failure::{bail, ensure, format_err, ResultExt};
 use filedescriptor::FileDescriptor;
 
 /// The Dispatch trait is implemented by the individual operation
@@ -404,6 +404,51 @@ impl Dispatch for OpenFile {
     }
 }
 
+/// Calculate the new program counter value after applying target.
+fn compute_jump_target(machine: &mut Machine, target: InstructionAddress) -> Fallible<usize> {
+    // we need to account for the fact that the
+    // program counter is pre-incremented prior to calling Dispatch::dispatch.
+    let pc = machine.program_counter - 1;
+    let dest = match target {
+        InstructionAddress::Absolute(dest) => dest,
+        InstructionAddress::Relative(offset) if offset >= 0 => {
+            pc.checked_add(offset as usize).ok_or_else(|| {
+                format_err!(
+                    "overflow while computing jump target; PC={} target={:?}",
+                    pc,
+                    target
+                )
+            })?
+        }
+        InstructionAddress::Relative(offset) => {
+            pc.checked_sub(offset as usize).ok_or_else(|| {
+                format_err!(
+                    "overflow while computing jump target; PC={} target={:?}",
+                    pc,
+                    target
+                )
+            })?
+        }
+    };
+
+    ensure!(
+        dest < machine.program.opcodes.len(),
+        "jump target walks off the end of the program. PC={} target={:?} dest={}",
+        pc,
+        target,
+        dest
+    );
+    Ok(dest)
+}
+
+impl Dispatch for Jump {
+    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+        let target = compute_jump_target(machine, self.target)?;
+        machine.program_counter = target;
+        Ok(Status::Running)
+    }
+}
+
 macro_rules! notyet {
     ($($name:ty),* $(,)?) => {
         $(
@@ -423,7 +468,6 @@ notyet!(
     IsNone,
     IsNoneOrEmptyString,
     JoinList,
-    Jump,
     JumpIfNonZero,
     JumpIfZero,
     ListInsert,

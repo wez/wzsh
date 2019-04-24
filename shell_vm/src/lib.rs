@@ -60,7 +60,7 @@ pub enum Operand {
     FrameRelative(usize),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy)]
 pub enum InstructionAddress {
     /// Relative to the start of the program
     Absolute(usize),
