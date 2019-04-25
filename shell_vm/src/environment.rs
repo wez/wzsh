@@ -1,18 +1,18 @@
 use failure::{bail, Fallible};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 
 /// The environment represents the environmental variables
 /// associated with the shell and the processes that it spawns.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Environment {
-    map: HashMap<OsString, OsString>,
+    map: BTreeMap<OsString, OsString>,
 }
 
 impl Environment {
     pub fn new() -> Self {
         let mut environ = Self {
-            map: HashMap::new(),
+            map: BTreeMap::new(),
         };
         for (key, value) in std::env::vars_os() {
             environ.set(key, value);

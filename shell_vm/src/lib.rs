@@ -200,6 +200,10 @@ impl Machine {
         })
     }
 
+    pub fn set_host(&mut self, host: Arc<ShellHost>) {
+        self.host = Some(host)
+    }
+
     fn environment(&self) -> Fallible<&Environment> {
         self.environment
             .back()

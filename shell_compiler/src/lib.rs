@@ -38,8 +38,19 @@ impl Compiler {
         Default::default()
     }
 
-    pub fn finish(self) -> Vec<Operation> {
-        self.program
+    pub fn finish(mut self) -> Fallible<Vec<Operation>> {
+        self.reserve_frame();
+        let retval = self.frame()?.allocate();
+        self.push(op::GetEnv {
+            name: Operand::Immediate("?".into()),
+            target: Operand::FrameRelative(retval),
+        });
+        self.push(op::Exit {
+            value: Operand::FrameRelative(retval),
+        });
+        self.commit_frame()?;
+
+        Ok(self.program)
     }
 
     /// Emit a half-baked PushFrame instruction and set up a new
@@ -354,9 +365,16 @@ impl Compiler {
                 for word in &simple.words {
                     self.word_expand(argv, word)?;
                 }
-                self.push(op::Exit {
-                    value: Operand::FrameRelative(argv),
+
+                let status = self.frame()?.allocate();
+                self.push(op::SpawnCommand {
+                    argv: Operand::FrameRelative(argv),
+                    status: Operand::FrameRelative(status),
                 });
+                self.push(op::Wait {
+                    status: Operand::FrameRelative(status),
+                });
+                self.frame()?.free(status);
 
                 if pop_env {
                     self.push(op::PopEnvironment {});
@@ -377,19 +395,74 @@ mod test {
     use super::*;
     use pretty_assertions::assert_eq;
     use shell_parser::Parser;
-    use std::sync::Arc;
+    use std::ffi::OsString;
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Debug, Clone, PartialEq)]
+    struct SpawnEntry {
+        argv: Vec<Value>,
+        environment: Environment,
+        current_directory: PathBuf,
+    }
+
+    #[derive(Default, Debug)]
+    struct TestHost {
+        spawn_log: Arc<Mutex<Vec<SpawnEntry>>>,
+    }
+
+    impl ShellHost for TestHost {
+        fn lookup_homedir(&self, user: Option<&str>) -> Fallible<OsString> {
+            Ok(match user {
+                Some("wez") => "/home/wez".into(),
+                None => "/home/wez".into(),
+                Some("one") => "/home/one".into(),
+                Some(name) => bail!("unknown user {:?}", name),
+            })
+        }
+
+        fn spawn_command(
+            &self,
+            argv: &Vec<Value>,
+            environment: &mut Environment,
+            current_directory: &mut PathBuf,
+            _io_env: &IoEnvironment,
+        ) -> Fallible<WaitableStatus> {
+            let mut log = self.spawn_log.lock().unwrap();
+            log.push(SpawnEntry {
+                argv: argv.clone(),
+                environment: environment.clone(),
+                current_directory: current_directory.clone(),
+            });
+            Ok(Status::Complete(0.into()).into())
+        }
+    }
 
     fn compile(prog: &str) -> Fallible<Vec<Operation>> {
         let mut parser = Parser::new(prog.as_bytes());
         let command = parser.parse()?;
         let mut compiler = Compiler::new();
         compiler.compile_command(&command)?;
-        Ok(compiler.finish())
+        compiler.finish()
     }
 
     fn run(prog: Vec<Operation>) -> Fallible<Status> {
         let mut machine = Machine::new(&Program::new(prog))?;
         machine.run()
+    }
+
+    fn run_with_log(prog: Vec<Operation>) -> Fallible<(Status, Vec<SpawnEntry>)> {
+        let mut machine = Machine::new(&Program::new(prog))?;
+
+        let host = TestHost::default();
+        let log = Arc::clone(&host.spawn_log);
+        machine.set_host(Arc::new(host));
+        let status = machine.run()?;
+        let log = {
+            let locked = log.lock().unwrap();
+            locked.clone()
+        };
+        Ok((status, log))
     }
 
     #[test]
@@ -431,15 +504,41 @@ mod test {
                     split: true,
                     glob: true,
                 }),
-                Operation::Exit(op::Exit {
+                op::SpawnCommand {
+                    argv: Operand::FrameRelative(1),
+                    status: Operand::FrameRelative(2),
+                }
+                .into(),
+                op::Wait {
+                    status: Operand::FrameRelative(2),
+                }
+                .into(),
+                op::PopFrame {}.into(),
+                op::PushFrame { size: 1 }.into(),
+                op::GetEnv {
+                    name: Operand::Immediate("?".into()),
+                    target: Operand::FrameRelative(1)
+                }
+                .into(),
+                op::Exit {
                     value: Operand::FrameRelative(1)
-                }),
-                Operation::PopFrame(op::PopFrame {}),
+                }
+                .into(),
+                op::PopFrame {}.into(),
             ]
         );
+        let environment = Environment::new();
+        let current_directory = std::env::current_dir().unwrap();
         assert_eq!(
-            run(ops)?,
-            Status::Complete(Value::List(vec!["echo".into(), "hello".into()]))
+            run_with_log(ops)?,
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry {
+                    argv: vec!["echo".into(), "hello".into()],
+                    environment,
+                    current_directory,
+                }]
+            )
         );
         Ok(())
     }

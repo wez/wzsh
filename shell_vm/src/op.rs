@@ -78,7 +78,10 @@ op!(
         source: Operand,
         destination: Operand
     },
-    /// Terminate the program and return the specified value
+    /// Terminate the program and return the specified value.
+    /// If the value is a string that can be represented as an integer,
+    /// the string is converted to an integer and that value is
+    /// returned to the host program.
     Exit { value: Operand },
     /// Append the value from the source to the list
     /// value at the destination.
@@ -207,6 +210,17 @@ op!(
         list: Operand,
         destination: Operand,
     },
+    /// Spawn a command.
+    /// Invokes ShellHost::spawn_command, passing the argument vector specified.
+    /// The resultant WaitableStatus value is stored into the status operand.
+    /// This does not automatically wait for the command to complete.
+    SpawnCommand {
+        argv: Operand,
+        status: Operand,
+    },
+    /// Wait for the status of a WaitableStatus to change.
+    /// This calls WaitableStatus::wait and may be subject to spurious wakeups.
+    Wait { status: Operand }
 );
 
 impl Dispatch for Copy {
@@ -301,7 +315,28 @@ impl Dispatch for SetEnv {
 
 impl Dispatch for Exit {
     fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
-        Ok(Status::Complete(machine.operand(&self.value)?.clone()))
+        let value = match machine.operand(&self.value)? {
+            Value::String(s) => {
+                if let Ok(n) = isize::from_str_radix(s, 10) {
+                    n.into()
+                } else {
+                    s.into()
+                }
+            }
+            Value::OsString(s) => {
+                if let Some(s) = s.to_str() {
+                    if let Ok(n) = isize::from_str_radix(s, 10) {
+                        n.into()
+                    } else {
+                        s.into()
+                    }
+                } else {
+                    Value::OsString(s.to_os_string())
+                }
+            }
+            value => value.clone(),
+        };
+        Ok(Status::Complete(value))
     }
 }
 
@@ -550,6 +585,58 @@ impl Dispatch for TildeExpand {
             .context(format!("TildeExpand {:?} failed", name))?;
 
         *machine.operand_mut(&self.destination)? = home.into();
+
+        Ok(Status::Running)
+    }
+}
+
+impl Dispatch for Wait {
+    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+        let status = match machine.operand(&self.status)? {
+            Value::WaitableStatus(status) => status.clone(),
+            bad => bail!("attempted to Wait on non-WaitableStatus value {:?}", bad),
+        };
+        match status.wait() {
+            None | Some(Status::Running) => {
+                // Spurious wakeup: Ensure that we don't advance the
+                // program counter yet
+                machine.program_counter -= 1;
+                Ok(Status::Running)
+            }
+            Some(Status::Stopped) => Ok(Status::Stopped),
+            // If it has completed, we can advance to the next opcode
+            Some(Status::Complete(Value::Integer(n))) => {
+                machine.environment_mut()?.set("?", format!("{}", n));
+                Ok(Status::Running)
+            }
+            Some(_) => Ok(Status::Running),
+        }
+    }
+}
+
+impl Dispatch for SpawnCommand {
+    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+        let argv = match machine.operand(&self.argv)? {
+            Value::List(argv) => argv.clone(),
+            argv => bail!("SpawnCommand argv must be a list, got {:?}", argv),
+        };
+
+        let host = machine.host.as_mut().ok_or_else(|| {
+            err_msg("unable to SpawnCommand because no shell host has been configured")
+        })?;
+
+        let env = machine
+            .environment
+            .back_mut()
+            .ok_or_else(|| err_msg("SpawnCommand: no current environment"))?;
+        let io_env = machine
+            .io_env
+            .back_mut()
+            .ok_or_else(|| err_msg("SpawnCommand: no current io_env"))?;
+
+        let status = host.spawn_command(&argv, env, &mut machine.cwd, io_env)?;
+
+        *machine.operand_mut(&self.status)? = Value::WaitableStatus(status);
 
         Ok(Status::Running)
     }
