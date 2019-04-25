@@ -23,6 +23,7 @@ pub enum Value {
     OsString(OsString),
     List(Vec<Value>),
     Integer(isize),
+    WaitableStatus(WaitableStatus),
 }
 
 impl Value {
@@ -31,6 +32,23 @@ impl Value {
             Value::String(s) => Some(s.as_ref()),
             Value::OsString(s) => Some(s.as_os_str()),
             _ => None,
+        }
+    }
+
+    fn truthy(&self) -> bool {
+        match self {
+            Value::None => false,
+            Value::String(s) => !s.is_empty(),
+            Value::OsString(s) => !s.is_empty(),
+            Value::List(list) => !list.is_empty(),
+            Value::Integer(n) => *n != 0,
+            Value::WaitableStatus(status) => {
+                match status.poll() {
+                    // Invert for the program return code: 0 is success
+                    Some(Status::Complete(value)) => !value.truthy(),
+                    _ => false,
+                }
+            }
         }
     }
 }
@@ -283,13 +301,7 @@ impl Machine {
     /// Resolve an operand for read, and return true if its value
     /// evaluates as true in a trutihness test.
     pub fn operand_truthy(&self, operand: &Operand) -> Fallible<bool> {
-        Ok(match self.operand(operand)? {
-            Value::None => false,
-            Value::String(s) => !s.is_empty(),
-            Value::OsString(s) => !s.is_empty(),
-            Value::List(list) => !list.is_empty(),
-            Value::Integer(n) => *n != 0,
-        })
+        Ok(self.operand(operand)?.truthy())
     }
 
     fn push_with_glob(list: &mut Vec<Value>, _glob: bool, v: Value) {
