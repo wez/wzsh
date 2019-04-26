@@ -20,6 +20,12 @@ impl Environment {
         environ
     }
 
+    pub fn new_empty() -> Self {
+        Self {
+            map: BTreeMap::new(),
+        }
+    }
+
     pub fn get_str<K: AsRef<OsStr> + std::fmt::Debug>(&self, key: K) -> Fallible<Option<&str>> {
         match self.get(key.as_ref()) {
             None => Ok(None),

@@ -322,6 +322,10 @@ impl Compiler {
         for a in assignments {
             let value = self.allocate_list()?;
             self.word_expand(value, &a.value)?;
+            self.push(op::JoinList {
+                list: Operand::FrameRelative(value),
+                destination: Operand::FrameRelative(value),
+            });
             self.push(op::SetEnv {
                 name: Operand::Immediate(a.name.as_str().into()),
                 value: Operand::FrameRelative(value),
@@ -428,13 +432,18 @@ mod test {
 
     impl SpawnEntry {
         fn new(argv: Vec<Value>) -> Self {
-            let environment = Environment::new();
+            let environment = Environment::new_empty();
             let current_directory = std::env::current_dir().unwrap();
             Self {
                 argv,
                 environment,
                 current_directory,
             }
+        }
+
+        fn set_env(mut self, key: &str, value: &str) -> Self {
+            self.environment.set(key, value);
+            self
         }
     }
 
@@ -495,7 +504,7 @@ mod test {
     }
 
     fn run(prog: Vec<Operation>) -> Fallible<Status> {
-        let mut machine = Machine::new(&Program::new(prog))?;
+        let mut machine = Machine::new(&Program::new(prog), Some(Environment::new_empty()))?;
         machine.run()
     }
 
@@ -510,7 +519,7 @@ mod test {
 
     fn run_with_log(prog: Vec<Operation>) -> Fallible<(Status, Vec<SpawnEntry>)> {
         print_prog(&prog);
-        let mut machine = Machine::new(&Program::new(prog))?;
+        let mut machine = Machine::new(&Program::new(prog), Some(Environment::new_empty()))?;
 
         let host = TestHost::default();
         let log = Arc::clone(&host.spawn_log);
@@ -622,4 +631,89 @@ mod test {
         Ok(())
     }
 
+    #[test]
+    fn test_param_get() -> Fallible<()> {
+        assert_eq!(
+            run_with_log(compile("echo $foo")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec!["echo".into()]),]
+            )
+        );
+
+        assert_eq!(
+            run_with_log(compile("echo \"$foo\"")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec!["echo".into(), "".into()]),]
+            )
+        );
+
+        assert_eq!(
+            run_with_log(compile("foo=1 echo $foo")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec!["echo".into(), "1".into()]).set_env("foo", "1"),]
+            )
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_param_get_default() -> Fallible<()> {
+        assert_eq!(
+            run_with_log(compile("echo ${foo:-bar}")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec!["echo".into(), "bar".into()]),]
+            )
+        );
+
+        assert_eq!(
+            run_with_log(compile("echo ${foo:-bar baz}")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec![
+                    "echo".into(),
+                    "bar".into(),
+                    "baz".into()
+                ]),]
+            )
+        );
+
+        assert_eq!(
+            run_with_log(compile("echo \"${foo:-bar baz}\"")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec!["echo".into(), "bar baz".into()]),]
+            )
+        );
+
+        assert_eq!(
+            run_with_log(compile("foo=1 echo ${foo:-bar}")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec!["echo".into(), "1".into()]).set_env("foo", "1"),]
+            )
+        );
+
+        assert_eq!(
+            run_with_log(compile("foo='' echo ${foo:-bar}")?)?, // FIXME: `foo= echo` is misparsed
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec!["echo".into(), "bar".into()]).set_env("foo", ""),]
+            )
+        );
+
+        assert_eq!(
+            run_with_log(compile("foo='' echo ${foo-bar}")?)?, // FIXME: `foo= echo` is misparsed
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec!["echo".into()]).set_env("foo", ""),]
+            )
+        );
+
+        Ok(())
+    }
 }

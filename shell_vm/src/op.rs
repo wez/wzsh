@@ -349,7 +349,15 @@ impl Dispatch for StringAppend {
         let src = match machine.operand(&self.source)? {
             Value::String(s) => s.clone(),
             Value::None => return Ok(Status::Running),
-            _ => bail!("cannot StringAppend from non-string"),
+            Value::OsString(s) => {
+                let s = s.to_str().ok_or_else(|| format_err!("StringAppend: operand {:?} is OsString value {:?} that is no representable as String", self.source, s))?;
+                s.to_owned()
+            }
+            value => bail!(
+                "cannot StringAppend from non-string operand {:?} value {:?}",
+                self.source,
+                value
+            ),
         };
         match machine.operand_mut(&self.destination)? {
             Value::String(dest) => dest.push_str(&src),
@@ -553,6 +561,7 @@ impl Dispatch for IsNoneOrEmptyString {
         let is_none = match machine.operand(&self.source)? {
             Value::None => 1,
             Value::String(s) if s.is_empty() => 1,
+            Value::OsString(s) if s.is_empty() => 1,
             _ => 0,
         };
 

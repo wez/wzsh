@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-use failure::{bail, err_msg, Fallible};
+use failure::{bail, err_msg, format_err, Fallible};
 use std::collections::VecDeque;
 use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
@@ -193,9 +193,9 @@ fn split_by_ifs<'a>(value: &'a str, ifs: &str) -> Vec<&'a str> {
 }
 
 impl Machine {
-    pub fn new(program: &Arc<Program>) -> Fallible<Self> {
+    pub fn new(program: &Arc<Program>, env: Option<Environment>) -> Fallible<Self> {
         let mut environment = VecDeque::new();
-        environment.push_back(Environment::new());
+        environment.push_back(env.unwrap_or_else(Environment::new));
 
         let mut io_env = VecDeque::new();
         io_env.push_back(IoEnvironment::new()?);
@@ -251,6 +251,7 @@ impl Machine {
             .opcodes
             .get(self.program_counter)
             .ok_or_else(|| err_msg("walked off the end of the program"))?;
+        let pc = self.program_counter;
         self.program_counter += 1;
         match op.dispatch(self) {
             status @ Ok(Status::Stopped) => {
@@ -258,6 +259,7 @@ impl Machine {
                 self.program_counter -= 1;
                 status
             }
+            Err(e) => Err(format_err!("PC={}: {}", pc, e)),
             status => status,
         }
     }
@@ -313,9 +315,14 @@ impl Machine {
     }
 
     pub fn operand_as_os_str<'a>(&'a self, operand: &'a Operand) -> Fallible<&'a OsStr> {
-        self.operand(operand)?
-            .as_os_str()
-            .ok_or_else(|| err_msg("operand is not representable as OsStr"))
+        let value = self.operand(operand)?;
+        value.as_os_str().ok_or_else(|| {
+            format_err!(
+                "operand {:?} of value {:?} is not representable as OsStr",
+                operand,
+                value
+            )
+        })
     }
 
     /// Resolve an operand for read, and return true if its value
