@@ -232,13 +232,13 @@ impl Machine {
         Ok(self.environment()?.get_str("IFS")?.unwrap_or(" \t\n"))
     }
 
-    fn io_env(&self) -> Fallible<&IoEnvironment> {
+    pub fn io_env(&self) -> Fallible<&IoEnvironment> {
         self.io_env
             .back()
             .ok_or_else(|| err_msg("no current IoEnvironment"))
     }
 
-    fn io_env_mut(&mut self) -> Fallible<&mut IoEnvironment> {
+    pub fn io_env_mut(&mut self) -> Fallible<&mut IoEnvironment> {
         self.io_env
             .back_mut()
             .ok_or_else(|| err_msg("no current IoEnvironment"))

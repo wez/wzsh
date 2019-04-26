@@ -1,6 +1,7 @@
 use super::*;
 use failure::{bail, ensure, format_err, ResultExt};
 use filedescriptor::FileDescriptor;
+use std::io::Write;
 
 /// The Dispatch trait is implemented by the individual operation
 /// types, and via the Operation enum that encompasses all possible
@@ -88,6 +89,8 @@ op!(
     /// the string is converted to an integer and that value is
     /// returned to the host program.
     Exit { value: Operand },
+    /// Emit an error and halt the program
+    Error { message: Operand },
     /// Append the value from the source to the list
     /// value at the destination.
     /// If split is true, split value using the current IFS value
@@ -346,6 +349,18 @@ impl Dispatch for Exit {
             value => value.clone(),
         };
         Ok(Status::Complete(value))
+    }
+}
+
+impl Dispatch for Error {
+    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+        let mut stderr = machine.io_env_mut()?.stderr();
+        match machine.operand(&self.message)? {
+            Value::String(s) => write!(stderr, "{}", s),
+            Value::OsString(s) => write!(stderr, "{:?}", s),
+            value => write!(stderr, "{:?}", value),
+        }?;
+        Ok(Status::Complete(1.into()))
     }
 }
 

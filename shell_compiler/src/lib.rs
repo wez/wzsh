@@ -259,6 +259,54 @@ impl Compiler {
                 string: Operand::FrameRelative(slot),
                 length: Operand::FrameRelative(target_string),
             }),
+            ParamOper::CheckSet { allow_null } => {
+                let test = self.frame()?.allocate();
+                if allow_null {
+                    self.push(op::IsNone {
+                        source: Operand::FrameRelative(slot),
+                        destination: Operand::FrameRelative(test),
+                    });
+                } else {
+                    self.push(op::IsNoneOrEmptyString {
+                        source: Operand::FrameRelative(slot),
+                        destination: Operand::FrameRelative(test),
+                    });
+                }
+                self.if_then_else(
+                    Operand::FrameRelative(test),
+                    |me| {
+                        if expr.word.is_empty() {
+                            me.push(op::Error {
+                                message: Operand::Immediate(
+                                    format!("parameter {} is not set", expr.name).into(),
+                                ),
+                            });
+                        } else {
+                            let argv = me.allocate_list()?;
+                            for w in &expr.word {
+                                me.word_expand(argv, w)?;
+                            }
+                            me.push(op::JoinList {
+                                list: Operand::FrameRelative(argv),
+                                destination: Operand::FrameRelative(target_string),
+                            });
+                            me.frame()?.free(argv);
+                            me.push(op::Error {
+                                message: Operand::FrameRelative(target_string),
+                            });
+                        }
+                        Ok(())
+                    },
+                    |me| {
+                        me.push(op::Copy {
+                            source: Operand::FrameRelative(slot),
+                            destination: Operand::FrameRelative(target_string),
+                        });
+                        Ok(())
+                    },
+                )?;
+                self.frame()?.free(test);
+            }
             _ => bail!("{:?} not implemented", expr),
         }
         Ok(())
@@ -463,9 +511,11 @@ impl Compiler {
 #[cfg(test)]
 mod test {
     use super::*;
+    use filedescriptor::FileDescriptor;
     use pretty_assertions::assert_eq;
     use shell_parser::Parser;
     use std::ffi::{OsStr, OsString};
+    use std::io::Read;
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
 
@@ -576,6 +626,44 @@ mod test {
             locked.clone()
         };
         Ok((status, log))
+    }
+
+    fn consume_pipe(mut fd: FileDescriptor) -> Fallible<String> {
+        let mut res = String::new();
+        fd.read_to_string(&mut res)?;
+        Ok(res)
+    }
+
+    fn run_with_log_and_output(
+        prog: Vec<Operation>,
+    ) -> Fallible<(Status, Vec<SpawnEntry>, String, String)> {
+        print_prog(&prog);
+        let mut machine = Machine::new(&Program::new(prog), Some(Environment::new_empty()))?;
+
+        let host = TestHost::default();
+        let log = Arc::clone(&host.spawn_log);
+        machine.set_host(Arc::new(host));
+
+        let stdout = FileDescriptor::pipe()?;
+        let stderr = FileDescriptor::pipe()?;
+
+        machine.io_env_mut()?.assign_fd(1, stdout.write);
+        machine.io_env_mut()?.assign_fd(2, stderr.write);
+
+        let status = machine.run()?;
+        let log = {
+            let locked = log.lock().unwrap();
+            locked.clone()
+        };
+
+        // Ensure that the write ends of the pipes are closed
+        // before we try to read the data out.
+        drop(machine);
+
+        let stdout = consume_pipe(stdout.read)?;
+        let stderr = consume_pipe(stderr.read)?;
+
+        Ok((status, log, stdout, stderr))
     }
 
     #[test]
@@ -838,4 +926,28 @@ mod test {
 
         Ok(())
     }
+
+    #[test]
+    fn test_param_check_set() -> Fallible<()> {
+        assert_eq!(
+            run_with_log_and_output(compile("echo ${foo:?bar}")?)?,
+            (
+                Status::Complete(1.into()),
+                vec![],
+                String::new(),
+                String::from("bar")
+            )
+        );
+        assert_eq!(
+            run_with_log_and_output(compile("echo ${foo:?}")?)?,
+            (
+                Status::Complete(1.into()),
+                vec![],
+                String::new(),
+                String::from("parameter foo is not set")
+            )
+        );
+        Ok(())
+    }
+
 }
