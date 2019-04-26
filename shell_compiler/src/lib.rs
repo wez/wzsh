@@ -1,7 +1,7 @@
 #![allow(dead_code, unused_imports)]
 use failure::{bail, err_msg, Fallible};
 use shell_lexer::{Assignment, ParamExpr, ParamOper, WordComponent, WordComponentKind};
-use shell_parser::{Command, CommandType, Redirection};
+use shell_parser::{Command, CommandType, CompoundList, Redirection};
 pub use shell_vm::*;
 use std::collections::VecDeque;
 
@@ -39,17 +39,9 @@ impl Compiler {
     }
 
     pub fn finish(mut self) -> Fallible<Vec<Operation>> {
-        self.reserve_frame();
-        let retval = self.frame()?.allocate();
-        self.push(op::GetEnv {
-            name: Operand::Immediate("?".into()),
-            target: Operand::FrameRelative(retval),
-        });
         self.push(op::Exit {
-            value: Operand::FrameRelative(retval),
+            value: Operand::LastWaitStatus,
         });
-        self.commit_frame()?;
-
         Ok(self.program)
     }
 
@@ -371,9 +363,11 @@ impl Compiler {
                     argv: Operand::FrameRelative(argv),
                     status: Operand::FrameRelative(status),
                 });
-                self.push(op::Wait {
-                    status: Operand::FrameRelative(status),
-                });
+                if !command.asynchronous {
+                    self.push(op::Wait {
+                        status: Operand::FrameRelative(status),
+                    });
+                }
                 self.frame()?.free(status);
 
                 if pop_env {
@@ -381,11 +375,37 @@ impl Compiler {
                 }
                 self.pop_redirection(pop_redir);
             }
+            CommandType::If(cmd) => {
+                // First evaluate the condition
+                self.compound_list(&cmd.condition)?;
+                self.if_then_else(
+                    Operand::LastWaitStatus,
+                    |me| {
+                        if let Some(true_part) = &cmd.true_part {
+                            me.compound_list(true_part)?;
+                        }
+                        Ok(())
+                    },
+                    |me| {
+                        if let Some(false_part) = &cmd.false_part {
+                            me.compound_list(false_part)?;
+                        }
+                        Ok(())
+                    },
+                )?;
+            }
             _ => bail!("unhandled command type: {:?}", command),
         };
 
         self.pop_redirection(pop_outer_redir);
         self.commit_frame()?;
+        Ok(())
+    }
+
+    fn compound_list(&mut self, list: &CompoundList) -> Fallible<()> {
+        for command in &list.commands {
+            self.compile_command(command)?;
+        }
         Ok(())
     }
 }
@@ -395,7 +415,7 @@ mod test {
     use super::*;
     use pretty_assertions::assert_eq;
     use shell_parser::Parser;
-    use std::ffi::OsString;
+    use std::ffi::{OsStr, OsString};
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
 
@@ -404,6 +424,18 @@ mod test {
         argv: Vec<Value>,
         environment: Environment,
         current_directory: PathBuf,
+    }
+
+    impl SpawnEntry {
+        fn new(argv: Vec<Value>) -> Self {
+            let environment = Environment::new();
+            let current_directory = std::env::current_dir().unwrap();
+            Self {
+                argv,
+                environment,
+                current_directory,
+            }
+        }
     }
 
     #[derive(Default, Debug)]
@@ -429,12 +461,28 @@ mod test {
             _io_env: &IoEnvironment,
         ) -> Fallible<WaitableStatus> {
             let mut log = self.spawn_log.lock().unwrap();
+
+            let command = argv
+                .get(0)
+                .ok_or_else(|| err_msg("argv0 is missing"))?
+                .as_os_str()
+                .ok_or_else(|| err_msg("argv0 is not a string"))?;
+            let status = if command == "true" || command == "echo" {
+                0
+            } else if command == "false" {
+                // false is explicitly non-zero
+                1
+            } else {
+                // Anything else we don't recognize is an error
+                2
+            };
+
             log.push(SpawnEntry {
                 argv: argv.clone(),
                 environment: environment.clone(),
                 current_directory: current_directory.clone(),
             });
-            Ok(Status::Complete(0.into()).into())
+            Ok(Status::Complete(status.into()).into())
         }
     }
 
@@ -451,7 +499,17 @@ mod test {
         machine.run()
     }
 
+    fn print_prog(prog: &Vec<Operation>) {
+        eprintln!("--");
+        eprintln!("program of length {}", prog.len());
+        for (idx, op) in prog.iter().enumerate() {
+            eprintln!("[{:3}]   {:?}", idx, op);
+        }
+        eprintln!("--");
+    }
+
     fn run_with_log(prog: Vec<Operation>) -> Fallible<(Status, Vec<SpawnEntry>)> {
+        print_prog(&prog);
         let mut machine = Machine::new(&Program::new(prog))?;
 
         let host = TestHost::default();
@@ -514,30 +572,51 @@ mod test {
                 }
                 .into(),
                 op::PopFrame {}.into(),
-                op::PushFrame { size: 1 }.into(),
-                op::GetEnv {
-                    name: Operand::Immediate("?".into()),
-                    target: Operand::FrameRelative(1)
-                }
-                .into(),
                 op::Exit {
-                    value: Operand::FrameRelative(1)
+                    value: Operand::LastWaitStatus
                 }
                 .into(),
-                op::PopFrame {}.into(),
             ]
         );
-        let environment = Environment::new();
-        let current_directory = std::env::current_dir().unwrap();
         assert_eq!(
             run_with_log(ops)?,
             (
                 Status::Complete(0.into()),
-                vec![SpawnEntry {
-                    argv: vec!["echo".into(), "hello".into()],
-                    environment,
-                    current_directory,
-                }]
+                vec![SpawnEntry::new(vec!["echo".into(), "hello".into()],)]
+            )
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_conditional_pipe() -> Fallible<()> {
+        assert_eq!(
+            run_with_log(compile("true || false")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec!["true".into()]),]
+            )
+        );
+
+        assert_eq!(
+            run_with_log(compile("true && false")?)?,
+            (
+                Status::Complete(1.into()),
+                vec![
+                    SpawnEntry::new(vec!["true".into()],),
+                    SpawnEntry::new(vec!["false".into()],),
+                ]
+            )
+        );
+
+        assert_eq!(
+            run_with_log(compile("false || true")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![
+                    SpawnEntry::new(vec!["false".into()],),
+                    SpawnEntry::new(vec!["true".into()],),
+                ]
             )
         );
         Ok(())

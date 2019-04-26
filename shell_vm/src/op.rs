@@ -334,6 +334,10 @@ impl Dispatch for Exit {
                     Value::OsString(s.to_os_string())
                 }
             }
+            Value::WaitableStatus(s) => match s.wait() {
+                Some(Status::Complete(n)) => n,
+                _ => bail!("last wait status is not complete!?"),
+            },
             value => value.clone(),
         };
         Ok(Status::Complete(value))
@@ -605,11 +609,11 @@ impl Dispatch for Wait {
             }
             Some(Status::Stopped) => Ok(Status::Stopped),
             // If it has completed, we can advance to the next opcode
-            Some(Status::Complete(Value::Integer(n))) => {
-                machine.environment_mut()?.set("?", format!("{}", n));
+            Some(Status::Complete(_)) => {
+                machine.last_wait_status = Some(Value::WaitableStatus(status));
+                // machine.environment_mut()?.set("?", format!("{}", n));
                 Ok(Status::Running)
             }
-            Some(_) => Ok(Status::Running),
         }
     }
 }

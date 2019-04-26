@@ -27,7 +27,7 @@ pub enum Value {
 }
 
 impl Value {
-    fn as_os_str(&self) -> Option<&OsStr> {
+    pub fn as_os_str(&self) -> Option<&OsStr> {
         match self {
             Value::String(s) => Some(s.as_ref()),
             Value::OsString(s) => Some(s.as_os_str()),
@@ -35,7 +35,7 @@ impl Value {
         }
     }
 
-    fn truthy(&self) -> bool {
+    pub fn truthy(&self) -> bool {
         match self {
             Value::None => false,
             Value::String(s) => !s.is_empty(),
@@ -45,7 +45,14 @@ impl Value {
             Value::WaitableStatus(status) => {
                 match status.poll() {
                     // Invert for the program return code: 0 is success
-                    Some(Status::Complete(value)) => !value.truthy(),
+                    Some(Status::Complete(value)) => {
+                        eprintln!(
+                            "wait status {:?}, truthy is {}, invert it",
+                            value,
+                            value.truthy()
+                        );
+                        !value.truthy()
+                    }
                     _ => false,
                 }
             }
@@ -91,6 +98,8 @@ pub enum Operand {
     /// The number is relative to the current frame
     /// pointer.
     FrameRelative(usize),
+    /// The status from the most recently waited command
+    LastWaitStatus,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Copy)]
@@ -136,6 +145,8 @@ pub struct Machine {
 
     program: Arc<Program>,
     program_counter: usize,
+
+    last_wait_status: Option<Value>,
 }
 
 /// This enum is essentially why this vm exists; it allows stepping
@@ -266,6 +277,7 @@ impl Machine {
     pub fn operand_mut(&mut self, operand: &Operand) -> Fallible<&mut Value> {
         match operand {
             Operand::Immediate(_) => bail!("cannot mutably reference an Immediate operand"),
+            Operand::LastWaitStatus => bail!("cannot mutably reference LastWaitStatus"),
             Operand::FrameRelative(offset) => self
                 .stack
                 .get_mut(
@@ -283,6 +295,10 @@ impl Machine {
     pub fn operand<'a>(&'a self, operand: &'a Operand) -> Fallible<&'a Value> {
         match operand {
             Operand::Immediate(value) => Ok(value),
+            Operand::LastWaitStatus => self
+                .last_wait_status
+                .as_ref()
+                .ok_or_else(|| err_msg("cannot reference LastWaitStatus as it has not been set")),
             Operand::FrameRelative(offset) => self
                 .stack
                 .get(
