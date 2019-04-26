@@ -307,6 +307,44 @@ impl Compiler {
                 )?;
                 self.frame()?.free(test);
             }
+            ParamOper::AlternativeValue { allow_null } => {
+                let test = self.frame()?.allocate();
+                if allow_null {
+                    self.push(op::IsNone {
+                        source: Operand::FrameRelative(slot),
+                        destination: Operand::FrameRelative(test),
+                    });
+                } else {
+                    self.push(op::IsNoneOrEmptyString {
+                        source: Operand::FrameRelative(slot),
+                        destination: Operand::FrameRelative(test),
+                    });
+                }
+                self.if_then_else(
+                    Operand::FrameRelative(test),
+                    |me| {
+                        me.push(op::Copy {
+                            source: Operand::Immediate("".into()),
+                            destination: Operand::FrameRelative(target_string),
+                        });
+                        Ok(())
+                    },
+                    |me| {
+                        let argv = me.allocate_list()?;
+                        for w in &expr.word {
+                            me.word_expand(argv, w)?;
+                        }
+                        me.push(op::JoinList {
+                            list: Operand::FrameRelative(argv),
+                            destination: Operand::FrameRelative(target_string),
+                        });
+                        me.frame()?.free(argv);
+
+                        Ok(())
+                    },
+                )?;
+                self.frame()?.free(test);
+            }
             _ => bail!("{:?} not implemented", expr),
         }
         Ok(())
@@ -950,4 +988,40 @@ mod test {
         Ok(())
     }
 
+    #[test]
+    fn test_param_alternative_value() -> Fallible<()> {
+        assert_eq!(
+            run_with_log(compile("echo ${foo:+bar}")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec!["echo".into()]),]
+            )
+        );
+
+        assert_eq!(
+            run_with_log(compile("foo=1 echo ${foo:+bar}")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec!["echo".into(), "bar".into()]).set_env("foo", "1"),]
+            )
+        );
+
+        assert_eq!(
+            run_with_log(compile("foo= echo ${foo:+bar}")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec!["echo".into()]).set_env("foo", ""),]
+            )
+        );
+
+        assert_eq!(
+            run_with_log(compile("foo= echo ${foo+bar}")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec!["echo".into(), "bar".into()]).set_env("foo", ""),]
+            )
+        );
+
+        Ok(())
+    }
 }
