@@ -91,7 +91,7 @@ pub enum Token {
     Eof(Pos),
     Newline(Pos),
     IoNumber(usize, Span),
-    Assignment(Assignment), // FIXME: lex both ways
+    Assignment(Assignment),
     EndCommandSubst(Pos),
     EndParamSubst(Pos),
 }
@@ -298,7 +298,20 @@ impl<R: Read> Lexer<R> {
 
                     if c.c == ' ' || c.c == '\t' || c.c == '\r' {
                         if let Some(token) = self.delimit_current_word() {
+                            self.reader.unget(c);
                             return Ok(token);
+                        }
+
+                        // Handle the case: `foo= echo`.
+                        // We want to treat that as `foo='' echo`
+                        if self.state().state == State::AssignmentWord {
+                            self.reader.unget(c);
+                            return Ok(Token::Word(vec![WordComponent {
+                                kind: WordComponentKind::Literal("".to_owned()),
+                                span: Span::new(c.pos, c.pos),
+                                splittable: false,
+                                remove_backslash: false,
+                            }]));
                         }
                     } else if c.c == '\n' {
                         if let Some(token) = self.delimit_current_word() {

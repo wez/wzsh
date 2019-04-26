@@ -699,7 +699,7 @@ mod test {
         );
 
         assert_eq!(
-            run_with_log(compile("foo='' echo ${foo:-bar}")?)?, // FIXME: `foo= echo` is misparsed
+            run_with_log(compile("foo='' echo ${foo:-bar}")?)?,
             (
                 Status::Complete(0.into()),
                 vec![SpawnEntry::new(vec!["echo".into(), "bar".into()]).set_env("foo", ""),]
@@ -707,7 +707,7 @@ mod test {
         );
 
         assert_eq!(
-            run_with_log(compile("foo='' echo ${foo-bar}")?)?, // FIXME: `foo= echo` is misparsed
+            run_with_log(compile("foo= echo ${foo-bar}")?)?,
             (
                 Status::Complete(0.into()),
                 vec![SpawnEntry::new(vec!["echo".into()]).set_env("foo", ""),]
