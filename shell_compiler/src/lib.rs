@@ -213,6 +213,48 @@ impl Compiler {
                 )?;
                 self.frame()?.free(test);
             }
+            ParamOper::AssignDefault { allow_null } => {
+                let test = self.frame()?.allocate();
+                if allow_null {
+                    self.push(op::IsNone {
+                        source: Operand::FrameRelative(slot),
+                        destination: Operand::FrameRelative(test),
+                    });
+                } else {
+                    self.push(op::IsNoneOrEmptyString {
+                        source: Operand::FrameRelative(slot),
+                        destination: Operand::FrameRelative(test),
+                    });
+                }
+                self.if_then_else(
+                    Operand::FrameRelative(test),
+                    |me| {
+                        let argv = me.allocate_list()?;
+                        for w in &expr.word {
+                            me.word_expand(argv, w)?;
+                        }
+                        me.push(op::JoinList {
+                            list: Operand::FrameRelative(argv),
+                            destination: Operand::FrameRelative(target_string),
+                        });
+                        me.frame()?.free(argv);
+                        me.push(op::SetEnv {
+                            name: Operand::Immediate(expr.name.as_str().into()),
+                            value: Operand::FrameRelative(target_string),
+                        });
+
+                        Ok(())
+                    },
+                    |me| {
+                        me.push(op::Copy {
+                            source: Operand::FrameRelative(slot),
+                            destination: Operand::FrameRelative(target_string),
+                        });
+                        Ok(())
+                    },
+                )?;
+                self.frame()?.free(test);
+            }
             ParamOper::StringLength => self.push(op::StringLength {
                 string: Operand::FrameRelative(slot),
                 length: Operand::FrameRelative(target_string),
@@ -737,6 +779,63 @@ mod test {
                 vec![SpawnEntry::new(vec!["echo".into(), "3".into()]).set_env("foo", "foo"),]
             )
         );
+        Ok(())
+    }
+
+    #[test]
+    fn test_param_assign_default() -> Fallible<()> {
+        assert_eq!(
+            run_with_log(compile("echo ${foo:=bar}")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec!["echo".into(), "bar".into()]).set_env("foo", "bar"),]
+            )
+        );
+
+        assert_eq!(
+            run_with_log(compile("echo ${foo:=bar baz}")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![
+                    SpawnEntry::new(vec!["echo".into(), "bar".into(), "baz".into()])
+                        .set_env("foo", "bar baz"),
+                ]
+            )
+        );
+
+        assert_eq!(
+            run_with_log(compile("echo \"${foo:=bar baz}\"")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec!["echo".into(), "bar baz".into()])
+                    .set_env("foo", "bar baz"),]
+            )
+        );
+
+        assert_eq!(
+            run_with_log(compile("foo=1 echo ${foo:=bar}")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec!["echo".into(), "1".into()]).set_env("foo", "1"),]
+            )
+        );
+
+        assert_eq!(
+            run_with_log(compile("foo='' echo ${foo:=bar}")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec!["echo".into(), "bar".into()]).set_env("foo", "bar"),]
+            )
+        );
+
+        assert_eq!(
+            run_with_log(compile("foo= echo ${foo=bar}")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec!["echo".into()]).set_env("foo", ""),]
+            )
+        );
+
         Ok(())
     }
 }
