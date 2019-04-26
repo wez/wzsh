@@ -78,6 +78,11 @@ op!(
         source: Operand,
         destination: Operand
     },
+    /// Evaluates to the length of the specified string operand
+    StringLength {
+        string: Operand,
+        length: Operand,
+    },
     /// Terminate the program and return the specified value.
     /// If the value is a string that can be represented as an integer,
     /// the string is converted to an integer and that value is
@@ -341,6 +346,23 @@ impl Dispatch for Exit {
             value => value.clone(),
         };
         Ok(Status::Complete(value))
+    }
+}
+
+impl Dispatch for StringLength {
+    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+        let len = match machine.operand(&self.string)? {
+            Value::String(s) => s.len(),
+            Value::None => 0,
+            Value::OsString(s) => s.len(),
+            value => bail!(
+                "cannot StringLength non-string operand {:?} value {:?}",
+                self.string,
+                value
+            ),
+        };
+        *machine.operand_mut(&self.length)? = format!("{}", len).into();
+        Ok(Status::Running)
     }
 }
 

@@ -213,6 +213,10 @@ impl Compiler {
                 )?;
                 self.frame()?.free(test);
             }
+            ParamOper::StringLength => self.push(op::StringLength {
+                string: Operand::FrameRelative(slot),
+                length: Operand::FrameRelative(target_string),
+            }),
             _ => bail!("{:?} not implemented", expr),
         }
         Ok(())
@@ -714,6 +718,25 @@ mod test {
             )
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_param_len() -> Fallible<()> {
+        assert_eq!(
+            run_with_log(compile("echo ${#foo}")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec!["echo".into(), "0".into()]),]
+            )
+        );
+        assert_eq!(
+            run_with_log(compile("foo=foo echo ${#foo}")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec!["echo".into(), "3".into()]).set_env("foo", "foo"),]
+            )
+        );
         Ok(())
     }
 }
