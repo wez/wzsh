@@ -345,7 +345,10 @@ impl Compiler {
                 )?;
                 self.frame()?.free(test);
             }
-            _ => bail!("{:?} not implemented", expr),
+            ParamOper::RemoveSmallestSuffixPattern
+            | ParamOper::RemoveLargestSuffixPattern
+            | ParamOper::RemoveSmallestPrefixPattern
+            | ParamOper::RemoveLargestPrefixPattern => bail!("TODO {:?} not implemented", expr),
         }
         Ok(())
     }
