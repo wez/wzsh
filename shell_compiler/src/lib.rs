@@ -533,6 +533,9 @@ impl Compiler {
                     },
                 )?;
             }
+            CommandType::Program(list) | CommandType::BraceGroup(list) => {
+                self.compound_list(list)?;
+            }
             _ => bail!("unhandled command type: {:?}", command),
         };
 
@@ -1025,6 +1028,36 @@ mod test {
             )
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn test_brace_group() -> Fallible<()> {
+        assert_eq!(
+            run_with_log(compile("{ true ; false }")?)?,
+            (
+                Status::Complete(1.into()),
+                vec![
+                    SpawnEntry::new(vec!["true".into()]),
+                    SpawnEntry::new(vec!["false".into()]),
+                ]
+            )
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_program() -> Fallible<()> {
+        assert_eq!(
+            run_with_log(compile("true\nfalse")?)?,
+            (
+                Status::Complete(1.into()),
+                vec![
+                    SpawnEntry::new(vec!["true".into()]),
+                    SpawnEntry::new(vec!["false".into()]),
+                ]
+            )
+        );
         Ok(())
     }
 }
