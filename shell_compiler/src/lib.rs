@@ -670,7 +670,7 @@ mod test {
         }
     }
 
-    fn uppercase(mut stdin: FileDescriptor, mut stdout: FileDescriptor) -> isize {
+    fn uppercase(mut stdin: Readable, mut stdout: Writable) -> isize {
         loop {
             let mut buf = [0u8; 1024];
             match stdin.read(&mut buf) {
@@ -731,10 +731,10 @@ mod test {
                 // false is explicitly non-zero
                 Status::Complete(1.into()).into()
             } else if command == "uppercase" {
-                // A simple filter that uppercases stdint and emits it
+                // A simple filter that uppercases stdin and emits it
                 // to stdout; this helps to test pipelines
-                let stdin = io_env.stdin().dup()?;
-                let stdout = io_env.stdout().dup()?;
+                let stdin = io_env.stdin();
+                let stdout = io_env.stdout();
                 ThreadStatus::new(std::thread::spawn(move || uppercase(stdin, stdout))).into()
             } else {
                 // Anything else we don't recognize is an error
