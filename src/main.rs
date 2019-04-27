@@ -4,7 +4,6 @@ use failure::Fallible;
 mod errorprint;
 //mod execenv;
 mod exitstatus;
-//mod expander;
 //mod job;
 //mod parse;
 mod pathsearch;
