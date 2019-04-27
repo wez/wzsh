@@ -5,7 +5,7 @@ mod reader;
 #[macro_use]
 mod tokenenum;
 
-pub use errors::LexErrorKind;
+pub use errors::{LexError, LexErrorKind};
 pub use lexer::{Assignment, Lexer, ParamExpr, ParamOper, Token, WordComponent, WordComponentKind};
 pub use position::{Pos, Span};
 pub use reader::CharReader;

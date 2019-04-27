@@ -118,6 +118,20 @@ impl Token {
         }
         false
     }
+
+    /// Returns the span for the token
+    pub fn span(&self) -> Span {
+        match self {
+            Token::Word(list) => list[0].span,
+            Token::Operator(_, span)
+            | Token::Assignment(Assignment { span, .. })
+            | Token::IoNumber(_, span) => *span,
+            Token::Newline(pos)
+            | Token::EndCommandSubst(pos)
+            | Token::EndParamSubst(pos)
+            | Token::Eof(pos) => Span::new(*pos, *pos),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

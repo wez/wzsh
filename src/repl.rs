@@ -4,15 +4,10 @@ use rustyline::error::ReadlineError;
 use rustyline::highlight::Highlighter;
 use rustyline::hint::Hinter;
 use rustyline::{Config, Editor, Helper};
-use shlex::error::LexError;
-use shlex::LexErrorKind;
 use std::borrow::Cow;
 
 use crate::errorprint::print_error;
-use crate::exitstatus::ExitStatus;
 use crate::job::put_shell_in_foreground;
-use crate::parse::{ParseErrorKind, Parser};
-use crate::{ExecutionEnvironment, ShellExpander};
 
 struct LineEditorHelper {
     completer: FilenameCompleter,

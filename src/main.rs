@@ -1,22 +1,17 @@
 use failure::Fallible;
 
-mod builtins;
+//mod builtins;
 mod errorprint;
-mod execenv;
-mod exitstatus;
-mod expander;
-mod job;
-mod parse;
-mod pathsearch;
-mod repl;
-mod vm;
-
-use execenv::ExecutionEnvironment;
-use expander::ShellExpander;
-use repl::repl;
+//mod execenv;
+//mod exitstatus;
+//mod expander;
+//mod job;
+//mod parse;
+//mod pathsearch;
+//mod repl;
+//mod vm;
 
 fn main() -> Fallible<()> {
-    let env = ExecutionEnvironment::new()?;
-    let expander = ShellExpander {};
-    repl(env, expander)
+    Ok(())
+    //repl(env, expander)
 }
