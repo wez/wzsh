@@ -366,7 +366,6 @@ impl Compiler {
 
         // TODO: field splitting, backslashes
         let mut split = true;
-        let glob = true;
         for component in word {
             if !component.splittable {
                 split = false;
@@ -404,6 +403,8 @@ impl Compiler {
                 WordComponentKind::CommandSubstitution(_) => bail!("command subst not implemented"),
             }
         }
+
+        let glob = split;
 
         self.push(op::ListAppend {
             value: Operand::FrameRelative(expanded_word),
@@ -724,8 +725,8 @@ mod test {
                     if let Some(s) = arg.as_str() {
                         write!(stdout, "{}", s)?;
                     }
-                    write!(stdout, "\n")?;
                 }
+                write!(stdout, "\n")?;
                 Status::Complete(0.into()).into()
             } else if command == "false" {
                 // false is explicitly non-zero
@@ -1189,6 +1190,37 @@ mod test {
                     SpawnEntry::new(vec!["uppercase".into()]),
                 ],
                 "A\n".to_owned(),
+                "".to_owned(),
+            )
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_glob() -> Fallible<()> {
+        assert_eq!(
+            run_with_log_and_output(compile("echo **/*.rs")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec![
+                    "echo".into(),
+                    // This test is sensitive to the names of the files
+                    // in this shell_compiler crate!
+                    OsString::from("src/lib.rs").into(),
+                    OsString::from("src/registeralloc.rs").into(),
+                ]),],
+                "src/lib.rs src/registeralloc.rs\n".to_owned(),
+                "".to_owned(),
+            )
+        );
+
+        // Don't expand globs in single quotes
+        assert_eq!(
+            run_with_log_and_output(compile("echo '**/*.rs'")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec!["echo".into(), "**/*.rs".into(),]),],
+                "**/*.rs\n".to_owned(),
                 "".to_owned(),
             )
         );

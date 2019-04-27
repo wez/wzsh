@@ -475,8 +475,8 @@ impl Dispatch for ListAppend {
     fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
         let ifs = machine.ifs()?.to_owned();
         let src = machine.operand(&self.value)?.clone();
-        let list = match machine.operand_mut(&self.list)? {
-            Value::List(dest) => dest,
+        let mut list = match machine.operand_mut(&self.list)? {
+            Value::List(dest) => std::mem::replace(dest, Vec::new()),
             _ => bail!("cannot ListAppend to non-list"),
         };
 
@@ -484,14 +484,15 @@ impl Dispatch for ListAppend {
             match src {
                 Value::String(src) => {
                     for word in split_by_ifs(&src, &ifs) {
-                        Machine::push_with_glob(list, self.glob, word.into());
+                        machine.push_with_glob(&mut list, self.glob, word.into())?;
                     }
                 }
-                _ => Machine::push_with_glob(list, self.glob, src),
+                _ => machine.push_with_glob(&mut list, self.glob, src)?,
             };
         } else {
-            Machine::push_with_glob(list, self.glob, src);
+            machine.push_with_glob(&mut list, self.glob, src)?;
         }
+        *machine.operand_mut(&self.list)? = list.into();
         Ok(Status::Running)
     }
 }

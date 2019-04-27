@@ -3,6 +3,7 @@ use failure::{bail, err_msg, format_err, Fallible};
 use filedescriptor::FileDescriptor;
 use std::collections::VecDeque;
 use std::ffi::{OsStr, OsString};
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -334,9 +335,50 @@ impl Machine {
         Ok(self.operand(operand)?.truthy())
     }
 
-    fn push_with_glob(list: &mut Vec<Value>, _glob: bool, v: Value) {
-        // FIXME: implement glob.  We need to lookup the cwd for correctness.
-        list.push(v);
+    fn push_with_glob(&self, list: &mut Vec<Value>, glob: bool, v: Value) -> Fallible<()> {
+        if glob && contains_glob_specials(&v) {
+            let pattern = v
+                .as_str()
+                .ok_or_else(|| err_msg("contains_glob_specials returned true for non String?"))?;
+            let walker = globwalk::GlobWalkerBuilder::new(&self.cwd, pattern)
+                .follow_links(true)
+                .sort_by(|a, b| a.path().cmp(b.path()))
+                .build()?;
+            for item in walker {
+                match item {
+                    Ok(entry) => {
+                        // The paths are absolute paths; let's try to relativize
+                        // them against the cwd, both to make the paths shorter
+                        // and to match convention.  This has the nice side effect
+                        // of making it easier to encode paths in tests, too.
+                        let path = entry.into_path();
+                        let path = match path.strip_prefix(&self.cwd) {
+                            Ok(relative) => relative.to_path_buf(),
+                            Err(_) => path,
+                        };
+                        list.push(path.into_os_string().into())
+                    }
+                    Err(err) => write!(self.io_env()?.stderr(), "{}", err)?,
+                }
+            }
+        } else {
+            list.push(v);
+        }
+        Ok(())
+    }
+}
+
+fn contains_glob_specials(v: &Value) -> bool {
+    match v.as_str() {
+        Some(s) => {
+            for c in s.chars() {
+                if c == '*' || c == '[' || c == '{' || c == '\\' {
+                    return true;
+                }
+            }
+            false
+        }
+        _ => false,
     }
 }
 
