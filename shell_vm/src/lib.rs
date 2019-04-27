@@ -215,6 +215,10 @@ impl Machine {
         })
     }
 
+    pub fn top_environment(&self) -> (PathBuf, Environment) {
+        (self.cwd.clone(), self.environment.front().unwrap().clone())
+    }
+
     pub fn set_host(&mut self, host: Arc<ShellHost>) {
         self.host = Some(host)
     }

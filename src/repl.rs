@@ -1,13 +1,22 @@
-use failure::{Error, Fail, Fallible};
+use failure::{bail, Error, Fail, Fallible};
 use rustyline::completion::{Completer, FilenameCompleter, Pair};
 use rustyline::error::ReadlineError;
 use rustyline::highlight::Highlighter;
 use rustyline::hint::Hinter;
 use rustyline::{Config, Editor, Helper};
+use shell_compiler::Compiler;
+use shell_lexer::{LexError, LexErrorKind};
+use shell_parser::{ParseErrorKind, Parser};
+use shell_vm::{
+    Environment, IoEnvironment, Machine, Program, ShellHost, Status, Value, WaitableStatus,
+};
 use std::borrow::Cow;
+use std::ffi::OsString;
+use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::errorprint::print_error;
-use crate::job::put_shell_in_foreground;
+//use crate::job::put_shell_in_foreground;
 
 struct LineEditorHelper {
     completer: FilenameCompleter,
@@ -61,6 +70,8 @@ fn is_recoverable_parse_error(e: &Error) -> bool {
             | LexErrorKind::EofDuringComment
             | LexErrorKind::EofDuringSingleQuotedString
             | LexErrorKind::EofDuringDoubleQuotedString
+            | LexErrorKind::EofDuringAssignmentWord
+            | LexErrorKind::EofDuringCommandSubstitution
             | LexErrorKind::EofDuringParameterExpansion => true,
             LexErrorKind::IoError => false,
         }
@@ -115,7 +126,52 @@ fn init_job_control() -> Fallible<()> {
     Ok(())
 }
 
-pub fn repl(mut env: ExecutionEnvironment, expander: ShellExpander) -> Fallible<()> {
+#[derive(Debug)]
+struct Host {}
+
+impl ShellHost for Host {
+    fn lookup_homedir(&self, user: Option<&str>) -> Fallible<OsString> {
+        bail!("lookup_homedir not implemented");
+    }
+    fn spawn_command(
+        &self,
+        argv: &Vec<Value>,
+        environment: &mut Environment,
+        current_directory: &mut PathBuf,
+        io_env: &IoEnvironment,
+    ) -> Fallible<WaitableStatus> {
+        bail!("spawn_command not implemented");
+    }
+}
+
+struct EnvBits {
+    cwd: PathBuf,
+    env: Environment,
+}
+
+fn compile_and_run(prog: &str, env_bits: &mut EnvBits) -> Fallible<Status> {
+    let mut parser = Parser::new(prog.as_bytes());
+    let command = parser.parse()?;
+    let mut compiler = Compiler::new();
+    compiler.compile_command(&command)?;
+    let prog = compiler.finish()?;
+    let mut machine = Machine::new(&Program::new(prog), Some(env_bits.env.clone()))?;
+    machine.set_host(Arc::new(Host {}));
+    let status = machine.run();
+
+    let (cwd, env) = machine.top_environment();
+    env_bits.cwd = cwd;
+    env_bits.env = env;
+
+    status
+}
+
+pub fn repl() -> Fallible<()> {
+    let mut env = EnvBits {
+        cwd: std::env::current_dir()?,
+        env: Environment::new(),
+    };
+
     init_job_control()?;
 
     let config = Config::builder().history_ignore_space(true).build();
@@ -127,23 +183,21 @@ pub fn repl(mut env: ExecutionEnvironment, expander: ShellExpander) -> Fallible<
     rl.load_history("history.txt").ok();
 
     let mut input = String::new();
-    let mut last_status = ExitStatus::new_ok();
 
     loop {
-        let prompt = match (input.is_empty(), last_status) {
-            (true, st) if !st.is_ok() => format!("[{}] $ ", st),
-            (true, _) => "$ ".to_owned(),
-            (false, _) => "..> ".to_owned(),
+        let prompt = match input.is_empty() {
+            true => "$ ".to_owned(),
+            false => "..> ".to_owned(),
         };
 
-        env.job_list().check_and_print_status();
+        // env.job_list().check_and_print_status();
 
         // A little bit gross, but the FilenameCompleter implementation
         // uses the process-wide current working dir, so we need to be
         // sure to sync that up with the top level environment in order
         // for tab completion to work as the user expects.
-        if std::env::current_dir()?.as_path() != &*env.cwd() {
-            std::env::set_current_dir(&*env.cwd())?;
+        if std::env::current_dir()?.as_path() != env.cwd {
+            std::env::set_current_dir(&env.cwd)?;
         }
 
         let readline = rl.readline(&prompt);
@@ -153,49 +207,23 @@ pub fn repl(mut env: ExecutionEnvironment, expander: ShellExpander) -> Fallible<
 
                 input.push_str(&line);
 
-                let mut parser = Parser::new("stdin", input.as_bytes());
-                let list = match parser.parse() {
+                let status = match compile_and_run(&input, &mut env) {
                     Err(e) => {
                         if !is_recoverable_parse_error(&e) {
                             print_error(&e, &input);
                             input.clear();
-                            last_status = ExitStatus::new_fail();
                         } else {
                             input.push('\n');
                         }
                         continue;
                     }
-                    Ok(list) => {
+                    Ok(command) => {
                         input.clear();
-                        list
+                        command
                     }
                 };
-                last_status = match env.eval(&expander, &list, None) {
-                    Err(e) => {
-                        print_error(&e, &input);
-                        ExitStatus::new_fail()
-                    }
-                    Ok(mut job) => {
-                        if job.is_background() {
-                            ExitStatus::new_ok()
-                        } else {
-                            job.put_in_foreground()?;
-                            let status;
-                            loop {
-                                status = match job.wait() {
-                                    Err(e) => {
-                                        print_error(&e, "");
-                                        continue;
-                                    }
-                                    Ok(status) => status,
-                                };
-                                break;
-                            }
-                            status
-                        }
-                    }
-                };
-                put_shell_in_foreground();
+
+                // put_shell_in_foreground();
             }
             Err(ReadlineError::Interrupted) => {
                 input.clear();

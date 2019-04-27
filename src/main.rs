@@ -8,10 +8,9 @@ mod errorprint;
 //mod job;
 //mod parse;
 //mod pathsearch;
-//mod repl;
+mod repl;
 //mod vm;
 
 fn main() -> Fallible<()> {
-    Ok(())
-    //repl(env, expander)
+    repl::repl()
 }
