@@ -347,7 +347,7 @@ mod test {
     }
 
     fn machine(ops: &[Operation]) -> Machine {
-        Machine::new(&prog(ops)).unwrap()
+        Machine::new(&prog(ops), None).unwrap()
     }
 
     fn run_err(m: &mut Machine) -> String {
@@ -368,13 +368,13 @@ mod test {
         let mut m = machine(&[Operation::Exit(Exit {
             value: Operand::FrameRelative(0),
         })]);
-        assert_eq!(run_err(&mut m), "no frame?");
+        assert_eq!(run_err(&mut m), "PC=0: no frame?");
     }
 
     #[test]
     fn test_pop_too_many_frames() {
         let mut m = machine(&[Operation::PopFrame(PopFrame {})]);
-        assert_eq!(run_err(&mut m), "frame underflow");
+        assert_eq!(run_err(&mut m), "PC=0: frame underflow");
     }
 
     #[test]
@@ -385,7 +385,7 @@ mod test {
                 value: Operand::FrameRelative(0),
             }),
         ]);
-        assert_eq!(run_err(&mut m), "FrameRelative offset out of range");
+        assert_eq!(run_err(&mut m), "PC=1: FrameRelative offset out of range");
     }
 
     #[test]
@@ -396,7 +396,7 @@ mod test {
         })]);
         assert_eq!(
             run_err(&mut m),
-            "cannot mutably reference an Immediate operand"
+            "PC=0: cannot mutably reference an Immediate operand"
         );
     }
 
