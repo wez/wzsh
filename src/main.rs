@@ -7,7 +7,7 @@ mod errorprint;
 //mod expander;
 //mod job;
 //mod parse;
-//mod pathsearch;
+mod pathsearch;
 mod repl;
 
 fn main() -> Fallible<()> {

@@ -1,5 +1,5 @@
 use failure::Fallible;
-use shlex::Environment;
+use shell_vm::Environment;
 use std::ffi::{OsStr, OsString};
 #[cfg(unix)]
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
