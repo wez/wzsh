@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 use failure::{bail, err_msg, format_err, Fallible};
+use filedescriptor::FileDescriptor;
 use std::collections::VecDeque;
 use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
@@ -35,6 +36,14 @@ impl Value {
         }
     }
 
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            Value::String(s) => Some(s.as_ref()),
+            Value::OsString(s) => s.to_str(),
+            _ => None,
+        }
+    }
+
     pub fn truthy(&self) -> bool {
         match self {
             Value::None => false,
@@ -45,14 +54,7 @@ impl Value {
             Value::WaitableStatus(status) => {
                 match status.poll() {
                     // Invert for the program return code: 0 is success
-                    Some(Status::Complete(value)) => {
-                        eprintln!(
-                            "wait status {:?}, truthy is {}, invert it",
-                            value,
-                            value.truthy()
-                        );
-                        !value.truthy()
-                    }
+                    Some(Status::Complete(value)) => !value.truthy(),
                     _ => false,
                 }
             }
@@ -142,6 +144,7 @@ pub struct Machine {
     io_env: VecDeque<IoEnvironment>,
     cwd: PathBuf,
     host: Option<Arc<ShellHost>>,
+    pipes: VecDeque<FileDescriptor>,
 
     program: Arc<Program>,
     program_counter: usize,

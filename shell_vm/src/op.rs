@@ -159,12 +159,26 @@ op!(
     PushFrame { size: usize },
     /// Pop the current frame
     PopFrame {},
+    /// Duplicate the current IO environment and push it onto
+    /// the IO environment stack.
     PushIo {},
+    /// Pop the top of the IO environment stack
     PopIo {},
+    /// Create a pair of connected pipes and assign the writable
+    /// end as stdout in the current IO environment, and push
+    /// the readable end on to the pipe stack.
+    PushPipe {},
+    /// Pop the most recently pushed readable pipe end off the
+    /// pipe stack and assign it as stdin in the current IO
+    /// environment
+    PopPipe {},
+    /// Duplicate the src_fd number as dest_fd in the current
+    /// IO environment.
     DupFd {
         src_fd: usize,
         dest_fd: usize,
     },
+    /// Open a file and assign it as fd_number in the current IO environment
     OpenFile {
         /// The file to open.  Can either be an immediate string
         /// value, or a list.  If a list, only a list with a single
@@ -228,7 +242,9 @@ op!(
     },
     /// Wait for the status of a WaitableStatus to change.
     /// This calls WaitableStatus::wait and may be subject to spurious wakeups.
-    Wait { status: Operand }
+    Wait { status: Operand },
+    /// Invert the truthiness of the last wait status
+    InvertLastWait {},
 );
 
 impl Dispatch for Copy {
@@ -278,6 +294,26 @@ impl Dispatch for PopEnvironment {
             .environment
             .pop_back()
             .ok_or_else(|| err_msg("environment underflow"))?;
+        Ok(Status::Running)
+    }
+}
+
+impl Dispatch for PushPipe {
+    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+        let pipe = FileDescriptor::pipe()?;
+        machine.io_env_mut()?.assign_fd(1, pipe.write);
+        machine.pipes.push_back(pipe.read);
+        Ok(Status::Running)
+    }
+}
+
+impl Dispatch for PopPipe {
+    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+        let stdin = machine
+            .pipes
+            .pop_back()
+            .ok_or_else(|| err_msg("pipe stack underflow"))?;
+        machine.io_env_mut()?.assign_fd(0, stdin);
         Ok(Status::Running)
     }
 }
@@ -661,6 +697,28 @@ impl Dispatch for Wait {
                 Ok(Status::Running)
             }
         }
+    }
+}
+
+impl Dispatch for InvertLastWait {
+    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+        let inverted_status = match machine.last_wait_status.take() {
+            Some(value) => {
+                if value.truthy() {
+                    1
+                } else {
+                    0
+                }
+            }
+            status => bail!(
+                "InvertLastWait used on invalid LastWaitStatus value {:?}",
+                status
+            ),
+        };
+        machine.last_wait_status = Some(Value::WaitableStatus(
+            Status::Complete(inverted_status.into()).into(),
+        ));
+        Ok(Status::Running)
     }
 }
 

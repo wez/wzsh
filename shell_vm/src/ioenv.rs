@@ -18,6 +18,12 @@ pub struct Readable {
     fd: Arc<Mutex<FileDescriptor>>,
 }
 
+impl Readable {
+    pub fn dup(&self) -> Fallible<FileDescriptor> {
+        self.fd.lock().unwrap().clone()
+    }
+}
+
 impl std::io::Read for Readable {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, std::io::Error> {
         self.fd.lock().unwrap().read(buf)
@@ -26,6 +32,12 @@ impl std::io::Read for Readable {
 
 pub struct Writable {
     fd: Arc<Mutex<FileDescriptor>>,
+}
+
+impl Writable {
+    pub fn dup(&self) -> Fallible<FileDescriptor> {
+        self.fd.lock().unwrap().clone()
+    }
 }
 
 impl std::io::Write for Writable {

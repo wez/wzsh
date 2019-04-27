@@ -3,7 +3,9 @@ use failure::{bail, err_msg, Fallible};
 use shell_lexer::{Assignment, ParamExpr, ParamOper, WordComponent, WordComponentKind};
 use shell_parser::{Command, CommandType, CompoundList, Redirection};
 pub use shell_vm::*;
+use std::cell::Cell;
 use std::collections::VecDeque;
+use std::thread::JoinHandle;
 
 mod registeralloc;
 use registeralloc::RegisterAllocator;
@@ -536,6 +538,35 @@ impl Compiler {
             CommandType::Program(list) | CommandType::BraceGroup(list) => {
                 self.compound_list(list)?;
             }
+            CommandType::Pipeline(pipeline) => {
+                let num_commands = pipeline.commands.len();
+                if num_commands <= 1 {
+                    // Nothing to pipe together, so just emit the command
+                    for cmd in &pipeline.commands {
+                        self.compile_command(&cmd)?;
+                    }
+                } else {
+                    for (i, cmd) in pipeline.commands.iter().enumerate() {
+                        self.push(op::PushIo {});
+                        let first = i == 0;
+                        if !first {
+                            // Connect the read pipe from the prior iteration
+                            self.push(op::PopPipe {});
+                        }
+                        let last = i == num_commands - 1;
+                        if !last {
+                            // Set up the write pipe for the next iteration
+                            self.push(op::PushPipe {});
+                        }
+                        self.compile_command(cmd)?;
+                        self.push(op::PopIo {});
+                    }
+                }
+
+                if pipeline.inverted {
+                    self.push(op::InvertLastWait {});
+                }
+            }
             _ => bail!("unhandled command type: {:?}", command),
         };
 
@@ -559,7 +590,7 @@ mod test {
     use pretty_assertions::assert_eq;
     use shell_parser::Parser;
     use std::ffi::{OsStr, OsString};
-    use std::io::Read;
+    use std::io::{Read, Write};
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
 
@@ -592,6 +623,71 @@ mod test {
         spawn_log: Arc<Mutex<Vec<SpawnEntry>>>,
     }
 
+    #[derive(Debug)]
+    enum ThreadState {
+        Running(JoinHandle<isize>),
+        Done(isize),
+    }
+
+    struct ThreadStatus {
+        state: Cell<ThreadState>,
+    }
+
+    impl std::fmt::Debug for ThreadStatus {
+        fn fmt(&self, _fmt: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+            Ok(())
+        }
+    }
+
+    impl ThreadStatus {
+        pub fn new(handle: JoinHandle<isize>) -> ThreadStatus {
+            Self {
+                state: Cell::new(ThreadState::Running(handle)),
+            }
+        }
+    }
+
+    impl WaitForStatus for ThreadStatus {
+        fn wait(&self) -> Option<Status> {
+            let state = self.state.replace(ThreadState::Done(10));
+            let state = match state {
+                ThreadState::Running(thread) => thread.join().unwrap(),
+                ThreadState::Done(state) => state,
+            };
+            self.state.set(ThreadState::Done(state));
+            Some(Status::Complete(state.into()))
+        }
+
+        // We don't support non-blocking here
+        fn poll(&self) -> Option<Status> {
+            self.wait()
+        }
+    }
+
+    impl From<ThreadStatus> for WaitableStatus {
+        fn from(status: ThreadStatus) -> WaitableStatus {
+            WaitableStatus::new(Arc::new(status))
+        }
+    }
+
+    fn uppercase(mut stdin: FileDescriptor, mut stdout: FileDescriptor) -> isize {
+        loop {
+            let mut buf = [0u8; 1024];
+            match stdin.read(&mut buf) {
+                Ok(0) => return 0,
+                Ok(n) => {
+                    for c in &mut buf[..n] {
+                        c.make_ascii_uppercase();
+                    }
+                    if stdout.write(&buf[..n]).is_err() {
+                        return 1;
+                    }
+                }
+                _ => return 1,
+            }
+        }
+    }
+
     impl ShellHost for TestHost {
         fn lookup_homedir(&self, user: Option<&str>) -> Fallible<OsString> {
             Ok(match user {
@@ -607,7 +703,7 @@ mod test {
             argv: &Vec<Value>,
             environment: &mut Environment,
             current_directory: &mut PathBuf,
-            _io_env: &IoEnvironment,
+            io_env: &IoEnvironment,
         ) -> Fallible<WaitableStatus> {
             let mut log = self.spawn_log.lock().unwrap();
 
@@ -616,14 +712,33 @@ mod test {
                 .ok_or_else(|| err_msg("argv0 is missing"))?
                 .as_os_str()
                 .ok_or_else(|| err_msg("argv0 is not a string"))?;
-            let status = if command == "true" || command == "echo" {
-                0
+            let status: WaitableStatus = if command == "true" {
+                Status::Complete(0.into()).into()
+            } else if command == "echo" {
+                // Trivial and basic inline `echo` implementation
+                let mut stdout = io_env.stdout();
+                for (i, arg) in argv.iter().skip(1).enumerate() {
+                    if i > 0 {
+                        write!(stdout, " ")?;
+                    }
+                    if let Some(s) = arg.as_str() {
+                        write!(stdout, "{}", s)?;
+                    }
+                    write!(stdout, "\n")?;
+                }
+                Status::Complete(0.into()).into()
             } else if command == "false" {
                 // false is explicitly non-zero
-                1
+                Status::Complete(1.into()).into()
+            } else if command == "uppercase" {
+                // A simple filter that uppercases stdint and emits it
+                // to stdout; this helps to test pipelines
+                let stdin = io_env.stdin().dup()?;
+                let stdout = io_env.stdout().dup()?;
+                ThreadStatus::new(std::thread::spawn(move || uppercase(stdin, stdout))).into()
             } else {
                 // Anything else we don't recognize is an error
-                2
+                Status::Complete(2.into()).into()
             };
 
             log.push(SpawnEntry {
@@ -631,7 +746,7 @@ mod test {
                 environment: environment.clone(),
                 current_directory: current_directory.clone(),
             });
-            Ok(Status::Complete(status.into()).into())
+            Ok(status)
         }
     }
 
@@ -658,18 +773,8 @@ mod test {
     }
 
     fn run_with_log(prog: Vec<Operation>) -> Fallible<(Status, Vec<SpawnEntry>)> {
-        print_prog(&prog);
-        let mut machine = Machine::new(&Program::new(prog), Some(Environment::new_empty()))?;
-
-        let host = TestHost::default();
-        let log = Arc::clone(&host.spawn_log);
-        machine.set_host(Arc::new(host));
-        let status = machine.run()?;
-        let log = {
-            let locked = log.lock().unwrap();
-            locked.clone()
-        };
-        Ok((status, log))
+        let (status, logs, _out, _err) = run_with_log_and_output(prog)?;
+        Ok((status, logs))
     }
 
     fn consume_pipe(mut fd: FileDescriptor) -> Fallible<String> {
@@ -1056,6 +1161,35 @@ mod test {
                     SpawnEntry::new(vec!["true".into()]),
                     SpawnEntry::new(vec!["false".into()]),
                 ]
+            )
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_simple_inverted_pipeline() -> Fallible<()> {
+        assert_eq!(
+            run_with_log(compile("! true")?)?,
+            (
+                Status::Complete(1.into()),
+                vec![SpawnEntry::new(vec!["true".into()]),]
+            )
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_pipeline() -> Fallible<()> {
+        assert_eq!(
+            run_with_log_and_output(compile("echo a | uppercase")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![
+                    SpawnEntry::new(vec!["echo".into(), "a".into()]),
+                    SpawnEntry::new(vec!["uppercase".into()]),
+                ],
+                "A\n".to_owned(),
+                "".to_owned(),
             )
         );
         Ok(())
