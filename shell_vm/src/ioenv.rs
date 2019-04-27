@@ -94,4 +94,12 @@ impl IoEnvironment {
         self.fds.insert(dest_fd, Arc::clone(fd));
         Ok(())
     }
+
+    pub fn fd_as_stdio(&self, fd_number: usize) -> Fallible<std::process::Stdio> {
+        let fd = self
+            .fds
+            .get(&fd_number)
+            .ok_or_else(|| format_err!("fd_as_stdio: fd {} not present", fd_number))?;
+        fd.lock().unwrap().as_stdio()
+    }
 }

@@ -1,5 +1,7 @@
 use failure::{err_msg, Fail, Fallible};
+use shell_vm::{Status, WaitForStatus};
 use std::borrow::Cow;
+use std::cell::RefCell;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum ExitStatus {
@@ -7,6 +9,15 @@ pub enum ExitStatus {
     Stopped,
     ExitCode(i32),
     Signalled(i32),
+}
+
+impl ExitStatus {
+    pub fn terminated(&self) -> bool {
+        match self {
+            ExitStatus::ExitCode(_) | ExitStatus::Signalled(_) => true,
+            ExitStatus::Stopped | ExitStatus::Running => false,
+        }
+    }
 }
 
 impl From<std::process::ExitStatus> for ExitStatus {
@@ -17,6 +28,17 @@ impl From<std::process::ExitStatus> for ExitStatus {
             ExitStatus::ExitCode(0)
         } else {
             ExitStatus::ExitCode(1)
+        }
+    }
+}
+
+impl From<ExitStatus> for Status {
+    fn from(status: ExitStatus) -> Status {
+        match status {
+            ExitStatus::Running => Status::Running,
+            ExitStatus::Stopped => Status::Stopped,
+            ExitStatus::ExitCode(n) => Status::Complete((n as isize).into()),
+            ExitStatus::Signalled(n) => Status::Complete((128 + n as isize).into()),
         }
     }
 }
@@ -64,32 +86,7 @@ impl std::fmt::Display for ExitStatus {
 #[derive(Debug)]
 pub struct UnixChild {
     pid: libc::pid_t,
-    final_status: Option<ExitStatus>,
-}
-
-pub enum WaitableExitStatus {
-    Child(std::process::Child),
-    UnixChild(UnixChild),
-    Done(ExitStatus),
-}
-
-impl std::fmt::Debug for WaitableExitStatus {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
-        match self {
-            WaitableExitStatus::Child(ref child) => fmt
-                .debug_struct("WaitableExitStatus::Child")
-                .field("pid", &child.id())
-                .finish(),
-            WaitableExitStatus::UnixChild(ref child) => fmt
-                .debug_struct("WaitableExitStatus::UnixChild")
-                .field("child", child)
-                .finish(),
-            WaitableExitStatus::Done(status) => fmt
-                .debug_struct("WaitableExitStatus::Done")
-                .field("code", &status)
-                .finish(),
-        }
-    }
+    final_status: RefCell<Option<ExitStatus>>,
 }
 
 #[cfg(unix)]
@@ -98,9 +95,17 @@ impl UnixChild {
         self.pid
     }
 
-    fn wait(&mut self, blocking: bool) -> Fallible<Option<ExitStatus>> {
-        if let Some(status) = self.final_status {
-            return Ok(Some(status));
+    pub fn new(child: std::process::Child) -> Self {
+        let pid = child.id() as _;
+        Self {
+            pid,
+            final_status: RefCell::new(None),
+        }
+    }
+
+    fn wait(&self, blocking: bool) -> Option<ExitStatus> {
+        if let Some(status) = &*self.final_status.borrow() {
+            return Some(*status);
         }
         unsafe {
             let mut status = 0i32;
@@ -111,10 +116,14 @@ impl UnixChild {
             );
             if res != self.pid {
                 if !blocking {
-                    return Ok(None);
+                    return None;
                 }
                 let err = std::io::Error::last_os_error();
-                return Err(err.context(format!("waiting for child pid {}", self.pid)))?;
+                eprintln!("error waiting for child pid {} {}", self.pid, err);
+
+                let status = ExitStatus::ExitCode(1);
+                *self.final_status.borrow_mut() = Some(status);
+                return Some(status);
             }
 
             let status = if libc::WIFSTOPPED(status) {
@@ -128,100 +137,20 @@ impl UnixChild {
             };
 
             if status.terminated() {
-                self.final_status = Some(status);
+                *self.final_status.borrow_mut() = Some(status);
             }
 
-            Ok(Some(status))
+            Some(status)
         }
     }
 }
 
-fn wait_child(child: &mut std::process::Child, blocking: bool) -> Fallible<Option<ExitStatus>> {
-    let pid = child.id();
-    let res = if blocking {
-        child.wait().map(|s| Some(s.into()))
-    } else {
-        child.try_wait().map(|s| match s {
-            Some(s) => Some(s.into()),
-            None => None,
-        })
-    };
-    res.map_err(|e| e.context(format!("waiting for child pid {}", pid)).into())
-}
-
-impl WaitableExitStatus {
-    #[cfg(unix)]
-    pub fn with_child(child: std::process::Child) -> Self {
-        WaitableExitStatus::UnixChild(UnixChild {
-            pid: child.id() as _,
-            final_status: None,
-        })
+#[cfg(unix)]
+impl WaitForStatus for UnixChild {
+    fn wait(&self) -> Option<Status> {
+        UnixChild::wait(self, true).map(Into::into)
     }
-
-    #[cfg(not(unix))]
-    pub fn with_child(child: std::process::Child) -> Self {
-        WaitableExitStatus::Child(child)
-    }
-
-    pub fn wait(&mut self) -> Fallible<ExitStatus> {
-        match self {
-            WaitableExitStatus::Child(ref mut child) => {
-                let status = wait_child(child, true)?
-                    .ok_or_else(|| err_msg("wait_child returned None in blocking mode"))?;
-                Ok(status.into())
-            }
-            WaitableExitStatus::UnixChild(ref mut child) => {
-                let status = child
-                    .wait(true)?
-                    .ok_or_else(|| err_msg("wait_child returned None in blocking mode"))?;
-                Ok(status.into())
-            }
-            WaitableExitStatus::Done(status) => Ok(*status),
-        }
-    }
-
-    pub fn try_wait(&mut self) -> Fallible<Option<ExitStatus>> {
-        match self {
-            WaitableExitStatus::Child(ref mut child) => {
-                let status = wait_child(child, false)?;
-                Ok(status.into())
-            }
-            WaitableExitStatus::UnixChild(ref mut child) => {
-                let status = child.wait(false)?;
-                Ok(status.into())
-            }
-            WaitableExitStatus::Done(status) => Ok(Some(*status)),
-        }
-    }
-}
-
-impl ExitStatus {
-    pub fn new_ok() -> Self {
-        ExitStatus::ExitCode(0)
-    }
-    pub fn new_fail() -> Self {
-        ExitStatus::ExitCode(1)
-    }
-
-    pub fn is_ok(&self) -> bool {
-        match self {
-            ExitStatus::ExitCode(0) => true,
-            _ => false,
-        }
-    }
-
-    pub fn terminated(&self) -> bool {
-        match self {
-            ExitStatus::ExitCode(_) | ExitStatus::Signalled(_) => true,
-            ExitStatus::Stopped | ExitStatus::Running => false,
-        }
-    }
-
-    pub fn invert(&self) -> ExitStatus {
-        match self {
-            ExitStatus::ExitCode(0) => ExitStatus::ExitCode(1),
-            ExitStatus::ExitCode(_) | ExitStatus::Signalled(_) => ExitStatus::ExitCode(0),
-            _ => ExitStatus::ExitCode(1),
-        }
+    fn poll(&self) -> Option<Status> {
+        UnixChild::wait(self, false).map(Into::into)
     }
 }

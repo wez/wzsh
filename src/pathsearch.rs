@@ -61,7 +61,7 @@ impl<'a> UnixPathSearcher<'a> {
     /// Create a new UnixPathSearcher that will yield candidate paths for
     /// the specified command
     #[allow(dead_code)]
-    pub fn new<T: AsRef<OsStr>>(command: &'a T, env: &'a Environment) -> Self {
+    pub fn new<T: AsRef<OsStr> + ?Sized>(command: &'a T, env: &'a Environment) -> Self {
         let path = env.get("PATH").unwrap_or_else(|| OsStr::new(""));
         let path_iter = std::env::split_paths(path);
         let command = command.as_ref();
@@ -109,7 +109,7 @@ pub struct WindowsPathSearcher<'a> {
 
 impl<'a> WindowsPathSearcher<'a> {
     #[allow(dead_code)]
-    pub fn new<T: AsRef<OsStr>>(command: &'a T, env: &'a Environment) -> Self {
+    pub fn new<T: AsRef<OsStr> + ?Sized>(command: &'a T, env: &'a Environment) -> Self {
         let path = env.get("PATH").unwrap_or_else(|| OsStr::new(""));
         let path_ext = env.get("PATHEXT").unwrap_or_else(|| OsStr::new(".EXE"));
         let path_iter = std::env::split_paths(path);
