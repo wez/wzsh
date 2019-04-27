@@ -9,7 +9,6 @@ mod errorprint;
 //mod parse;
 //mod pathsearch;
 mod repl;
-//mod vm;
 
 fn main() -> Fallible<()> {
     repl::repl()
