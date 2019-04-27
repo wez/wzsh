@@ -335,7 +335,13 @@ impl Machine {
         Ok(self.operand(operand)?.truthy())
     }
 
-    fn push_with_glob(&self, list: &mut Vec<Value>, glob: bool, v: Value) -> Fallible<()> {
+    fn push_with_glob(
+        &self,
+        list: &mut Vec<Value>,
+        glob: bool,
+        remove_backslash: bool,
+        v: Value,
+    ) -> Fallible<()> {
         if glob && contains_glob_specials(&v) {
             let pattern = v
                 .as_str()
@@ -362,7 +368,14 @@ impl Machine {
                 }
             }
         } else {
-            list.push(v);
+            match (remove_backslash, v.as_str()) {
+                (true, Some(s)) => {
+                    let mut string = s.to_owned();
+                    string.retain(|c| c != '\\');
+                    list.push(string.into());
+                }
+                _ => list.push(v),
+            }
         }
         Ok(())
     }
@@ -372,7 +385,7 @@ fn contains_glob_specials(v: &Value) -> bool {
     match v.as_str() {
         Some(s) => {
             for c in s.chars() {
-                if c == '*' || c == '[' || c == '{' || c == '\\' {
+                if c == '*' || c == '[' || c == '{' {
                     return true;
                 }
             }

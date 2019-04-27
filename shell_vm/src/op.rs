@@ -103,6 +103,7 @@ op!(
         list: Operand,
         split: bool,
         glob: bool,
+        remove_backslash: bool,
     },
     /// Insert the source value to the destination list
     /// at the specified index.
@@ -484,13 +485,18 @@ impl Dispatch for ListAppend {
             match src {
                 Value::String(src) => {
                     for word in split_by_ifs(&src, &ifs) {
-                        machine.push_with_glob(&mut list, self.glob, word.into())?;
+                        machine.push_with_glob(
+                            &mut list,
+                            self.glob,
+                            self.remove_backslash,
+                            word.into(),
+                        )?;
                     }
                 }
-                _ => machine.push_with_glob(&mut list, self.glob, src)?,
+                _ => machine.push_with_glob(&mut list, self.glob, self.remove_backslash, src)?,
             };
         } else {
-            machine.push_with_glob(&mut list, self.glob, src)?;
+            machine.push_with_glob(&mut list, self.glob, self.remove_backslash, src)?;
         }
         *machine.operand_mut(&self.list)? = list.into();
         Ok(Status::Running)

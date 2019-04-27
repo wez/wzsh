@@ -364,16 +364,20 @@ impl Compiler {
     fn word_expand(&mut self, argv: usize, word: &Vec<WordComponent>) -> Fallible<()> {
         let expanded_word = self.allocate_string()?;
 
-        // TODO: field splitting, backslashes
         let mut split = true;
+        let mut remove_backslash = true;
         for component in word {
             if !component.splittable {
                 split = false;
             }
             match &component.kind {
                 WordComponentKind::Literal(literal) => {
+                    if !component.remove_backslash {
+                        remove_backslash = false;
+                    }
+                    let literal = literal.to_owned();
                     self.push(op::StringAppend {
-                        source: Operand::Immediate(Value::String(literal.to_owned())),
+                        source: Operand::Immediate(Value::String(literal)),
                         destination: Operand::FrameRelative(expanded_word),
                     });
                 }
@@ -411,6 +415,7 @@ impl Compiler {
             list: Operand::FrameRelative(argv),
             split,
             glob,
+            remove_backslash,
         });
 
         self.frame()?.free(expanded_word);
@@ -840,6 +845,7 @@ mod test {
                     list: Operand::FrameRelative(1),
                     split: true,
                     glob: true,
+                    remove_backslash: true,
                 }),
                 Operation::Copy(op::Copy {
                     source: Operand::Immediate("".into()),
@@ -854,6 +860,7 @@ mod test {
                     list: Operand::FrameRelative(1),
                     split: true,
                     glob: true,
+                    remove_backslash: true,
                 }),
                 op::SpawnCommand {
                     argv: Operand::FrameRelative(1),
@@ -1221,6 +1228,40 @@ mod test {
                 Status::Complete(0.into()),
                 vec![SpawnEntry::new(vec!["echo".into(), "**/*.rs".into(),]),],
                 "**/*.rs\n".to_owned(),
+                "".to_owned(),
+            )
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_backslash() -> Fallible<()> {
+        assert_eq!(
+            run_with_log_and_output(compile("echo fo\\o")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec!["echo".into(), "foo".into(),]),],
+                "foo\n".to_owned(),
+                "".to_owned(),
+            )
+        );
+
+        assert_eq!(
+            run_with_log_and_output(compile("echo 'fo\\o'")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec!["echo".into(), "fo\\o".into(),]),],
+                "fo\\o\n".to_owned(),
+                "".to_owned(),
+            )
+        );
+
+        assert_eq!(
+            run_with_log_and_output(compile("echo \\**/*.rs")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec!["echo".into(),]),],
+                "\n".to_owned(),
                 "".to_owned(),
             )
         );
