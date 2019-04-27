@@ -56,7 +56,6 @@ impl<R: Read> CharReader<R> {
         &mut self,
         matcher: &LiteralMatcher<T>,
     ) -> Fallible<MatchResult<T>> {
-        eprintln!("matches_literal called, {:?}", self);
         match self.check_and_fill_buffer() {
             Next::Eof(_) => Ok(MatchResult::No),
             Next::Error(err, pos) => return Err(err.context(pos).into()),
@@ -68,11 +67,9 @@ impl<R: Read> CharReader<R> {
         &mut self,
         matcher: &LiteralMatcher<T>,
     ) -> Fallible<Option<(T, Span)>> {
-        eprintln!("next_literal called, {:?}", self);
         match self.matches_literal(matcher)? {
             MatchResult::No => Ok(None),
             MatchResult::Match(value, len) => {
-                eprintln!("adjusting by len={}", len);
                 self.line_idx += len;
                 let start = self.position;
                 let end = Pos::new(start.line, start.col + len - 1);
@@ -181,7 +178,6 @@ impl<R: Read> CharReader<R> {
     }
 
     pub fn next_char(&mut self) -> Next {
-        eprintln!("calling next_char {:?}", self);
         match self.check_and_fill_buffer() {
             fail @ Next::Eof(..) | fail @ Next::Error(..) => return fail,
             _ => {}
