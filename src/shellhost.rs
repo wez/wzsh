@@ -146,6 +146,6 @@ impl ShellHost for Host {
         } else {
             writeln!(io_env.stderr(), "wzsh: {:?} not found", &argv[0])?;
         }
-        Ok(Status::Complete(1.into()).into())
+        Ok(Status::Complete(127.into()).into())
     }
 }
