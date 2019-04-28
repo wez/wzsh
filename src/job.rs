@@ -19,6 +19,13 @@ pub fn make_own_process_group(pid: i32) {
     }
 }
 
+pub fn add_to_process_group(pid: i32, process_group_id: i32) {
+    #[cfg(unix)]
+    unsafe {
+        libc::setpgid(pid, process_group_id);
+    }
+}
+
 pub fn make_foreground_process_group(pid: i32) {
     make_own_process_group(pid);
     #[cfg(unix)]

@@ -1,4 +1,8 @@
+use crate::errorprint::print_error;
 use crate::exitstatus::UnixChild;
+use crate::job::{
+    add_to_process_group, make_foreground_process_group, put_shell_in_foreground, Job, JobList,
+};
 use crate::pathsearch::PathSearcher;
 use failure::{bail, err_msg, format_err, Error, Fail, Fallible};
 use rustyline::completion::{Completer, FilenameCompleter, Pair};
@@ -15,10 +19,7 @@ use shell_vm::{
 use std::borrow::Cow;
 use std::ffi::OsString;
 use std::path::PathBuf;
-use std::sync::Arc;
-
-use crate::errorprint::print_error;
-use crate::job::put_shell_in_foreground;
+use std::sync::{Arc, Mutex};
 
 struct LineEditorHelper {
     completer: FilenameCompleter,
@@ -129,7 +130,9 @@ fn init_job_control() -> Fallible<()> {
 }
 
 #[derive(Debug)]
-struct Host {}
+struct Host {
+    job: Mutex<Job>,
+}
 
 impl ShellHost for Host {
     fn lookup_homedir(&self, user: Option<&str>) -> Fallible<OsString> {
@@ -178,13 +181,65 @@ impl ShellHost for Host {
                 child_cmd.stdout(io_env.fd_as_stdio(1)?);
                 child_cmd.stderr(io_env.fd_as_stdio(2)?);
 
-                // TODO: job control setup in the child here
+                let process_group_id = self.job.lock().unwrap().process_group_id();
+
+                #[cfg(unix)]
+                unsafe {
+                    use std::os::unix::process::CommandExt;
+                    child_cmd.pre_exec(move || {
+                        let pid = libc::getpid();
+                        if process_group_id == 0 {
+                            /*
+                            if asynchronous {
+                                make_own_process_group(pid);
+                            } else {
+                            */
+                            make_foreground_process_group(pid);
+                        } else {
+                            add_to_process_group(pid, process_group_id);
+                        }
+                        for s in &[
+                            libc::SIGINT,
+                            libc::SIGQUIT,
+                            libc::SIGTSTP,
+                            libc::SIGTTIN,
+                            libc::SIGTTOU,
+                            libc::SIGCHLD,
+                        ] {
+                            libc::signal(*s, libc::SIG_DFL);
+                        }
+
+                        Ok(())
+                    });
+                }
 
                 let child = child_cmd.spawn()?;
 
-                // TODO: job control setup in the parent here
+                let child = UnixChild::new(child);
 
-                return Ok(WaitableStatus::new(Arc::new(UnixChild::new(child))));
+                // To avoid a race condition with starting up the child, we
+                // need to also munge the process group assignment here in
+                // the parent.  Note that the loser of the race will experience
+                // errors in attempting this block, so we willfully ignore
+                // the return values here: we cannot do anything about them.
+                #[cfg(unix)]
+                {
+                    let pid = child.pid();
+                    if process_group_id == 0 {
+                        /*
+                        if asynchronous {
+                            make_own_process_group(pid);
+                        } else {
+                        */
+                        make_foreground_process_group(pid);
+                    } else {
+                        add_to_process_group(pid, process_group_id);
+                    }
+                }
+
+                self.job.lock().unwrap().add(child.clone())?;
+
+                return Ok(WaitableStatus::new(Arc::new(child)));
             }
         }
 
@@ -195,16 +250,18 @@ impl ShellHost for Host {
 struct EnvBits {
     cwd: PathBuf,
     env: Environment,
+    jobs: JobList,
 }
 
 fn compile_and_run(prog: &str, env_bits: &mut EnvBits) -> Fallible<Status> {
+    let job = Mutex::new(Job::new_empty(prog.to_owned()));
     let mut parser = Parser::new(prog.as_bytes());
     let command = parser.parse()?;
     let mut compiler = Compiler::new();
     compiler.compile_command(&command)?;
     let prog = compiler.finish()?;
     let mut machine = Machine::new(&Program::new(prog), Some(env_bits.env.clone()))?;
-    machine.set_host(Arc::new(Host {}));
+    machine.set_host(Arc::new(Host { job }));
     let status = machine.run();
 
     let (cwd, env) = machine.top_environment();
@@ -218,6 +275,7 @@ pub fn repl() -> Fallible<()> {
     let mut env = EnvBits {
         cwd: std::env::current_dir()?,
         env: Environment::new(),
+        jobs: JobList::default(),
     };
 
     init_job_control()?;
