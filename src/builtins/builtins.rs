@@ -1,7 +1,8 @@
 use crate::builtins::Builtin;
-use crate::execenv::ExecutionEnvironment;
-use crate::exitstatus::ExitStatus;
 use failure::Fallible;
+use shell_vm::{Environment, IoEnvironment, Status, WaitableStatus};
+use std::io::Write;
+use std::path::PathBuf;
 use structopt::*;
 
 #[derive(Debug, StructOpt)]
@@ -12,12 +13,17 @@ impl Builtin for BuiltinsCommand {
         "builtins"
     }
 
-    fn run(&mut self, exe: &ExecutionEnvironment) -> Fallible<ExitStatus> {
+    fn run(
+        &mut self,
+        _environment: &mut Environment,
+        _current_directory: &mut PathBuf,
+        io_env: &IoEnvironment,
+    ) -> Fallible<WaitableStatus> {
         let mut builtins: Vec<&'static str> = super::BUILTINS.iter().map(|(k, _)| *k).collect();
         builtins.sort_unstable();
         for k in builtins {
-            writeln!(exe.stdout(), "{}", k)?;
+            writeln!(io_env.stdout(), "{}", k)?;
         }
-        Ok(ExitStatus::ExitCode(0))
+        Ok(Status::Complete(0.into()).into())
     }
 }

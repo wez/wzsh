@@ -1,7 +1,8 @@
+use crate::builtins::lookup_builtin;
 use crate::errorprint::print_error;
 use crate::exitstatus::UnixChild;
 use crate::job::{
-    add_to_process_group, make_foreground_process_group, put_shell_in_foreground, Job, JobList,
+    add_to_process_group, make_foreground_process_group, put_shell_in_foreground, Job, JOB_LIST,
 };
 use crate::pathsearch::PathSearcher;
 use failure::{bail, err_msg, format_err, Error, Fail, Fallible};
@@ -136,7 +137,7 @@ struct Host {
 }
 
 impl ShellHost for Host {
-    fn lookup_homedir(&self, user: Option<&str>) -> Fallible<OsString> {
+    fn lookup_homedir(&self, _user: Option<&str>) -> Fallible<OsString> {
         bail!("lookup_homedir not implemented");
     }
     fn spawn_command(
@@ -157,6 +158,12 @@ impl ShellHost for Host {
         } else {
             (true, true, &argv[..])
         };
+
+        if search_builtin {
+            if let Some(builtin) = lookup_builtin(&argv[0]) {
+                return builtin(&argv[..], environment, current_directory, io_env);
+            }
+        }
 
         if search_path {
             if let Some(exe) = PathSearcher::new(
@@ -193,7 +200,7 @@ impl ShellHost for Host {
                             /*
                             if asynchronous {
                                 make_own_process_group(pid);
-                            } else {
+                            } else {}
                             */
                             make_foreground_process_group(pid);
                         } else {
@@ -230,7 +237,7 @@ impl ShellHost for Host {
                         /*
                         if asynchronous {
                             make_own_process_group(pid);
-                        } else {
+                        } else {}
                         */
                         make_foreground_process_group(pid);
                     } else {
@@ -239,6 +246,10 @@ impl ShellHost for Host {
                 }
 
                 self.job.lock().unwrap().add(child.clone())?;
+
+                if process_group_id == 0 {
+                    JOB_LIST.add(self.job.lock().unwrap().clone());
+                }
 
                 return Ok(WaitableStatus::new(Arc::new(child)));
             }
@@ -256,7 +267,6 @@ impl ShellHost for Host {
 struct EnvBits {
     cwd: PathBuf,
     env: Environment,
-    jobs: JobList,
 }
 
 fn compile_and_run(prog: &str, env_bits: &mut EnvBits) -> Fallible<Status> {
@@ -281,7 +291,6 @@ pub fn repl() -> Fallible<()> {
     let mut env = EnvBits {
         cwd: std::env::current_dir()?,
         env: Environment::new(),
-        jobs: JobList::default(),
     };
 
     init_job_control()?;
@@ -302,7 +311,7 @@ pub fn repl() -> Fallible<()> {
             false => "..> ".to_owned(),
         };
 
-        // env.job_list().check_and_print_status();
+        JOB_LIST.check_and_print_status();
 
         // A little bit gross, but the FilenameCompleter implementation
         // uses the process-wide current working dir, so we need to be
@@ -319,7 +328,7 @@ pub fn repl() -> Fallible<()> {
 
                 input.push_str(&line);
 
-                let status = match compile_and_run(&input, &mut env) {
+                let _status = match compile_and_run(&input, &mut env) {
                     Err(e) => {
                         if !is_recoverable_parse_error(&e) {
                             print_error(&e, &input);

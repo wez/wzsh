@@ -1,8 +1,13 @@
 use crate::exitstatus::UnixChild;
 use failure::{Fail, Fallible};
+use lazy_static::lazy_static;
 use shell_vm::{Status, WaitForStatus};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+
+lazy_static! {
+    pub static ref JOB_LIST: JobList = JobList::default();
+}
 
 pub fn put_shell_in_foreground() {
     unsafe {
@@ -153,7 +158,7 @@ impl JobList {
         let mut jobs = self.jobs.lock().unwrap();
         let mut terminated = vec![];
         for (id, job) in jobs.iter_mut() {
-            if let Some(Status::Complete(status)) = job.poll() {
+            if let Some(Status::Complete(_status)) = job.poll() {
                 /* FIXME: only print if it wasn't the most recent fg command
                 if job.is_background() {
                     eprintln!("[{}] - {} {}", id, status, job);

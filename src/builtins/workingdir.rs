@@ -1,7 +1,7 @@
 use crate::builtins::Builtin;
-use crate::execenv::ExecutionEnvironment;
-use crate::exitstatus::ExitStatus;
 use failure::{err_msg, Fallible};
+use shell_vm::{Environment, IoEnvironment, Status, WaitableStatus};
+use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use structopt::*;
 
@@ -23,14 +23,19 @@ impl Builtin for PwdCommand {
         "pwd"
     }
 
-    fn run(&mut self, exe: &ExecutionEnvironment) -> Fallible<ExitStatus> {
+    fn run(
+        &mut self,
+        _environment: &mut Environment,
+        current_directory: &mut PathBuf,
+        io_env: &IoEnvironment,
+    ) -> Fallible<WaitableStatus> {
         let pwd = if self.physical {
-            exe.cwd().canonicalize()?
+            current_directory.canonicalize()?
         } else {
-            exe.cwd().to_path_buf()
+            current_directory.clone()
         };
-        writeln!(exe.stdout(), "{}", pwd.display())?;
-        Ok(ExitStatus::ExitCode(0))
+        writeln!(io_env.stdout(), "{}", pwd.display())?;
+        Ok(Status::Complete(0.into()).into())
     }
 }
 
@@ -92,15 +97,20 @@ impl Builtin for CdCommand {
         "cd"
     }
 
-    fn run(&mut self, exe: &ExecutionEnvironment) -> Fallible<ExitStatus> {
+    fn run(
+        &mut self,
+        environment: &mut Environment,
+        current_directory: &mut PathBuf,
+        io_env: &IoEnvironment,
+    ) -> Fallible<WaitableStatus> {
         let directory = match self.directory.take() {
             Some(dir) => dir,
             None => {
-                if let Some(home) = exe.env().get("HOME") {
+                if let Some(home) = environment.get("HOME") {
                     PathBuf::from(home)
                 } else {
-                    writeln!(exe.stderr(), "$HOME is not set")?;
-                    return Ok(ExitStatus::ExitCode(1));
+                    writeln!(io_env.stderr(), "$HOME is not set")?;
+                    return Ok(Status::Complete(1.into()).into());
                 }
             }
         };
@@ -112,28 +122,28 @@ impl Builtin for CdCommand {
         } else if directory == Path::new("-") {
             print = true;
             PathBuf::from(
-                exe.env()
+                environment
                     .get("OLDPWD")
                     .ok_or_else(|| err_msg("OLDPWD is not set"))?,
             )
         } else {
-            exe.cwd().join(directory)
+            current_directory.join(directory)
         };
 
         let cwd = canonicalize_path(curpath, self.physical)?;
         if !cwd.is_dir() {
             writeln!(
-                exe.stderr(),
+                io_env.stderr(),
                 "wzsh: cd: {} is not a directory",
                 cwd.display()
             )?;
-            return Ok(ExitStatus::ExitCode(1));
+            return Ok(Status::Complete(1.into()).into());
         }
 
-        exe.chdir(cwd.clone());
+        *current_directory = cwd.clone();
         if print {
-            writeln!(exe.stdout(), "{}", cwd.display())?;
+            writeln!(io_env.stdout(), "{}", cwd.display())?;
         }
-        Ok(ExitStatus::ExitCode(0))
+        return Ok(Status::Complete(0.into()).into());
     }
 }

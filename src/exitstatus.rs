@@ -1,4 +1,3 @@
-use failure::{err_msg, Fail, Fallible};
 use shell_vm::{Status, WaitForStatus};
 use std::borrow::Cow;
 use std::sync::{Arc, Mutex};

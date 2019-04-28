@@ -1,8 +1,8 @@
 use crate::builtins::Builtin;
-use crate::execenv::ExecutionEnvironment;
-use crate::exitstatus::ExitStatus;
 use crate::pathsearch::PathSearcher;
 use failure::Fallible;
+use shell_vm::{Environment, IoEnvironment, Status, WaitableStatus};
+use std::io::Write;
 use std::path::PathBuf;
 use structopt::*;
 
@@ -24,15 +24,20 @@ impl Builtin for WhichCommand {
         "which"
     }
 
-    fn run(&mut self, exe: &ExecutionEnvironment) -> Fallible<ExitStatus> {
+    fn run(
+        &mut self,
+        environment: &mut Environment,
+        _current_directory: &mut PathBuf,
+        io_env: &IoEnvironment,
+    ) -> Fallible<WaitableStatus> {
         let mut found = false;
-        for path in PathSearcher::new(&self.command, &*exe.env()) {
+        for path in PathSearcher::new(&self.command, environment) {
             found = true;
-            writeln!(exe.stdout(), "{}", path.display())?;
+            writeln!(io_env.stdout(), "{}", path.display())?;
             if !self.all {
                 break;
             }
         }
-        Ok(ExitStatus::ExitCode(if found { 0 } else { 1 }))
+        Ok(Status::Complete(if found { 0 } else { 1 }.into()).into())
     }
 }

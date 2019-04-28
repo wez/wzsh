@@ -1,7 +1,7 @@
 use crate::builtins::Builtin;
-use crate::execenv::ExecutionEnvironment;
-use crate::exitstatus::ExitStatus;
 use failure::Fallible;
+use shell_vm::{Environment, IoEnvironment, Status, WaitableStatus};
+use std::path::PathBuf;
 use structopt::*;
 
 #[derive(StructOpt)]
@@ -13,8 +13,13 @@ impl Builtin for TrueCommand {
         "true"
     }
 
-    fn run(&mut self, _exe: &ExecutionEnvironment) -> Fallible<ExitStatus> {
-        Ok(ExitStatus::ExitCode(0))
+    fn run(
+        &mut self,
+        _environment: &mut Environment,
+        _current_directory: &mut PathBuf,
+        _io_env: &IoEnvironment,
+    ) -> Fallible<WaitableStatus> {
+        Ok(Status::Complete(0.into()).into())
     }
 }
 
@@ -27,7 +32,12 @@ impl Builtin for FalseCommand {
         "false"
     }
 
-    fn run(&mut self, _exe: &ExecutionEnvironment) -> Fallible<ExitStatus> {
-        Ok(ExitStatus::ExitCode(1))
+    fn run(
+        &mut self,
+        _environment: &mut Environment,
+        _current_directory: &mut PathBuf,
+        _io_env: &IoEnvironment,
+    ) -> Fallible<WaitableStatus> {
+        Ok(Status::Complete(1.into()).into())
     }
 }

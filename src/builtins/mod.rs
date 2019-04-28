@@ -1,9 +1,8 @@
-use crate::execenv::ExecutionEnvironment;
-use crate::exitstatus::ExitStatus;
-use failure::Fallible;
+use failure::{err_msg, Fallible};
 use lazy_static::lazy_static;
-use shlex::string::ShellString;
+use shell_vm::{Environment, IoEnvironment, Value, WaitableStatus};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use structopt::*;
 
 mod builtins;
@@ -14,7 +13,12 @@ mod which;
 mod workingdir;
 
 pub trait Builtin: StructOpt {
-    fn eval(argv: Vec<ShellString>, exe: &ExecutionEnvironment) -> Fallible<ExitStatus>
+    fn eval(
+        argv: &[Value],
+        environment: &mut Environment,
+        current_directory: &mut PathBuf,
+        io_env: &IoEnvironment,
+    ) -> Fallible<WaitableStatus>
     where
         Self: Sized,
     {
@@ -22,22 +26,39 @@ pub trait Builtin: StructOpt {
             .global_setting(structopt::clap::AppSettings::ColoredHelp)
             .global_setting(structopt::clap::AppSettings::DisableVersion)
             .name(Self::name());
-        let mut args = Self::from_clap(&app.get_matches_from_safe(argv.iter())?);
-        args.run(exe)
+        let mut os_args = vec![];
+        for arg in argv {
+            os_args.push(
+                arg.as_os_str()
+                    .ok_or_else(|| err_msg("argument is not representable as osstr"))?,
+            );
+        }
+        let mut args = Self::from_clap(&app.get_matches_from_safe(os_args.iter())?);
+        args.run(environment, current_directory, io_env)
     }
 
     fn name() -> &'static str;
 
-    fn run(&mut self, exe: &ExecutionEnvironment) -> Fallible<ExitStatus>;
+    fn run(
+        &mut self,
+        environment: &mut Environment,
+        current_directory: &mut PathBuf,
+        io_env: &IoEnvironment,
+    ) -> Fallible<WaitableStatus>;
 }
 
-pub type BuiltinFunc =
-    fn(argv: Vec<ShellString>, exe: &ExecutionEnvironment) -> Fallible<ExitStatus>;
+pub type BuiltinFunc = fn(
+    argv: &[Value],
+    environment: &mut Environment,
+    current_directory: &mut PathBuf,
+    io_env: &IoEnvironment,
+) -> Fallible<WaitableStatus>;
 
-pub fn lookup_builtin(name: &ShellString) -> Option<BuiltinFunc> {
-    match &name {
-        ShellString::String(s) => BUILTINS.get(s.as_str()).map(|f| *f),
-        _ => None,
+pub fn lookup_builtin(name: &Value) -> Option<BuiltinFunc> {
+    if let Some(s) = name.as_str() {
+        BUILTINS.get(s).map(|f| *f)
+    } else {
+        None
     }
 }
 

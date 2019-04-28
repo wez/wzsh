@@ -1,7 +1,9 @@
 use crate::builtins::Builtin;
-use crate::execenv::ExecutionEnvironment;
-use crate::exitstatus::ExitStatus;
-use failure::Fallible;
+use crate::job::JOB_LIST;
+use failure::{err_msg, Fallible};
+use shell_vm::{Environment, IoEnvironment, Status, WaitableStatus};
+use std::io::Write;
+use std::path::PathBuf;
 use structopt::*;
 
 #[derive(Debug, StructOpt)]
@@ -12,22 +14,33 @@ impl Builtin for FgCommand {
         "fg"
     }
 
-    fn run(&mut self, exe: &ExecutionEnvironment) -> Fallible<ExitStatus> {
-        let mut jobs = exe.job_list().jobs();
+    fn run(
+        &mut self,
+        _environment: &mut Environment,
+        _current_directory: &mut PathBuf,
+        io_env: &IoEnvironment,
+    ) -> Fallible<WaitableStatus> {
+        let mut jobs = JOB_LIST.jobs();
         if let Some(mut job) = jobs.pop() {
             writeln!(
-                exe.stderr(),
+                io_env.stderr(),
                 "wzsh: putting [{}] {} into fg",
                 job.process_group_id(),
                 job
             )?;
             job.put_in_foreground()?;
-            let status = job.wait()?;
-            writeln!(exe.stderr(), "wzsh: after fg, wait returned {}", status)?;
-            Ok(ExitStatus::ExitCode(0))
+            let status = job
+                .wait()
+                .ok_or_else(|| err_msg("job.wait returned None?"))?;
+            writeln!(
+                io_env.stderr(),
+                "wzsh: after fg, wait returned {:?}",
+                status
+            )?;
+            Ok(Status::Complete(0.into()).into())
         } else {
-            writeln!(exe.stderr(), "wzsh: fg: no jobs to put in foreground")?;
-            Ok(ExitStatus::ExitCode(1))
+            writeln!(io_env.stderr(), "wzsh: fg: no jobs to put in foreground")?;
+            Ok(Status::Complete(1.into()).into())
         }
     }
 }
@@ -40,26 +53,30 @@ impl Builtin for JobsCommand {
         "jobs"
     }
 
-    fn run(&mut self, exe: &ExecutionEnvironment) -> Fallible<ExitStatus> {
-        let mut jobs = exe.job_list().jobs();
+    fn run(
+        &mut self,
+        _environment: &mut Environment,
+        _current_directory: &mut PathBuf,
+        io_env: &IoEnvironment,
+    ) -> Fallible<WaitableStatus> {
+        let mut jobs = JOB_LIST.jobs();
         for job in &mut jobs {
-            match job.try_wait() {
-                Ok(Some(status)) => writeln!(
-                    exe.stdout(),
-                    "[{}] - {} {}",
+            match job.poll() {
+                Some(status) => writeln!(
+                    io_env.stdout(),
+                    "[{}] - {:?} {}",
                     job.process_group_id(),
                     status,
                     job
                 )?,
-                Ok(None) => writeln!(
-                    exe.stdout(),
+                None => writeln!(
+                    io_env.stdout(),
                     "[{}] - <nochange> {}", // TODO: be smarter about stopped status
                     job.process_group_id(),
                     job
                 )?,
-                Err(e) => writeln!(exe.stderr(), "wzsh: wait failed for job {}", e)?,
             }
         }
-        Ok(ExitStatus::ExitCode(0))
+        Ok(Status::Complete(0.into()).into())
     }
 }

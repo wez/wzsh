@@ -1,7 +1,7 @@
 use crate::builtins::Builtin;
-use crate::execenv::ExecutionEnvironment;
-use crate::exitstatus::ExitStatus;
 use failure::Fallible;
+use shell_vm::{Environment, IoEnvironment, Status, WaitableStatus};
+use std::path::PathBuf;
 use structopt::*;
 
 #[derive(StructOpt)]
@@ -14,7 +14,12 @@ impl Builtin for ColonCommand {
         ":"
     }
 
-    fn run(&mut self, _exe: &ExecutionEnvironment) -> Fallible<ExitStatus> {
-        Ok(ExitStatus::ExitCode(0))
+    fn run(
+        &mut self,
+        _environment: &mut Environment,
+        _current_directory: &mut PathBuf,
+        _io_env: &IoEnvironment,
+    ) -> Fallible<WaitableStatus> {
+        Ok(Status::Complete(0.into()).into())
     }
 }

@@ -1,6 +1,6 @@
 use failure::Fallible;
 
-//mod builtins;
+mod builtins;
 mod errorprint;
 //mod execenv;
 mod exitstatus;
