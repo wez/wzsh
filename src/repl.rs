@@ -18,6 +18,7 @@ use shell_vm::{
 };
 use std::borrow::Cow;
 use std::ffi::OsString;
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -243,7 +244,12 @@ impl ShellHost for Host {
             }
         }
 
-        bail!("spawn_command not implemented");
+        if let Some(s) = argv[0].as_str() {
+            writeln!(io_env.stderr(), "wzsh: {} not found", s)?;
+        } else {
+            writeln!(io_env.stderr(), "wzsh: {:?} not found", &argv[0])?;
+        }
+        Ok(Status::Complete(1.into()).into())
     }
 }
 

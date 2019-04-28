@@ -1,4 +1,4 @@
-use crate::exitstatus::{ExitStatus, UnixChild};
+use crate::exitstatus::UnixChild;
 use failure::{Fail, Fallible};
 use shell_vm::{Status, WaitForStatus};
 use std::collections::HashMap;
