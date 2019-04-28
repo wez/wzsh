@@ -85,13 +85,13 @@ impl std::fmt::Display for ExitStatus {
 #[derive(Debug)]
 struct UnixChildInner {
     pid: libc::pid_t,
-    final_status: Option<ExitStatus>,
+    last_status: ExitStatus,
 }
 
 impl UnixChildInner {
     fn wait(&mut self, blocking: bool) -> Option<ExitStatus> {
-        if let Some(status) = self.final_status {
-            return Some(status);
+        if self.last_status.terminated() {
+            return Some(self.last_status);
         }
         unsafe {
             let mut status = 0i32;
@@ -102,13 +102,13 @@ impl UnixChildInner {
             );
             if res != self.pid {
                 if !blocking {
-                    return None;
+                    return Some(self.last_status);
                 }
                 let err = std::io::Error::last_os_error();
                 eprintln!("error waiting for child pid {} {}", self.pid, err);
 
                 let status = ExitStatus::ExitCode(1);
-                self.final_status = Some(status);
+                self.last_status = status;
                 return Some(status);
             }
 
@@ -122,10 +122,7 @@ impl UnixChildInner {
                 ExitStatus::Running
             };
 
-            if status.terminated() {
-                self.final_status = Some(status);
-            }
-
+            self.last_status = status;
             Some(status)
         }
     }
@@ -147,7 +144,7 @@ impl UnixChild {
         Self {
             inner: Arc::new(Mutex::new(UnixChildInner {
                 pid,
-                final_status: None,
+                last_status: ExitStatus::Running,
             })),
         }
     }
