@@ -7,6 +7,7 @@ use structopt::*;
 
 mod builtins;
 mod colon;
+mod env;
 mod jobcontrol;
 mod truefalse;
 mod which;
@@ -84,6 +85,7 @@ lazy_static! {
         builtins!(
             builtins::BuiltinsCommand,
             colon::ColonCommand,
+            env::UnsetCommand,
             jobcontrol::FgCommand,
             jobcontrol::JobsCommand,
             truefalse::FalseCommand,
