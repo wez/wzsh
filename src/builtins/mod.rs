@@ -12,6 +12,8 @@ mod truefalse;
 mod which;
 mod workingdir;
 
+/// The `Builtin` trait extends `StructOpt` by adding `name` and `run`
+/// methods that allow registering a command with the shell.
 pub trait Builtin: StructOpt {
     fn eval(
         argv: &[Value],
@@ -80,15 +82,15 @@ lazy_static! {
         }
 
         builtins!(
-            jobcontrol::JobsCommand,
+            builtins::BuiltinsCommand,
+            colon::ColonCommand,
             jobcontrol::FgCommand,
+            jobcontrol::JobsCommand,
+            truefalse::FalseCommand,
+            truefalse::TrueCommand,
+            which::WhichCommand,
             workingdir::CdCommand,
             workingdir::PwdCommand,
-            colon::ColonCommand,
-            truefalse::TrueCommand,
-            truefalse::FalseCommand,
-            builtins::BuiltinsCommand,
-            which::WhichCommand,
         );
 
         builtins
