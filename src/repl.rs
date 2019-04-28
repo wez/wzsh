@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::errorprint::print_error;
-//use crate::job::put_shell_in_foreground;
+use crate::job::put_shell_in_foreground;
 
 struct LineEditorHelper {
     completer: FilenameCompleter,
@@ -271,7 +271,7 @@ pub fn repl() -> Fallible<()> {
                     }
                 };
 
-                // put_shell_in_foreground();
+                put_shell_in_foreground();
             }
             Err(ReadlineError::Interrupted) => {
                 input.clear();

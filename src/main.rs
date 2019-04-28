@@ -4,7 +4,7 @@ use failure::Fallible;
 mod errorprint;
 //mod execenv;
 mod exitstatus;
-//mod job;
+mod job;
 mod pathsearch;
 mod repl;
 

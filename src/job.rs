@@ -1,6 +1,6 @@
-use crate::exitstatus::{ExitStatus, WaitableExitStatus};
-use crate::parse::Command;
+use crate::exitstatus::{ExitStatus, UnixChild};
 use failure::{Fail, Fallible};
+use shell_vm::{Status, WaitForStatus};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -43,7 +43,7 @@ fn send_cont(pid: libc::pid_t) -> Fallible<()> {
 
 #[derive(Debug)]
 struct Inner {
-    processes: Vec<WaitableExitStatus>,
+    processes: Vec<UnixChild>,
     process_group_id: libc::pid_t,
     label: String,
 }
@@ -66,22 +66,18 @@ impl std::fmt::Display for Job {
 }
 
 impl Job {
-    pub fn new_empty(cmd: &Command) -> Self {
+    pub fn new_empty(label: String) -> Self {
         Self {
             inner: Arc::new(Mutex::new(Inner {
                 processes: vec![],
                 process_group_id: 0,
-                label: format!("{}", cmd),
+                label,
             })),
         }
     }
 
-    pub fn add(&mut self, proc: WaitableExitStatus) -> Fallible<()> {
-        let process_group_id = match &proc {
-            WaitableExitStatus::Child(ref proc) => proc.id() as _,
-            WaitableExitStatus::UnixChild(ref proc) => proc.pid(),
-            WaitableExitStatus::Done(_) => 0,
-        };
+    pub fn add(&mut self, proc: UnixChild) -> Fallible<()> {
+        let process_group_id = proc.pid();
 
         let mut inner = self.inner.lock().unwrap();
         if inner.process_group_id == 0 {
@@ -123,17 +119,13 @@ impl Job {
         Ok(())
     }
 
-    pub fn unwrap_or_create(job: Option<Job>, cmd: &Command) -> Job {
-        job.unwrap_or_else(|| Job::new_empty(cmd))
-    }
-
-    pub fn wait(&mut self) -> Fallible<ExitStatus> {
+    pub fn wait(&mut self) -> Option<Status> {
         let mut inner = self.inner.lock().unwrap();
         inner.processes.last_mut().unwrap().wait()
     }
-    pub fn try_wait(&mut self) -> Fallible<Option<ExitStatus>> {
+    pub fn poll(&mut self) -> Option<Status> {
         let mut inner = self.inner.lock().unwrap();
-        inner.processes.last_mut().unwrap().try_wait()
+        inner.processes.last_mut().unwrap().poll()
     }
 }
 
@@ -154,19 +146,13 @@ impl JobList {
         let mut jobs = self.jobs.lock().unwrap();
         let mut terminated = vec![];
         for (id, job) in jobs.iter_mut() {
-            match job.try_wait() {
-                Ok(Some(status)) => {
-                    /* FIXME: only print if it wasn't the most recent fg command
-                    if job.is_background() {
-                        eprintln!("[{}] - {} {}", id, status, job);
-                    }
-                    */
-                    if status.terminated() {
-                        terminated.push(*id);
-                    }
+            if let Some(Status::Complete(status)) = job.poll() {
+                /* FIXME: only print if it wasn't the most recent fg command
+                if job.is_background() {
+                    eprintln!("[{}] - {} {}", id, status, job);
                 }
-                Ok(_) => {}
-                Err(e) => eprintln!("wzsh: wait failed for job {} {}", id, e),
+                */
+                terminated.push(*id);
             }
         }
 

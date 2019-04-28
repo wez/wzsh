@@ -1,7 +1,7 @@
 use failure::{err_msg, Fail, Fallible};
 use shell_vm::{Status, WaitForStatus};
 use std::borrow::Cow;
-use std::cell::RefCell;
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum ExitStatus {
@@ -84,28 +84,15 @@ impl std::fmt::Display for ExitStatus {
 }
 
 #[derive(Debug)]
-pub struct UnixChild {
+struct UnixChildInner {
     pid: libc::pid_t,
-    final_status: RefCell<Option<ExitStatus>>,
+    final_status: Option<ExitStatus>,
 }
 
-#[cfg(unix)]
-impl UnixChild {
-    pub fn pid(&self) -> libc::pid_t {
-        self.pid
-    }
-
-    pub fn new(child: std::process::Child) -> Self {
-        let pid = child.id() as _;
-        Self {
-            pid,
-            final_status: RefCell::new(None),
-        }
-    }
-
-    fn wait(&self, blocking: bool) -> Option<ExitStatus> {
-        if let Some(status) = &*self.final_status.borrow() {
-            return Some(*status);
+impl UnixChildInner {
+    fn wait(&mut self, blocking: bool) -> Option<ExitStatus> {
+        if let Some(status) = self.final_status {
+            return Some(status);
         }
         unsafe {
             let mut status = 0i32;
@@ -122,7 +109,7 @@ impl UnixChild {
                 eprintln!("error waiting for child pid {} {}", self.pid, err);
 
                 let status = ExitStatus::ExitCode(1);
-                *self.final_status.borrow_mut() = Some(status);
+                self.final_status = Some(status);
                 return Some(status);
             }
 
@@ -137,11 +124,37 @@ impl UnixChild {
             };
 
             if status.terminated() {
-                *self.final_status.borrow_mut() = Some(status);
+                self.final_status = Some(status);
             }
 
             Some(status)
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct UnixChild {
+    inner: Arc<Mutex<UnixChildInner>>,
+}
+
+#[cfg(unix)]
+impl UnixChild {
+    pub fn pid(&self) -> libc::pid_t {
+        self.inner.lock().unwrap().pid
+    }
+
+    pub fn new(child: std::process::Child) -> Self {
+        let pid = child.id() as _;
+        Self {
+            inner: Arc::new(Mutex::new(UnixChildInner {
+                pid,
+                final_status: None,
+            })),
+        }
+    }
+
+    fn wait(&self, blocking: bool) -> Option<ExitStatus> {
+        self.inner.lock().unwrap().wait(blocking)
     }
 }
 
