@@ -10,11 +10,11 @@ use structopt::*;
 pub struct PwdCommand {
     /// Display the logical current working directory.
     /// This is the default behavior.
-    #[structopt(short = "L", conflicts_with = "physical")]
+    #[structopt(short = "L", overrides_with = "physical")]
     logical: bool,
 
     /// Display the physical current working directory (all symbolic links resolved).
-    #[structopt(short = "P", conflicts_with = "logical")]
+    #[structopt(short = "P", overrides_with = "logical")]
     physical: bool,
 }
 
@@ -45,11 +45,11 @@ impl Builtin for PwdCommand {
 /// The cd utility changes the working directory of the current shell environment.
 pub struct CdCommand {
     /// Handle the operand dot-dot logically; symbolic link components shall not be resolved before dot-dot components are processed
-    #[structopt(short = "L", conflicts_with = "physical")]
+    #[structopt(short = "L", overrides_with = "physical")]
     logical: bool,
 
     /// Handle the operand dot-dot physically; symbolic link components shall be resolved before dot-dot components are processed
-    #[structopt(short = "P", conflicts_with = "logical")]
+    #[structopt(short = "P", overrides_with = "logical")]
     physical: bool,
 
     /// The destination directory
