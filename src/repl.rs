@@ -5,7 +5,7 @@ use failure::{Error, Fail, Fallible};
 use rustyline::completion::{Completer, FilenameCompleter, Pair};
 use rustyline::error::ReadlineError;
 use rustyline::highlight::Highlighter;
-use rustyline::hint::Hinter;
+use rustyline::hint::{Hinter, HistoryHinter};
 use rustyline::{Config, Editor, Helper};
 use shell_compiler::Compiler;
 use shell_lexer::{LexError, LexErrorKind};
@@ -17,23 +17,25 @@ use std::sync::Arc;
 
 struct LineEditorHelper {
     completer: FilenameCompleter,
+    hinter: HistoryHinter,
 }
 
 impl Completer for LineEditorHelper {
     type Candidate = Pair;
 
-    fn complete(&self, line: &str, pos: usize) -> Result<(usize, Vec<Pair>), ReadlineError> {
-        self.completer.complete(line, pos)
+    fn complete(
+        &self,
+        line: &str,
+        pos: usize,
+        ctx: &rustyline::Context<'_>,
+    ) -> Result<(usize, Vec<Pair>), ReadlineError> {
+        self.completer.complete(line, pos, ctx)
     }
 }
 
 impl Hinter for LineEditorHelper {
-    fn hint(&self, line: &str, _pos: usize) -> Option<String> {
-        if line == "ls" {
-            Some(" -l".to_owned())
-        } else {
-            None
-        }
+    fn hint(&self, line: &str, pos: usize, ctx: &rustyline::Context<'_>) -> Option<String> {
+        self.hinter.hint(line, pos, ctx)
     }
 }
 
@@ -159,6 +161,7 @@ pub fn repl() -> Fallible<()> {
     let mut rl = Editor::with_config(config);
     rl.set_helper(Some(LineEditorHelper {
         completer: FilenameCompleter::new(),
+        hinter: HistoryHinter {},
     }));
     rl.load_history("history.txt").ok();
 
