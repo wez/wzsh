@@ -2,7 +2,7 @@ use crate::builtins::lookup_builtin;
 use crate::exitstatus::UnixChild;
 use crate::job::{add_to_process_group, make_foreground_process_group, Job, JOB_LIST};
 use crate::pathsearch::PathSearcher;
-use failure::{bail, err_msg, format_err, Fallible};
+use failure::{bail, err_msg, format_err, Fallible, ResultExt};
 use shell_vm::{Environment, IoEnvironment, ShellHost, Status, Value, WaitableStatus};
 use std::ffi::OsString;
 use std::io::Write;
@@ -107,7 +107,7 @@ impl ShellHost for Host {
                     });
                 }
 
-                let child = child_cmd.spawn()?;
+                let child = child_cmd.spawn().context(format!("spawning {:?}", argv))?;
 
                 let child = UnixChild::new(child);
 
