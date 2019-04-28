@@ -6,6 +6,7 @@ mod exitstatus;
 mod job;
 mod pathsearch;
 mod repl;
+mod shellhost;
 
 fn main() -> Fallible<()> {
     repl::repl()
