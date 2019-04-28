@@ -85,6 +85,7 @@ lazy_static! {
         builtins!(
             builtins::BuiltinsCommand,
             colon::ColonCommand,
+            env::ExportCommand,
             env::UnsetCommand,
             jobcontrol::FgCommand,
             jobcontrol::JobsCommand,
