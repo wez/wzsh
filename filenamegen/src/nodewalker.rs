@@ -69,9 +69,7 @@ impl<'a> NodeWalker<'a> {
     fn next_from_dir(&mut self, walker: &mut Walker<'a>) -> Option<PathBuf> {
         while let Some(entry) = self.dir.as_mut().unwrap().next() {
             match entry {
-                Err(err) => {
-                    continue;
-                }
+                Err(_) => continue,
                 Ok(entry) => {
                     let file_name = entry.path();
                     let base_name = file_name.file_name().unwrap();
@@ -127,9 +125,7 @@ impl<'a> NodeWalker<'a> {
 
             let name = walker.root.join(&self.current_dir);
             match std::fs::read_dir(&name) {
-                Err(err) => {
-                    return None;
-                }
+                Err(_) => return None,
                 Ok(dir) => {
                     self.dir = Some(dir);
                 }
