@@ -106,19 +106,6 @@ op!(
         glob: bool,
         remove_backslash: bool,
     },
-    /// Insert the source value to the destination list
-    /// at the specified index.
-    ListInsert {
-        value: Operand,
-        list: Operand,
-        insertion_index: Operand,
-    },
-    /// Remove the value from the destination list at
-    /// the specified index.
-    ListRemove {
-        list: Operand,
-        index: Operand,
-    },
     /// destination = a + b
     Add {
         a: Operand,
@@ -769,4 +756,4 @@ impl Dispatch for $name {
     }
 }
 
-notyet!(Add, Divide, ListInsert, ListRemove, Multiply, Subtract,);
+notyet!(Add, Divide, Multiply, Subtract,);
