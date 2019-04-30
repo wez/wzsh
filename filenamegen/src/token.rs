@@ -5,9 +5,19 @@ pub enum Token {
     Any,
     /// `*`
     ZeroOrMore,
+    /// `{`
     StartAlternative,
+    /// `,`
     NextAlternative,
+    /// `}`
     EndAlternative,
+    /// `[`
+    StartClass,
+    /// `!`
+    NegateClass,
+    /// `]`
+    EndClass,
+    ClassContent(char),
 }
 
 impl Token {
@@ -36,6 +46,10 @@ impl Token {
             Token::StartAlternative => pattern.push('('),
             Token::NextAlternative => pattern.push('|'),
             Token::EndAlternative => pattern.push(')'),
+            Token::StartClass => pattern.push('['),
+            Token::NegateClass => pattern.push('^'),
+            Token::EndClass => pattern.push(']'),
+            Token::ClassContent(c) => pattern.push(*c),
         }
     }
 }

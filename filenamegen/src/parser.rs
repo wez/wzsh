@@ -8,6 +8,7 @@ struct Parser<'a> {
     chars: std::iter::Peekable<std::str::Chars<'a>>,
     tokens: Vec<Token>,
     in_alternative: bool,
+    in_class: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -21,7 +22,25 @@ impl<'a> Parser<'a> {
                         self.tokens.push(Token::Literal('\\'));
                     }
                 }
-                '{' => {
+                '[' => {
+                    if self.in_class == 0 {
+                        self.tokens.push(Token::StartClass)
+                    } else {
+                        self.tokens.push(Token::ClassContent('['))
+                    }
+                    self.in_class += 1;
+                }
+                ']' if self.in_class > 0 => {
+                    if self.in_class == 1 {
+                        self.tokens.push(Token::EndClass);
+                    } else {
+                        self.tokens.push(Token::ClassContent(']'));
+                    }
+                    self.in_class -= 1;
+                }
+                '!' if self.in_class > 0 => self.tokens.push(Token::NegateClass),
+                c if self.in_class > 0 => self.tokens.push(Token::ClassContent(c)),
+                '{' if self.in_class == 0 => {
                     ensure!(
                         !self.in_alternative,
                         "cannot start an alternative inside an alternative"
@@ -30,7 +49,7 @@ impl<'a> Parser<'a> {
                     self.tokens.push(Token::StartAlternative)
                 }
                 ',' if self.in_alternative => self.tokens.push(Token::NextAlternative),
-                '}' => {
+                '}' if self.in_alternative => {
                     ensure!(
                         self.in_alternative,
                         "cannot end an alternative when not already inside an alternative"
@@ -44,6 +63,7 @@ impl<'a> Parser<'a> {
             }
         }
         ensure!(!self.in_alternative, "missing closing alternative");
+        ensure!(self.in_class == 0, "missing closing class");
         Ok(())
     }
 
@@ -85,6 +105,7 @@ pub fn parse(pattern: &str) -> Fallible<Node> {
         chars: pattern.chars().peekable(),
         tokens: vec![],
         in_alternative: false,
+        in_class: 0,
     };
 
     parser.parse()?;

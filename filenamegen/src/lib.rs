@@ -317,10 +317,6 @@ mod test {
     #[test]
     fn bogus_alternative() -> Fallible<()> {
         assert_eq!(
-            format!("{}", Glob::new("}").unwrap_err()),
-            "cannot end an alternative when not already inside an alternative"
-        );
-        assert_eq!(
             format!("{}", Glob::new("{{").unwrap_err()),
             "cannot start an alternative inside an alternative"
         );
@@ -328,6 +324,25 @@ mod test {
             format!("{}", Glob::new("{").unwrap_err()),
             "missing closing alternative"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn class() -> Fallible<()> {
+        let root = make_fixture()?;
+        touch_files_in(&root, &["foo.o", "foo.a"])?;
+        let glob = Glob::new("foo.[oa]")?;
+        assert_eq!(
+            glob.walk(&root),
+            vec![PathBuf::from("foo.a"), PathBuf::from("foo.o")]
+        );
+        let glob = Glob::new("foo.[[:alnum:]]")?;
+        assert_eq!(
+            glob.walk(&root),
+            vec![PathBuf::from("foo.a"), PathBuf::from("foo.o")]
+        );
+        let glob = Glob::new("foo.[![:alnum:]]")?;
+        assert_eq!(glob.walk(&root), Vec::<PathBuf>::new());
         Ok(())
     }
 }
