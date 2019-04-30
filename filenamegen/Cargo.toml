@@ -1,0 +1,15 @@
+[package]
+name = "filenamegen"
+version = "0.1.0"
+authors = ["Wez Furlong"]
+edition = "2018"
+
+[dependencies]
+bstr = "0.1"
+failure = "0.1"
+regex = "1.1"
+walkdir = "2.2"
+
+[dev-dependencies]
+pretty_assertions = "0.6"
+tempdir = "0.3"
