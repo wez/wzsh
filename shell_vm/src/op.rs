@@ -1,6 +1,7 @@
 use super::*;
 use failure::{bail, ensure, format_err, ResultExt};
 use filedescriptor::FileDescriptor;
+use std::convert::TryInto;
 use std::io::Write;
 
 /// The Dispatch trait is implemented by the individual operation
@@ -420,32 +421,33 @@ impl Dispatch for StringLength {
 
 impl Dispatch for StringAppend {
     fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
-        let src = match machine.operand(&self.source)? {
-            Value::String(s) => s.clone(),
-            Value::None => return Ok(Status::Running),
-            Value::OsString(s) => {
-                let s = s.to_str().ok_or_else(|| format_err!("StringAppend: operand {:?} is OsString value {:?} that is no representable as String", self.source, s))?;
-                s.to_owned()
-            }
-            value => bail!(
-                "cannot StringAppend from non-string operand {:?} value {:?}",
-                self.source,
-                value
-            ),
-        };
-        match machine.operand_mut(&self.destination)? {
-            Value::String(dest) => dest.push_str(&src),
-            _ => bail!("cannot StringAppend to non-string"),
+        let src = machine
+            .operand(&self.source)?
+            .as_bstr()
+            .ok_or_else(|| err_msg("StringAppend: operand is not representable as a BStr"))?
+            .to_bstring();
+
+        if src.is_empty() {
+            // Append would be a NOP
+            return Ok(Status::Running);
         }
+
+        let dest = std::mem::replace(machine.operand_mut(&self.destination)?, Value::None);
+        let mut dest = dest.into_bstring().ok_or_else(|| {
+            err_msg("StringAppend: destinatination is not representable as a BString")
+        })?;
+
+        dest.push(src);
+        *machine.operand_mut(&self.destination)? = dest.try_into()?;
         Ok(Status::Running)
     }
 }
 
 impl JoinList {
     fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
-        let mut dest = String::new();
+        let mut dest = BString::new();
         let ifs = machine.ifs()?.to_owned();
-        let join_str = if ifs.is_empty() { "" } else { &ifs[0..1] };
+        let join_char = ifs.chars().next();
 
         let list = machine.operand(&self.list)?;
         let list = match list {
@@ -454,20 +456,17 @@ impl JoinList {
         };
 
         for element in list {
-            if !dest.is_empty() {
-                dest.push_str(join_str);
+            if !dest.is_empty() && join_char.is_some() {
+                dest.push_char(*join_char.as_ref().unwrap());
             }
-            match element {
-                Value::String(s) => dest.push_str(s),
-                Value::OsString(s) => {
-                    let s = s.to_str().ok_or_else(|| format_err!("JoinList: element is OsString value {:?} that is no representable as String", element))?;
-                    dest.push_str(s);
-                }
-                _ => bail!("JoinList: element is non-string value {:?}", element),
-            }
+
+            let element = element
+                .as_bstr()
+                .ok_or_else(|| err_msg("JoinList: element is not representable as BString"))?;
+            dest.push(element);
         }
 
-        *machine.operand_mut(&self.destination)? = dest.into();
+        *machine.operand_mut(&self.destination)? = dest.try_into()?;
         Ok(Status::Running)
     }
 }

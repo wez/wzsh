@@ -1,5 +1,6 @@
 #![allow(dead_code)]
-use failure::{bail, err_msg, format_err, Fallible};
+use bstr::{BStr, BString};
+use failure::{bail, err_msg, format_err, Error, Fallible};
 use filedescriptor::FileDescriptor;
 use std::collections::VecDeque;
 use std::ffi::{OsStr, OsString};
@@ -40,6 +41,23 @@ impl Value {
         match self {
             Value::String(s) => Some(s.as_ref()),
             Value::OsString(s) => s.to_str(),
+            _ => None,
+        }
+    }
+
+    pub fn as_bstr(&self) -> Option<&BStr> {
+        match self {
+            Value::String(s) => Some(s.as_str().into()),
+            Value::OsString(s) => BStr::from_os_str(s),
+            Value::None => Some("".into()),
+            _ => None,
+        }
+    }
+
+    pub fn into_bstring(self) -> Option<BString> {
+        match self {
+            Value::String(s) => Some(s.into()),
+            Value::OsString(s) => BString::from_os_string(s).ok(),
             _ => None,
         }
     }
@@ -89,6 +107,19 @@ impl From<isize> for Value {
 impl From<Vec<Value>> for Value {
     fn from(s: Vec<Value>) -> Value {
         Value::List(s)
+    }
+}
+
+impl std::convert::TryFrom<BString> for Value {
+    type Error = Error;
+    fn try_from(b: BString) -> Result<Value, Error> {
+        match b.into_string() {
+            Ok(s) => Ok(Value::String(s)),
+            Err(e) => match e.into_bstring().into_os_string() {
+                Ok(os) => Ok(Value::OsString(os)),
+                Err(_) => bail!("BString is neither UTF-8 nor representable as an OsString"),
+            },
+        }
     }
 }
 
