@@ -3,7 +3,6 @@ use failure::{bail, err_msg, format_err, Fallible};
 use filedescriptor::FileDescriptor;
 use std::collections::VecDeque;
 use std::ffi::{OsStr, OsString};
-use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -350,26 +349,9 @@ impl Machine {
             let pattern = v
                 .as_str()
                 .ok_or_else(|| err_msg("contains_glob_specials returned true for non String?"))?;
-            let walker = globwalk::GlobWalkerBuilder::new(&self.cwd, pattern)
-                .follow_links(true)
-                .sort_by(|a, b| a.path().cmp(b.path()))
-                .build()?;
-            for item in walker {
-                match item {
-                    Ok(entry) => {
-                        // The paths are absolute paths; let's try to relativize
-                        // them against the cwd, both to make the paths shorter
-                        // and to match convention.  This has the nice side effect
-                        // of making it easier to encode paths in tests, too.
-                        let path = entry.into_path();
-                        let path = match path.strip_prefix(&self.cwd) {
-                            Ok(relative) => relative.to_path_buf(),
-                            Err(_) => path,
-                        };
-                        list.push(path.into_os_string().into())
-                    }
-                    Err(err) => write!(self.io_env()?.stderr(), "{}", err)?,
-                }
+            let glob = filenamegen::Glob::new(pattern)?;
+            for item in glob.walk(&self.cwd) {
+                list.push(item.into_os_string().into())
             }
         } else {
             match (remove_backslash, v.as_str()) {

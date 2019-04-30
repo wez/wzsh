@@ -55,7 +55,6 @@ impl<'a> NodeWalker<'a> {
     // Advance to the next directory component
     fn next_candidate_path(&mut self) -> Option<&'a Node> {
         while let Some(node) = self.node.next() {
-            eprintln!("next_candidate_path: node={:?}", node);
             match node {
                 Node::LiteralComponents(literal) => {
                     self.current_dir = self.current_dir.join(literal);
@@ -69,14 +68,11 @@ impl<'a> NodeWalker<'a> {
     /// Attempt to match the next entry by reading the dir
     fn next_from_dir(&mut self, walker: &mut Walker<'a>) -> Option<PathBuf> {
         while let Some(entry) = self.dir.as_mut().unwrap().next() {
-            eprintln!("next_from_dir: {:?}", entry);
             match entry {
                 Err(err) => {
-                    eprintln!("while reading dir: {}", err);
                     continue;
                 }
                 Ok(entry) => {
-                    eprintln!("got entry: {:?}", entry);
                     let file_name = entry.path();
                     let base_name = file_name.file_name().unwrap();
                     if let Some(bstr) = BStr::from_os_str(base_name) {
@@ -93,13 +89,10 @@ impl<'a> NodeWalker<'a> {
                             } else if entry_may_be_dir(&entry) {
                                 // We can only really match if this non-leaf node
                                 // is a directory
-                                eprintln!("queue up walking into {:?}", entry);
                                 let route = self.fork(base_name);
                                 walker.stack.push_back(route);
                             }
                         }
-                    } else {
-                        eprintln!("entry {:?} is not representable as utf-8", entry);
                     }
                 }
             }
@@ -116,7 +109,6 @@ impl<'a> NodeWalker<'a> {
             // Advance to the next directory component
             self.node_to_match = match self.next_candidate_path() {
                 None => {
-                    eprintln!("ran out of candidates!");
                     return None;
                 }
                 node => node,
@@ -124,7 +116,6 @@ impl<'a> NodeWalker<'a> {
 
             if self.node_to_match.as_ref().unwrap().is_recursive() {
                 if self.node.peek().is_some() {
-                    eprintln!("switch to recursive walker strategy");
                     walker.recursive.push_back(RecursiveWalker::new(
                         self.node.clone(),
                         walker.root.join(&self.current_dir),
@@ -137,11 +128,9 @@ impl<'a> NodeWalker<'a> {
             let name = walker.root.join(&self.current_dir);
             match std::fs::read_dir(&name) {
                 Err(err) => {
-                    eprintln!("failed to read {}: {}", name.display(), err);
                     return None;
                 }
                 Ok(dir) => {
-                    eprintln!("opened {}", name.display());
                     self.dir = Some(dir);
                 }
             }

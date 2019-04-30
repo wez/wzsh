@@ -24,7 +24,6 @@ impl RecursiveWalker {
         }
         pattern.push('$');
         let regex = Regex::new(&pattern).expect("regex to compile");
-        eprintln!("recursive regex: {}", pattern);
 
         Self {
             regex,
@@ -69,7 +68,6 @@ impl RecursiveWalker {
         } else {
             false
         };
-        eprintln!("{} vs {} -> {}", self.regex, path.display(), matched);
         matched
     }
 }

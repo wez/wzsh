@@ -91,7 +91,6 @@ impl Glob {
     /// Returns all matching entries in sorted order.  The entries are
     /// relative to `path`.
     pub fn walk<P: AsRef<Path>>(&self, path: P) -> Vec<PathBuf> {
-        eprintln!("nodes: {:#?}", self.nodes);
         let walker = Walker::new(path.as_ref(), &self.nodes);
 
         let mut results: Vec<PathBuf> = walker.collect();
