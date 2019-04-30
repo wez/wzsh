@@ -1,7 +1,7 @@
-use crate::builtins::Builtin;
+use crate::builtins::{lookup_builtin, Builtin};
 use crate::pathsearch::PathSearcher;
 use failure::Fallible;
-use shell_vm::{Environment, IoEnvironment, Status, WaitableStatus};
+use shell_vm::{Environment, IoEnvironment, Status, Value, WaitableStatus};
 use std::io::Write;
 use std::path::PathBuf;
 use structopt::*;
@@ -31,11 +31,21 @@ impl Builtin for WhichCommand {
         io_env: &IoEnvironment,
     ) -> Fallible<WaitableStatus> {
         let mut found = false;
-        for path in PathSearcher::new(&self.command, environment) {
+        if let Some(_) = lookup_builtin(&Value::OsString(self.command.as_os_str().to_os_string())) {
             found = true;
-            writeln!(io_env.stdout(), "{}", path.display())?;
-            if !self.all {
-                break;
+            writeln!(
+                io_env.stdout(),
+                "{}: shell built-in command",
+                self.command.display()
+            )?;
+        }
+        if !found || self.all {
+            for path in PathSearcher::new(&self.command, environment) {
+                found = true;
+                writeln!(io_env.stdout(), "{}", path.display())?;
+                if !self.all {
+                    break;
+                }
             }
         }
         Ok(Status::Complete(if found { 0 } else { 1 }.into()).into())
