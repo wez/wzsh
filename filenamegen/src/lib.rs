@@ -46,6 +46,9 @@ impl Glob {
     /// `**`, when used in its own non-leaf directory component, acts as a
     ///     recursive wildcard, matching any number of directories.
     ///     When used in the leaf position it acts the same as `*`.
+    ///
+    /// `{foo,bar}.rs` matches both `foo.rs` and `bar.rs`.  The curly braces
+    ///    define an alternation regex.
     pub fn new(pattern: &str) -> Fallible<Glob> {
         let mut nodes = vec![];
         for comp in Path::new(pattern).components() {
@@ -295,6 +298,35 @@ mod test {
         assert_eq!(
             glob.walk(root.path().join("woot")),
             vec![PathBuf::from("../woot/woot.rs")]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn alternative() -> Fallible<()> {
+        let root = make_fixture()?;
+        touch_files_in(&root, &["foo.rs", "bar.rs"])?;
+        let glob = Glob::new("{foo,bar}.rs")?;
+        assert_eq!(
+            glob.walk(&root),
+            vec![PathBuf::from("bar.rs"), PathBuf::from("foo.rs")]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn bogus_alternative() -> Fallible<()> {
+        assert_eq!(
+            format!("{}", Glob::new("}").unwrap_err()),
+            "cannot end an alternative when not already inside an alternative"
+        );
+        assert_eq!(
+            format!("{}", Glob::new("{{").unwrap_err()),
+            "cannot start an alternative inside an alternative"
+        );
+        assert_eq!(
+            format!("{}", Glob::new("{").unwrap_err()),
+            "missing closing alternative"
         );
         Ok(())
     }

@@ -5,6 +5,9 @@ pub enum Token {
     Any,
     /// `*`
     ZeroOrMore,
+    StartAlternative,
+    NextAlternative,
+    EndAlternative,
 }
 
 impl Token {
@@ -30,6 +33,9 @@ impl Token {
                     pattern.push_str("[^/]*");
                 }
             }
+            Token::StartAlternative => pattern.push('('),
+            Token::NextAlternative => pattern.push('|'),
+            Token::EndAlternative => pattern.push(')'),
         }
     }
 }

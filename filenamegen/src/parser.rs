@@ -1,12 +1,13 @@
 use crate::new_binary_pattern_string;
 use crate::node::{Node, RegexAndTokens};
 use crate::token::Token;
-use failure::{format_err, Fallible};
+use failure::{ensure, format_err, Fallible};
 use regex::bytes::Regex;
 
 struct Parser<'a> {
     chars: std::iter::Peekable<std::str::Chars<'a>>,
     tokens: Vec<Token>,
+    in_alternative: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -20,11 +21,29 @@ impl<'a> Parser<'a> {
                         self.tokens.push(Token::Literal('\\'));
                     }
                 }
+                '{' => {
+                    ensure!(
+                        !self.in_alternative,
+                        "cannot start an alternative inside an alternative"
+                    );
+                    self.in_alternative = true;
+                    self.tokens.push(Token::StartAlternative)
+                }
+                ',' if self.in_alternative => self.tokens.push(Token::NextAlternative),
+                '}' => {
+                    ensure!(
+                        self.in_alternative,
+                        "cannot end an alternative when not already inside an alternative"
+                    );
+                    self.in_alternative = false;
+                    self.tokens.push(Token::EndAlternative)
+                }
                 '?' => self.tokens.push(Token::Any),
                 '*' => self.tokens.push(Token::ZeroOrMore),
                 c => self.tokens.push(Token::Literal(c)),
             }
         }
+        ensure!(!self.in_alternative, "missing closing alternative");
         Ok(())
     }
 
@@ -65,6 +84,7 @@ pub fn parse(pattern: &str) -> Fallible<Node> {
     let mut parser = Parser {
         chars: pattern.chars().peekable(),
         tokens: vec![],
+        in_alternative: false,
     };
 
     parser.parse()?;
