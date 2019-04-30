@@ -245,6 +245,12 @@ mod test {
 
         let glob = Glob::new("*/src/.*.rs")?;
         assert_eq!(glob.walk(&root), vec![PathBuf::from("bar/src/.bar.rs")]);
+
+        let glob = Glob::new("*")?;
+        assert_eq!(
+            glob.walk(&root),
+            vec![PathBuf::from("bar"), PathBuf::from("foo")]
+        );
         Ok(())
     }
 
