@@ -20,7 +20,7 @@ pub struct Readable {
 
 impl Readable {
     pub fn dup(&self) -> Fallible<FileDescriptor> {
-        self.fd.lock().unwrap().clone()
+        self.fd.lock().unwrap().try_clone()
     }
 }
 
@@ -36,7 +36,7 @@ pub struct Writable {
 
 impl Writable {
     pub fn dup(&self) -> Fallible<FileDescriptor> {
-        self.fd.lock().unwrap().clone()
+        self.fd.lock().unwrap().try_clone()
     }
 }
 
