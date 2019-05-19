@@ -1,6 +1,6 @@
 use super::*;
 use failure::{bail, ensure, format_err, ResultExt};
-use filedescriptor::FileDescriptor;
+use filedescriptor::{FileDescriptor, Pipe};
 use std::convert::TryInto;
 use std::io::Write;
 
@@ -289,7 +289,7 @@ impl Dispatch for PopEnvironment {
 
 impl Dispatch for PushPipe {
     fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
-        let pipe = FileDescriptor::pipe()?;
+        let pipe = Pipe::new()?;
         machine.io_env_mut()?.assign_fd(1, pipe.write);
         machine.pipes.push_back(pipe.read);
         Ok(Status::Running)
