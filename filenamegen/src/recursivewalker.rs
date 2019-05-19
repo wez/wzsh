@@ -1,5 +1,5 @@
 use crate::node::Node;
-use crate::{new_binary_pattern_string, Walker};
+use crate::{new_binary_pattern_string, normalize_slashes, Walker};
 use bstr::BStr;
 use regex::bytes::Regex;
 use std::path::{Path, PathBuf};
@@ -51,13 +51,13 @@ impl RecursiveWalker {
                     .strip_prefix(&self.walk_root)
                     .expect("walk is always relative to self.walk_root");
                 if self.is_match(path) {
-                    return Some(
+                    return Some(normalize_slashes(
                         entry
                             .path()
                             .strip_prefix(&walker.root)
                             .expect("walk is always relative to walker.root")
                             .to_path_buf(),
-                    );
+                    ));
                 }
             }
         }

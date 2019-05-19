@@ -105,6 +105,27 @@ fn new_binary_pattern_string() -> String {
     String::from(if cfg!(windows) { "^(?i-u)" } else { "^(?-u)" })
 }
 
+/// This is triply gross because the string needs to be translated
+/// from WTF-8 to UCS-2, normalized, and then re-encoded back to WTF-8
+#[cfg(windows)]
+fn normalize_slashes(path: PathBuf) -> PathBuf {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+
+    let normalized: Vec<u16> = path
+        .into_os_string()
+        .encode_wide()
+        .map(|c| if c == b'\\' as u16 { b'/' as u16 } else { c })
+        .collect();
+
+    OsString::from_wide(&normalized).into()
+}
+
+#[cfg(not(windows))]
+fn normalize_slashes(path: PathBuf) -> PathBuf {
+    path
+}
+
 /// `Walker` is the iterator implementation that drives
 /// executing the glob.  It tracks both the regular walker
 /// and the recursive walkers.  The regular walkers are evaluated

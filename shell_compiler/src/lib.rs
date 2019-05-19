@@ -592,6 +592,7 @@ impl Compiler {
 #[cfg(test)]
 mod test {
     use super::*;
+    use failure::{Error, ResultExt};
     use filedescriptor::{FileDescriptor, Pipe};
     use pretty_assertions::assert_eq;
     use shell_parser::Parser;
@@ -725,10 +726,10 @@ mod test {
                 let mut stdout = io_env.stdout();
                 for (i, arg) in argv.iter().skip(1).enumerate() {
                     if i > 0 {
-                        write!(stdout, " ")?;
+                        write!(stdout, " ").context("echo: write")?;
                     }
                     if let Some(s) = arg.as_str() {
-                        write!(stdout, "{}", s)?;
+                        write!(stdout, "{}", s).context("echo: write")?;
                     }
                 }
                 write!(stdout, "\n")?;
@@ -785,7 +786,16 @@ mod test {
 
     fn consume_pipe(mut fd: FileDescriptor) -> Fallible<String> {
         let mut res = String::new();
-        fd.read_to_string(&mut res)?;
+        match fd.read_to_string(&mut res) {
+            Ok(_) => {}
+            Err(err) => {
+                if err.kind() != std::io::ErrorKind::BrokenPipe {
+                    let err: Error = err.into();
+                    Err(err.context("consume_pipe: read_to_string"))?
+                }
+            }
+        };
+
         Ok(res)
     }
 

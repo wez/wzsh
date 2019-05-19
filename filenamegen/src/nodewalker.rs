@@ -1,4 +1,5 @@
 use crate::node::Node;
+use crate::normalize_slashes;
 use crate::recursivewalker::RecursiveWalker;
 use crate::Walker;
 use bstr::BStr;
@@ -77,13 +78,13 @@ impl<'a> NodeWalker<'a> {
                         if self.node_to_match.as_ref().unwrap().is_match(&bstr) {
                             let is_leaf = self.node.peek().is_none();
                             if is_leaf {
-                                return Some(
+                                return Some(normalize_slashes(
                                     entry
                                         .path()
                                         .strip_prefix(&walker.root)
                                         .expect("entry path always has walker.root as a prefix")
                                         .to_path_buf(),
-                                );
+                                ));
                             } else if entry_may_be_dir(&entry) {
                                 // We can only really match if this non-leaf node
                                 // is a directory
