@@ -1,0 +1,17 @@
+language: rust
+cache: cargo
+rust:
+  - stable
+  - beta
+
+os:
+  - osx
+  - linux
+  - windows
+
+dist: xenial
+
+matrix:
+  allow_failures:
+    - rust: beta
+    - os: windows
