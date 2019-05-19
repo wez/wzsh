@@ -15,3 +15,6 @@ matrix:
   allow_failures:
     - rust: beta
     - os: windows
+
+script:
+  - cargo test --all

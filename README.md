@@ -2,6 +2,8 @@
 
 A unixy interactive shell for Posix and Windows systems
 
+[![Build Status](https://travis-ci.org/wez/wzsh.svg?branch=master)](https://travis-ci.org/wez/wzsh)
+
 ## Goals
 
 * Be a convenient interactive shell
