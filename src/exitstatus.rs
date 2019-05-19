@@ -1,6 +1,15 @@
+#[cfg(windows)]
+use filedescriptor::OwnedHandle;
 use shell_vm::{Status, WaitForStatus};
 use std::borrow::Cow;
+#[cfg(windows)]
+use std::os::windows::io::{AsRawHandle, IntoRawHandle};
 use std::sync::{Arc, Mutex};
+
+#[cfg(unix)]
+pub type Pid = libc::pid_t;
+#[cfg(windows)]
+pub type Pid = u32;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum ExitStatus {
@@ -47,24 +56,32 @@ impl From<ExitStatus> for Status {
 // we only use signal numbers produced from a process exit
 // status to index into the sys_signame and sys_siglist
 // globals, and those are therefore valid signal offsets.
+#[cfg(unix)]
 const NSIG: usize = 1024;
+#[cfg(unix)]
 extern "C" {
     static sys_signame: [*const i8; NSIG];
     static sys_siglist: [*const i8; NSIG];
 }
 
 fn signame(n: i32) -> Cow<'static, str> {
+    #[cfg(unix)]
     unsafe {
         let c_str = sys_signame[n as usize];
         std::ffi::CStr::from_ptr(c_str).to_string_lossy()
     }
+    #[cfg(windows)]
+    unreachable!(n);
 }
 
 fn sigdesc(n: i32) -> Cow<'static, str> {
+    #[cfg(unix)]
     unsafe {
         let c_str = sys_siglist[n as usize];
         std::ffi::CStr::from_ptr(c_str).to_string_lossy()
     }
+    #[cfg(windows)]
+    unreachable!(n);
 }
 
 impl std::fmt::Display for ExitStatus {
@@ -83,16 +100,19 @@ impl std::fmt::Display for ExitStatus {
 }
 
 #[derive(Debug)]
-struct UnixChildInner {
-    pid: libc::pid_t,
+struct ChildProcessInner {
+    pid: Pid,
     last_status: ExitStatus,
+    #[cfg(windows)]
+    process: OwnedHandle,
 }
 
-impl UnixChildInner {
+impl ChildProcessInner {
     fn wait(&mut self, blocking: bool) -> Option<ExitStatus> {
         if self.last_status.terminated() {
             return Some(self.last_status);
         }
+        #[cfg(unix)]
         unsafe {
             let mut status = 0i32;
             let res = libc::waitpid(
@@ -125,26 +145,61 @@ impl UnixChildInner {
             self.last_status = status;
             Some(status)
         }
+        #[cfg(windows)]
+        {
+            use winapi::shared::winerror::WAIT_TIMEOUT;
+            use winapi::um::processthreadsapi::GetExitCodeProcess;
+            use winapi::um::synchapi::*;
+            use winapi::um::winbase::WAIT_OBJECT_0;
+            if blocking {
+                let res = unsafe { WaitForSingleObject(self.process.as_raw_handle(), 0) };
+                match res {
+                    WAIT_OBJECT_0 => {}
+                    WAIT_TIMEOUT => return None,
+                    _ => {
+                        let err = std::io::Error::last_os_error();
+                        eprintln!("error waiting for child pid {} {}", self.pid, err);
+                        let status = ExitStatus::ExitCode(1);
+                        self.last_status = status;
+                        return Some(status);
+                    }
+                };
+            }
+
+            let mut exit_code: winapi::shared::minwindef::DWORD = 0;
+            let status =
+                if unsafe { GetExitCodeProcess(self.process.as_raw_handle(), &mut exit_code) } != 0
+                {
+                    ExitStatus::ExitCode(exit_code as i32)
+                } else {
+                    let err = std::io::Error::last_os_error();
+                    eprintln!("error getting exit code for child pid {} {}", self.pid, err);
+                    ExitStatus::ExitCode(1)
+                };
+            self.last_status = status;
+            Some(status)
+        }
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct UnixChild {
-    inner: Arc<Mutex<UnixChildInner>>,
+pub struct ChildProcess {
+    inner: Arc<Mutex<ChildProcessInner>>,
 }
 
-#[cfg(unix)]
-impl UnixChild {
-    pub fn pid(&self) -> libc::pid_t {
+impl ChildProcess {
+    pub fn pid(&self) -> Pid {
         self.inner.lock().unwrap().pid
     }
 
     pub fn new(child: std::process::Child) -> Self {
         let pid = child.id() as _;
         Self {
-            inner: Arc::new(Mutex::new(UnixChildInner {
+            inner: Arc::new(Mutex::new(ChildProcessInner {
                 pid,
                 last_status: ExitStatus::Running,
+                #[cfg(windows)]
+                process: OwnedHandle::new(child.into_raw_handle()),
             })),
         }
     }
@@ -154,12 +209,11 @@ impl UnixChild {
     }
 }
 
-#[cfg(unix)]
-impl WaitForStatus for UnixChild {
+impl WaitForStatus for ChildProcess {
     fn wait(&self) -> Option<Status> {
-        UnixChild::wait(self, true).map(Into::into)
+        ChildProcess::wait(self, true).map(Into::into)
     }
     fn poll(&self) -> Option<Status> {
-        UnixChild::wait(self, false).map(Into::into)
+        ChildProcess::wait(self, false).map(Into::into)
     }
 }

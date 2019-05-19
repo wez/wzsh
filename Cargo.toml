@@ -16,6 +16,15 @@ shell_parser = { path = "shell_parser" }
 shell_vm = { path = "shell_vm" }
 structopt = "0.2"
 
+[target."cfg(windows)".dependencies]
+winapi = { version = "0.3", features = [
+    "winuser",
+    "handleapi",
+    "synchapi",
+    "fileapi",
+    "processthreadsapi",
+]}
+
 [dev-dependencies]
 pretty_assertions = "0.6"
 

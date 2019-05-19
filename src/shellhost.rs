@@ -1,6 +1,8 @@
 use crate::builtins::lookup_builtin;
-use crate::exitstatus::UnixChild;
-use crate::job::{add_to_process_group, make_foreground_process_group, Job, JOB_LIST};
+use crate::exitstatus::ChildProcess;
+#[cfg(unix)]
+use crate::job::{add_to_process_group, make_foreground_process_group};
+use crate::job::{Job, JOB_LIST};
 use crate::pathsearch::PathSearcher;
 use failure::{bail, err_msg, format_err, Fallible, ResultExt};
 use shell_vm::{Environment, IoEnvironment, ShellHost, Status, Value, WaitableStatus};
@@ -108,8 +110,7 @@ impl ShellHost for Host {
                 }
 
                 let child = child_cmd.spawn().context(format!("spawning {:?}", argv))?;
-
-                let child = UnixChild::new(child);
+                let child = ChildProcess::new(child);
 
                 // To avoid a race condition with starting up the child, we
                 // need to also munge the process group assignment here in

@@ -37,7 +37,7 @@ fn concat_osstr(a: &OsStr, b: &OsStr) -> OsString {
     for c in b.encode_wide() {
         res.push(c);
     }
-    OsStringExt::from_wide(res)
+    OsStringExt::from_wide(&res)
 }
 
 #[cfg(unix)]
@@ -133,15 +133,13 @@ impl<'a> Iterator for WindowsPathSearcher<'a> {
     fn next(&mut self) -> Option<PathBuf> {
         loop {
             if let Some(iter) = self.path_ext_iter.as_mut() {
-                loop {
-                    if let Some(ext) = iter.next() {
-                        let extended = PathBuf::from(concat_osstr(
-                            self.candidate.as_ref().unwrap().as_os_str(),
-                            ext.as_os_str(),
-                        ));
-                        if extended.is_file() {
-                            return Some(extended);
-                        }
+                while let Some(ext) = iter.next() {
+                    let extended = PathBuf::from(concat_osstr(
+                        self.candidate.as_ref().unwrap().as_os_str(),
+                        ext.as_os_str(),
+                    ));
+                    if extended.is_file() {
+                        return Some(extended);
                     }
                 }
             }

@@ -1,5 +1,5 @@
-use crate::exitstatus::UnixChild;
-use failure::{Fail, Fallible};
+use crate::exitstatus::{ChildProcess, Pid};
+use failure::Fallible;
 use lazy_static::lazy_static;
 use shell_vm::{Status, WaitForStatus};
 use std::collections::HashMap;
@@ -10,30 +10,31 @@ lazy_static! {
 }
 
 pub fn put_shell_in_foreground() {
+    #[cfg(unix)]
     unsafe {
         let pgrp = libc::getpgid(libc::getpid());
         libc::tcsetpgrp(0, pgrp);
     }
 }
 
+#[cfg(unix)]
 pub fn make_own_process_group(pid: i32) {
-    #[cfg(unix)]
     unsafe {
         // Put the process into its own process group
         libc::setpgid(pid, pid);
     }
 }
 
+#[cfg(unix)]
 pub fn add_to_process_group(pid: i32, process_group_id: i32) {
-    #[cfg(unix)]
     unsafe {
         libc::setpgid(pid, process_group_id);
     }
 }
 
+#[cfg(unix)]
 pub fn make_foreground_process_group(pid: i32) {
     make_own_process_group(pid);
-    #[cfg(unix)]
     unsafe {
         // Grant that process group foreground control
         // over the terminal
@@ -42,7 +43,9 @@ pub fn make_foreground_process_group(pid: i32) {
     }
 }
 
+#[cfg(unix)]
 fn send_cont(pid: libc::pid_t) -> Fallible<()> {
+    use failure::Fail;
     unsafe {
         if libc::kill(pid, libc::SIGCONT) != 0 {
             let err = std::io::Error::last_os_error();
@@ -55,8 +58,8 @@ fn send_cont(pid: libc::pid_t) -> Fallible<()> {
 
 #[derive(Debug)]
 struct Inner {
-    processes: Vec<UnixChild>,
-    process_group_id: libc::pid_t,
+    processes: Vec<ChildProcess>,
+    process_group_id: Pid,
     label: String,
 }
 
@@ -88,7 +91,7 @@ impl Job {
         }
     }
 
-    pub fn add(&mut self, proc: UnixChild) -> Fallible<()> {
+    pub fn add(&mut self, proc: ChildProcess) -> Fallible<()> {
         let process_group_id = proc.pid();
 
         let mut inner = self.inner.lock().unwrap();
@@ -101,32 +104,48 @@ impl Job {
     }
 
     pub fn is_background(&self) -> bool {
-        let inner = self.inner.lock().unwrap();
-        let pgrp = unsafe { libc::tcgetpgrp(0) };
-        inner.process_group_id != pgrp
+        #[cfg(unix)]
+        {
+            let inner = self.inner.lock().unwrap();
+            let pgrp = unsafe { libc::tcgetpgrp(0) };
+            inner.process_group_id != pgrp
+        }
+        #[cfg(windows)]
+        false
     }
 
     pub fn process_group_id(&self) -> i32 {
-        let inner = self.inner.lock().unwrap();
-        inner.process_group_id
+        #[cfg(unix)]
+        {
+            let inner = self.inner.lock().unwrap();
+            inner.process_group_id
+        }
+        #[cfg(windows)]
+        0
     }
 
     pub fn put_in_background(&mut self) -> Fallible<()> {
-        let inner = self.inner.lock().unwrap();
-        send_cont(-inner.process_group_id).ok();
+        #[cfg(unix)]
+        {
+            let inner = self.inner.lock().unwrap();
+            send_cont(-inner.process_group_id).ok();
+        }
         Ok(())
     }
 
     pub fn put_in_foreground(&mut self) -> Fallible<()> {
-        let inner = self.inner.lock().unwrap();
-        if inner.process_group_id == 0 {
-            return Ok(());
+        #[cfg(unix)]
+        {
+            let inner = self.inner.lock().unwrap();
+            if inner.process_group_id == 0 {
+                return Ok(());
+            }
+            unsafe {
+                let pty_fd = 0;
+                libc::tcsetpgrp(pty_fd, inner.process_group_id)
+            };
+            send_cont(-inner.process_group_id).ok();
         }
-        unsafe {
-            let pty_fd = 0;
-            libc::tcsetpgrp(pty_fd, inner.process_group_id)
-        };
-        send_cont(-inner.process_group_id).ok();
 
         Ok(())
     }

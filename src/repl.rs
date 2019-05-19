@@ -83,6 +83,7 @@ fn is_recoverable_parse_error(e: &Error) -> bool {
     }
 }
 
+#[cfg(unix)]
 fn init_job_control() -> Fallible<()> {
     let pty_fd = 0;
     unsafe {
@@ -154,6 +155,7 @@ pub fn repl() -> Fallible<()> {
         env: Environment::new(),
     };
 
+    #[cfg(unix)]
     init_job_control()?;
 
     let config = Config::builder().history_ignore_space(true).build();
