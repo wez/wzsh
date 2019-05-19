@@ -1,5 +1,7 @@
 use crate::token::Token;
-use bstr::{BStr, BString};
+use bstr::BStr;
+#[cfg(windows)]
+use bstr::BString;
 use regex::bytes::Regex;
 use std::path::PathBuf;
 

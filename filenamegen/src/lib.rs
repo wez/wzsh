@@ -211,6 +211,7 @@ mod test {
     }
 
     #[test]
+    #[cfg(windows)]
     fn case_insensitive() -> Fallible<()> {
         let node = parse("foo/bar.rs")?;
         use bstr::B;
