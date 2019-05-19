@@ -19,7 +19,10 @@ impl RecursiveWalker {
         let mut pattern = new_binary_pattern_string();
         Node::RecursiveMatch.append_regex(&mut pattern);
         for node in nodes {
+            #[cfg(not(windows))]
             pattern.push('/');
+            #[cfg(windows)]
+            pattern.push_str("[/\\\\]");
             node.append_regex(&mut pattern);
         }
         pattern.push('$');

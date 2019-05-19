@@ -29,18 +29,30 @@ impl Token {
             // a filename.
             Token::Any => {
                 if is_first_in_component {
+                    #[cfg(not(windows))]
                     pattern.push_str("[^./]");
+                    #[cfg(windows)]
+                    pattern.push_str("[^./\\\\]");
                 } else {
+                    #[cfg(not(windows))]
                     pattern.push_str("[^/]");
+                    #[cfg(windows)]
+                    pattern.push_str("[^/\\\\]");
                 }
             }
             // `*` matches 0 or more of any character,
             // except for `.` at the start of a filename.
             Token::ZeroOrMore => {
                 if is_first_in_component {
+                    #[cfg(not(windows))]
                     pattern.push_str("[^./][^/]*");
+                    #[cfg(windows)]
+                    pattern.push_str("[^./\\\\][^/\\\\]*");
                 } else {
+                    #[cfg(not(windows))]
                     pattern.push_str("[^/]*");
+                    #[cfg(windows)]
+                    pattern.push_str("[^/\\\\]*");
                 }
             }
             Token::StartAlternative => pattern.push('('),

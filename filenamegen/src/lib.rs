@@ -102,7 +102,7 @@ impl Glob {
 
 /// Disable unicode mode so that we can match non-utf8 filenames
 fn new_binary_pattern_string() -> String {
-    String::from("^(?-u)")
+    String::from(if cfg!(windows) { "^(?i-u)" } else { "^(?-u)" })
 }
 
 /// `Walker` is the iterator implementation that drives
@@ -207,6 +207,16 @@ mod test {
         eprintln!("node is {:?}", node);
         assert_eq!(node.is_match(&pound), true);
 
+        Ok(())
+    }
+
+    #[test]
+    fn case_insensitive() -> Fallible<()> {
+        let node = parse("foo/bar.rs")?;
+        use bstr::B;
+        let upper = B(b"FOO/bAr.rs");
+
+        assert_eq!(node.is_match(&upper), true);
         Ok(())
     }
 
