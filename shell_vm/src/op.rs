@@ -534,11 +534,7 @@ impl Dispatch for OpenFile {
             file_name.display(),
             options
         ))?;
-        let fd = FileDescriptor::dup(file).context(format!(
-            "duplicating open file handle from '{}",
-            file_name.display()
-        ))?;
-
+        let fd = FileDescriptor::new(file);
         machine.io_env_mut()?.assign_fd(self.fd_number, fd);
         Ok(Status::Running)
     }

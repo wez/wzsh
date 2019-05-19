@@ -1,5 +1,5 @@
 use failure::{format_err, Fallible};
-use filedescriptor::{dup, FileDescriptor};
+use filedescriptor::FileDescriptor;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -56,7 +56,7 @@ impl IoEnvironment {
 
         macro_rules! stdio {
             ($fd:literal, $func:path) => {
-                fds.insert($fd, Arc::new(Mutex::new(dup($func())?)));
+                fds.insert($fd, Arc::new(Mutex::new(FileDescriptor::dup(&$func())?)));
             };
         }
 

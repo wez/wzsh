@@ -3,7 +3,7 @@ use filedescriptor::OwnedHandle;
 use shell_vm::{Status, WaitForStatus};
 use std::borrow::Cow;
 #[cfg(windows)]
-use std::os::windows::io::{AsRawHandle, IntoRawHandle};
+use std::os::windows::io::AsRawHandle;
 use std::sync::{Arc, Mutex};
 
 #[cfg(unix)]
@@ -199,7 +199,7 @@ impl ChildProcess {
                 pid,
                 last_status: ExitStatus::Running,
                 #[cfg(windows)]
-                process: OwnedHandle::new(child.into_raw_handle()),
+                process: OwnedHandle::new(child),
             })),
         }
     }
