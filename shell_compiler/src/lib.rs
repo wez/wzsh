@@ -592,7 +592,7 @@ impl Compiler {
 #[cfg(test)]
 mod test {
     use super::*;
-    use filedescriptor::FileDescriptor;
+    use filedescriptor::{FileDescriptor, Pipe};
     use pretty_assertions::assert_eq;
     use shell_parser::Parser;
     use std::ffi::{OsStr, OsString};
@@ -799,8 +799,8 @@ mod test {
         let log = Arc::clone(&host.spawn_log);
         machine.set_host(Arc::new(host));
 
-        let stdout = FileDescriptor::pipe()?;
-        let stderr = FileDescriptor::pipe()?;
+        let stdout = Pipe::new()?;
+        let stderr = Pipe::new()?;
 
         machine.io_env_mut()?.assign_fd(1, stdout.write);
         machine.io_env_mut()?.assign_fd(2, stderr.write);
