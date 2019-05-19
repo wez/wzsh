@@ -87,11 +87,12 @@ impl IoEnvironment {
     }
 
     pub fn duplicate_to(&mut self, src_fd: usize, dest_fd: usize) -> Fallible<()> {
-        let fd = self
-            .fds
-            .get(&src_fd)
-            .ok_or_else(|| format_err!("duplicate_to: src_fd {} not present", src_fd))?;
-        self.fds.insert(dest_fd, Arc::clone(fd));
+        let fd = Arc::clone(
+            self.fds
+                .get(&src_fd)
+                .ok_or_else(|| format_err!("duplicate_to: src_fd {} not present", src_fd))?,
+        );
+        self.fds.insert(dest_fd, fd);
         Ok(())
     }
 
