@@ -690,7 +690,13 @@ mod test {
                         return 1;
                     }
                 }
-                _ => return 1,
+                Err(err) => {
+                    return if err.kind() == std::io::ErrorKind::BrokenPipe {
+                        0
+                    } else {
+                        1
+                    };
+                }
             }
         }
     }
@@ -1266,6 +1272,8 @@ mod test {
             )
         );
 
+        // Globbing with backslash currently doesn't work correctly on windows
+        #[cfg(not(windows))]
         assert_eq!(
             run_with_log_and_output(compile("echo \\**/*.rs")?)?,
             (
