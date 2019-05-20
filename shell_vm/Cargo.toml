@@ -6,6 +6,7 @@ edition = "2018"
 
 [dependencies]
 bstr = "0.1"
+caseless = "0.2"
 failure = "0.1"
 failure_derive = "0.1"
 filedescriptor = { path = "../filedescriptor" }
