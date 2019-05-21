@@ -150,9 +150,9 @@ impl ChildProcessInner {
             use winapi::shared::winerror::WAIT_TIMEOUT;
             use winapi::um::processthreadsapi::GetExitCodeProcess;
             use winapi::um::synchapi::*;
-            use winapi::um::winbase::WAIT_OBJECT_0;
+            use winapi::um::winbase::{INFINITE, WAIT_OBJECT_0};
             if blocking {
-                let res = unsafe { WaitForSingleObject(self.process.as_raw_handle(), 0) };
+                let res = unsafe { WaitForSingleObject(self.process.as_raw_handle(), INFINITE) };
                 match res {
                     WAIT_OBJECT_0 => {}
                     WAIT_TIMEOUT => return None,
