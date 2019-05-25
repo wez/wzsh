@@ -1,8 +1,10 @@
 use crate::builtins::Builtin;
+use cancel::Token;
 use failure::{err_msg, Fallible};
 use shell_vm::{Environment, IoEnvironment, Status, WaitableStatus};
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 use structopt::*;
 
 #[derive(Debug, StructOpt)]
@@ -28,6 +30,7 @@ impl Builtin for PwdCommand {
         _environment: &mut Environment,
         current_directory: &mut PathBuf,
         io_env: &IoEnvironment,
+        _cancel: Arc<Token>,
     ) -> Fallible<WaitableStatus> {
         let pwd = if self.physical {
             current_directory.canonicalize()?
@@ -102,6 +105,7 @@ impl Builtin for CdCommand {
         environment: &mut Environment,
         current_directory: &mut PathBuf,
         io_env: &IoEnvironment,
+        _cancel: Arc<Token>,
     ) -> Fallible<WaitableStatus> {
         let directory = match self.directory.take() {
             Some(dir) => dir,

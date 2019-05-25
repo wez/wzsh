@@ -1,7 +1,9 @@
 use crate::builtins::Builtin;
+use cancel::Token;
 use failure::Fallible;
 use shell_vm::{Environment, IoEnvironment, Status, WaitableStatus};
 use std::path::PathBuf;
+use std::sync::Arc;
 use structopt::*;
 
 #[derive(StructOpt)]
@@ -18,6 +20,7 @@ impl Builtin for TrueCommand {
         _environment: &mut Environment,
         _current_directory: &mut PathBuf,
         _io_env: &IoEnvironment,
+        _cancel: Arc<Token>,
     ) -> Fallible<WaitableStatus> {
         Ok(Status::Complete(0.into()).into())
     }
@@ -37,6 +40,7 @@ impl Builtin for FalseCommand {
         _environment: &mut Environment,
         _current_directory: &mut PathBuf,
         _io_env: &IoEnvironment,
+        _cancel: Arc<Token>,
     ) -> Fallible<WaitableStatus> {
         Ok(Status::Complete(1.into()).into())
     }

@@ -1,8 +1,10 @@
 use crate::builtins::Builtin;
+use cancel::Token;
 use failure::Fallible;
 use shell_vm::{Environment, IoEnvironment, Status, WaitableStatus};
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::Arc;
 use structopt::*;
 
 #[derive(Debug, StructOpt)]
@@ -18,6 +20,7 @@ impl Builtin for BuiltinsCommand {
         _environment: &mut Environment,
         _current_directory: &mut PathBuf,
         io_env: &IoEnvironment,
+        _cancel: Arc<Token>,
     ) -> Fallible<WaitableStatus> {
         let mut builtins: Vec<&'static str> = super::BUILTINS.iter().map(|(k, _)| *k).collect();
         builtins.sort_unstable();

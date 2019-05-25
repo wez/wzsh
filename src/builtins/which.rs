@@ -1,9 +1,11 @@
 use crate::builtins::{lookup_builtin, Builtin};
+use cancel::Token;
 use failure::Fallible;
 use pathsearch::PathSearcher;
 use shell_vm::{Environment, IoEnvironment, Status, Value, WaitableStatus};
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::Arc;
 use structopt::*;
 
 #[derive(StructOpt)]
@@ -29,6 +31,7 @@ impl Builtin for WhichCommand {
         environment: &mut Environment,
         _current_directory: &mut PathBuf,
         io_env: &IoEnvironment,
+        cancel: Arc<Token>,
     ) -> Fallible<WaitableStatus> {
         let mut found = false;
         if let Some(_) = lookup_builtin(&Value::OsString(self.command.as_os_str().to_os_string())) {
@@ -45,6 +48,7 @@ impl Builtin for WhichCommand {
                 environment.get("PATH"),
                 environment.get("PATHEXT"),
             ) {
+                cancel.check_cancel()?;
                 found = true;
                 writeln!(io_env.stdout(), "{}", path.display())?;
                 if !self.all {

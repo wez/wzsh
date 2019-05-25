@@ -1,8 +1,10 @@
+use cancel::Token;
 use failure::{err_msg, Fallible};
 use lazy_static::lazy_static;
 use shell_vm::{Environment, IoEnvironment, Value, WaitableStatus};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use structopt::*;
 
 mod builtins;
@@ -21,6 +23,7 @@ pub trait Builtin: StructOpt {
         environment: &mut Environment,
         current_directory: &mut PathBuf,
         io_env: &IoEnvironment,
+        cancel: Arc<Token>,
     ) -> Fallible<WaitableStatus>
     where
         Self: Sized,
@@ -37,7 +40,7 @@ pub trait Builtin: StructOpt {
             );
         }
         let mut args = Self::from_clap(&app.get_matches_from_safe(os_args.iter())?);
-        args.run(environment, current_directory, io_env)
+        args.run(environment, current_directory, io_env, cancel)
     }
 
     fn name() -> &'static str;
@@ -47,6 +50,7 @@ pub trait Builtin: StructOpt {
         environment: &mut Environment,
         current_directory: &mut PathBuf,
         io_env: &IoEnvironment,
+        cancel: Arc<Token>,
     ) -> Fallible<WaitableStatus>;
 }
 
@@ -55,6 +59,7 @@ pub type BuiltinFunc = fn(
     environment: &mut Environment,
     current_directory: &mut PathBuf,
     io_env: &IoEnvironment,
+    cancel: Arc<Token>,
 ) -> Fallible<WaitableStatus>;
 
 pub fn lookup_builtin(name: &Value) -> Option<BuiltinFunc> {

@@ -1,8 +1,10 @@
 use crate::builtins::Builtin;
+use cancel::Token;
 use failure::Fallible;
 use shell_vm::{Environment, IoEnvironment, Status, WaitableStatus};
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::Arc;
 use structopt::*;
 
 #[derive(StructOpt)]
@@ -25,9 +27,11 @@ impl Builtin for ExportCommand {
         environment: &mut Environment,
         _current_directory: &mut PathBuf,
         io_env: &IoEnvironment,
+        cancel: Arc<Token>,
     ) -> Fallible<WaitableStatus> {
         if self.print {
             for (k, v) in environment.iter() {
+                cancel.check_cancel()?;
                 match (k.to_str(), v.to_str()) {
                     (Some(k), Some(v)) => writeln!(io_env.stdout(), "export {}={}", k, v)?,
                     _ => writeln!(
@@ -67,6 +71,7 @@ impl Builtin for UnsetCommand {
         environment: &mut Environment,
         _current_directory: &mut PathBuf,
         _io_env: &IoEnvironment,
+        _cancel: Arc<Token>,
     ) -> Fallible<WaitableStatus> {
         for name in &self.names {
             environment.unset(name);

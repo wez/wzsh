@@ -3,6 +3,7 @@ use crate::exitstatus::ChildProcess;
 #[cfg(unix)]
 use crate::job::{add_to_process_group, make_foreground_process_group};
 use crate::job::{Job, JOB_LIST};
+use cancel::Token;
 use failure::{bail, err_msg, format_err, Fallible, ResultExt};
 use pathsearch::PathSearcher;
 use shell_vm::{Environment, IoEnvironment, ShellHost, Status, Value, WaitableStatus};
@@ -49,7 +50,13 @@ impl ShellHost for Host {
 
         if search_builtin {
             if let Some(builtin) = lookup_builtin(&argv[0]) {
-                return builtin(&argv[..], environment, current_directory, io_env);
+                // Create a token for cancellation.
+                // This is currently useless; I just wanted to establish this in
+                // the builtins interface.
+                // This needs to be connected to CTRL-C from the REPL or from a
+                // signal handler.
+                let token = Arc::new(Token::new());
+                return builtin(&argv[..], environment, current_directory, io_env, token);
             }
         }
 
