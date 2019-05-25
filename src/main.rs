@@ -4,7 +4,6 @@ mod builtins;
 mod errorprint;
 mod exitstatus;
 mod job;
-mod pathsearch;
 mod repl;
 mod shellhost;
 

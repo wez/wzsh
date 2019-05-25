@@ -15,6 +15,7 @@ shell_lexer = { path = "shell_lexer" }
 shell_parser = { path = "shell_parser" }
 shell_vm = { path = "shell_vm" }
 structopt = "0.2"
+pathsearch = { path = "pathsearch" }
 
 [target."cfg(windows)".dependencies]
 winapi = { version = "0.3", features = [

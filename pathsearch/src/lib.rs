@@ -1,5 +1,4 @@
 use failure::Fallible;
-use shell_vm::Environment;
 use std::ffi::{OsStr, OsString};
 #[cfg(unix)]
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
@@ -50,9 +49,7 @@ pub type PathSearcher<'a> = WindowsPathSearcher<'a>;
 /// standard unix rules: explode PATH by the system path separator character
 /// and then for each entry, concatenate the candidate command and test
 /// whether that is an executable file.
-#[allow(dead_code)]
 pub struct UnixPathSearcher<'a> {
-    path: &'a OsStr,
     path_iter: std::env::SplitPaths<'a>,
     command: &'a OsStr,
 }
@@ -60,16 +57,15 @@ pub struct UnixPathSearcher<'a> {
 impl<'a> UnixPathSearcher<'a> {
     /// Create a new UnixPathSearcher that will yield candidate paths for
     /// the specified command
-    #[allow(dead_code)]
-    pub fn new<T: AsRef<OsStr> + ?Sized>(command: &'a T, env: &'a Environment) -> Self {
-        let path = env.get("PATH").unwrap_or_else(|| OsStr::new(""));
+    pub fn new<T: AsRef<OsStr> + ?Sized>(
+        command: &'a T,
+        path: Option<&'a OsStr>,
+        _path_ext: Option<&'a OsStr>,
+    ) -> Self {
+        let path = path.unwrap_or_else(|| OsStr::new(""));
         let path_iter = std::env::split_paths(path);
         let command = command.as_ref();
-        Self {
-            path,
-            path_iter,
-            command,
-        }
+        Self { path_iter, command }
     }
 }
 
@@ -90,16 +86,14 @@ impl<'a> Iterator for UnixPathSearcher<'a> {
     }
 }
 
-/// UnixPathSearcher is an iterator that yields candidate PathBuf instances
+/// WindowsPathSearcher is an iterator that yields candidate PathBuf instances
 /// generated from searching the PATH environment variable following the
 /// standard windows rules: explode PATH by the system path separator character
 /// and then for each entry, concatenate the candidate command and test
 /// whether that is a file.  Additional candidates are produced by taking
 /// each of the filename extensions specified by the PATHEXT environment
 /// variable and concatenating those with the command.
-#[allow(dead_code)]
 pub struct WindowsPathSearcher<'a> {
-    path: &'a OsStr,
     path_ext: &'a OsStr,
     path_iter: std::env::SplitPaths<'a>,
     path_ext_iter: Option<std::env::SplitPaths<'a>>,
@@ -108,16 +102,18 @@ pub struct WindowsPathSearcher<'a> {
 }
 
 impl<'a> WindowsPathSearcher<'a> {
-    #[allow(dead_code)]
-    pub fn new<T: AsRef<OsStr> + ?Sized>(command: &'a T, env: &'a Environment) -> Self {
-        let path = env.get("PATH").unwrap_or_else(|| OsStr::new(""));
-        let path_ext = env.get("PATHEXT").unwrap_or_else(|| OsStr::new(".EXE"));
+    pub fn new<T: AsRef<OsStr> + ?Sized>(
+        command: &'a T,
+        path: Option<&'a OsStr>,
+        path_ext: Option<&'a OsStr>,
+    ) -> Self {
+        let path = path.unwrap_or_else(|| OsStr::new(""));
+        let path_ext = path_ext.unwrap_or_else(|| OsStr::new(".EXE"));
         let path_iter = std::env::split_paths(path);
         let path_ext_iter = None;
         let command = command.as_ref();
         let candidate = None;
         Self {
-            path,
             path_iter,
             path_ext,
             path_ext_iter,

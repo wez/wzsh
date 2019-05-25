@@ -1,6 +1,6 @@
 use crate::builtins::{lookup_builtin, Builtin};
-use crate::pathsearch::PathSearcher;
 use failure::Fallible;
+use pathsearch::PathSearcher;
 use shell_vm::{Environment, IoEnvironment, Status, Value, WaitableStatus};
 use std::io::Write;
 use std::path::PathBuf;
@@ -40,7 +40,11 @@ impl Builtin for WhichCommand {
             )?;
         }
         if !found || self.all {
-            for path in PathSearcher::new(&self.command, environment) {
+            for path in PathSearcher::new(
+                &self.command,
+                environment.get("PATH"),
+                environment.get("PATHEXT"),
+            ) {
                 found = true;
                 writeln!(io_env.stdout(), "{}", path.display())?;
                 if !self.all {

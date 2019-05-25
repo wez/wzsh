@@ -1,0 +1,14 @@
+[package]
+name = "pathsearch"
+version = "0.1.0"
+authors = ["Wez Furlong"]
+edition = "2018"
+repository = "https://github.com/wez/wzsh"
+description = "Search for files in PATH"
+license = "MIT"
+documentation = "https://docs.rs/pathsearch"
+
+[dependencies]
+failure = "0.1"
+libc = "0.2"
+

@@ -3,8 +3,8 @@ use crate::exitstatus::ChildProcess;
 #[cfg(unix)]
 use crate::job::{add_to_process_group, make_foreground_process_group};
 use crate::job::{Job, JOB_LIST};
-use crate::pathsearch::PathSearcher;
 use failure::{bail, err_msg, format_err, Fallible, ResultExt};
+use pathsearch::PathSearcher;
 use shell_vm::{Environment, IoEnvironment, ShellHost, Status, Value, WaitableStatus};
 use std::ffi::OsString;
 use std::io::Write;
@@ -58,7 +58,8 @@ impl ShellHost for Host {
                 argv[0]
                     .as_os_str()
                     .ok_or_else(|| err_msg("argv0 is not convertible to OsStr"))?,
-                environment,
+                environment.get("PATH"),
+                environment.get("PATHEXT"),
             )
             .next()
             {
