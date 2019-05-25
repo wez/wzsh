@@ -1,7 +1,6 @@
-use failure::Fallible;
 use std::ffi::{OsStr, OsString};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// Returns an OsString composed from `a` with `b` appended
 pub fn concat_osstr(a: &OsStr, b: &OsStr) -> OsString {
