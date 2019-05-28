@@ -2,62 +2,15 @@ use crate::errorprint::print_error;
 use crate::job::{put_shell_in_foreground, Job, JOB_LIST};
 use crate::shellhost::Host;
 use failure::{Error, Fail, Fallible};
-use rustyline::completion::{Completer, FilenameCompleter, Pair};
-use rustyline::error::ReadlineError;
-use rustyline::highlight::Highlighter;
-use rustyline::hint::{Hinter, HistoryHinter};
-use rustyline::{Config, Editor, Helper};
 use shell_compiler::Compiler;
 use shell_lexer::{LexError, LexErrorKind};
 use shell_parser::{ParseErrorKind, Parser};
 use shell_vm::{Environment, Machine, Program, Status};
-use std::borrow::Cow;
 use std::path::PathBuf;
 use std::sync::Arc;
-
-struct LineEditorHelper {
-    completer: FilenameCompleter,
-    hinter: HistoryHinter,
-}
-
-impl Completer for LineEditorHelper {
-    type Candidate = Pair;
-
-    fn complete(
-        &self,
-        line: &str,
-        pos: usize,
-        ctx: &rustyline::Context<'_>,
-    ) -> Result<(usize, Vec<Pair>), ReadlineError> {
-        self.completer.complete(line, pos, ctx)
-    }
-}
-
-impl Hinter for LineEditorHelper {
-    fn hint(&self, line: &str, pos: usize, ctx: &rustyline::Context<'_>) -> Option<String> {
-        self.hinter.hint(line, pos, ctx)
-    }
-}
-
-impl Highlighter for LineEditorHelper {
-    fn highlight_prompt<'p>(&self, prompt: &'p str) -> Cow<'p, str> {
-        Cow::Borrowed(prompt)
-    }
-
-    fn highlight_hint<'h>(&self, hint: &'h str) -> Cow<'h, str> {
-        Cow::Owned("\x1b[1m".to_owned() + hint + "\x1b[m")
-    }
-
-    fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
-        Cow::Borrowed(line)
-    }
-
-    fn highlight_char(&self, _line: &str, _pos: usize) -> bool {
-        true
-    }
-}
-
-impl Helper for LineEditorHelper {}
+use termwiz::cell::AttributeChange;
+use termwiz::color::{AnsiColor, ColorAttribute, RgbColor};
+use termwiz::lineedit::*;
 
 /// Returns true if a given error might be resolved by allowing
 /// the user to continue typing more text on a subsequent line.
@@ -149,6 +102,29 @@ fn compile_and_run(prog: &str, env_bits: &mut EnvBits) -> Fallible<Status> {
     status
 }
 
+#[derive(Default)]
+struct EditHost {
+    history: BasicHistory,
+}
+
+impl LineEditorHost for EditHost {
+    fn render_prompt(&self, prompt: &str) -> Vec<OutputElement> {
+        vec![
+            OutputElement::Attribute(AttributeChange::Foreground(
+                ColorAttribute::TrueColorWithPaletteFallback(
+                    RgbColor::from_named("plum").unwrap(),
+                    AnsiColor::Navy.into(),
+                ),
+            )),
+            OutputElement::Text(prompt.to_owned()),
+        ]
+    }
+
+    fn history(&mut self) -> &mut History {
+        &mut self.history
+    }
+}
+
 pub fn repl() -> Fallible<()> {
     let mut env = EnvBits {
         cwd: std::env::current_dir()?,
@@ -158,37 +134,23 @@ pub fn repl() -> Fallible<()> {
     #[cfg(unix)]
     init_job_control()?;
 
-    let config = Config::builder().history_ignore_space(true).build();
-
-    let mut rl = Editor::with_config(config);
-    rl.set_helper(Some(LineEditorHelper {
-        completer: FilenameCompleter::new(),
-        hinter: HistoryHinter {},
-    }));
-    rl.load_history("history.txt").ok();
+    let mut editor = line_editor()?;
+    let mut host = EditHost::default();
 
     let mut input = String::new();
 
     loop {
         let prompt = match input.is_empty() {
-            true => "$ ".to_owned(),
-            false => "..> ".to_owned(),
+            true => "$ ",
+            false => "..> ",
         };
+        editor.set_prompt(prompt);
 
         JOB_LIST.check_and_print_status();
 
-        // A little bit gross, but the FilenameCompleter implementation
-        // uses the process-wide current working dir, so we need to be
-        // sure to sync that up with the top level environment in order
-        // for tab completion to work as the user expects.
-        if std::env::current_dir()?.as_path() != env.cwd {
-            std::env::set_current_dir(&env.cwd)?;
-        }
-
-        let readline = rl.readline(&prompt);
-        match readline {
-            Ok(line) => {
-                rl.add_history_entry(line.as_ref());
+        match editor.read_line(&mut host) {
+            Ok(Some(line)) => {
+                host.history().add(&line);
 
                 input.push_str(&line);
 
@@ -210,12 +172,9 @@ pub fn repl() -> Fallible<()> {
 
                 put_shell_in_foreground();
             }
-            Err(ReadlineError::Interrupted) => {
+            Ok(None) => {
                 input.clear();
                 continue;
-            }
-            Err(ReadlineError::Eof) => {
-                break;
             }
             Err(err) => {
                 print_error(&err.context("during readline").into(), "");
