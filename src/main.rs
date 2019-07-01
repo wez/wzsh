@@ -1,4 +1,5 @@
 use failure::Fallible;
+use shell_vm::Environment;
 
 mod builtins;
 mod errorprint;
@@ -8,5 +9,7 @@ mod repl;
 mod shellhost;
 
 fn main() -> Fallible<()> {
-    repl::repl()
+    let cwd = std::env::current_dir()?;
+    let env = Environment::new();
+    repl::repl(cwd, env)
 }

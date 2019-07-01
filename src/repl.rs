@@ -125,11 +125,8 @@ impl LineEditorHost for EditHost {
     }
 }
 
-pub fn repl() -> Fallible<()> {
-    let mut env = EnvBits {
-        cwd: std::env::current_dir()?,
-        env: Environment::new(),
-    };
+pub fn repl(cwd: PathBuf, env: Environment) -> Fallible<()> {
+    let mut env = EnvBits { cwd, env };
 
     #[cfg(unix)]
     init_job_control()?;
