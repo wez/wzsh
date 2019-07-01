@@ -17,6 +17,12 @@ pub struct WhichCommand {
     #[structopt(short = "a")]
     all: bool,
 
+    /// Don't output anything; only indicate success/failure through
+    /// the exit status.
+    /// This is a non-standard extension for wzsh.
+    #[structopt(short = "q")]
+    quiet: bool,
+
     /// The command to find
     command: PathBuf,
 }
@@ -36,11 +42,13 @@ impl Builtin for WhichCommand {
         let mut found = false;
         if let Some(_) = lookup_builtin(&Value::OsString(self.command.as_os_str().to_os_string())) {
             found = true;
-            writeln!(
-                io_env.stdout(),
-                "{}: shell built-in command",
-                self.command.display()
-            )?;
+            if !self.quiet {
+                writeln!(
+                    io_env.stdout(),
+                    "{}: shell built-in command",
+                    self.command.display()
+                )?;
+            }
         }
         if !found || self.all {
             for path in PathSearcher::new(
@@ -50,7 +58,9 @@ impl Builtin for WhichCommand {
             ) {
                 cancel.check_cancel()?;
                 found = true;
-                writeln!(io_env.stdout(), "{}", path.display())?;
+                if !self.quiet {
+                    writeln!(io_env.stdout(), "{}", path.display())?;
+                }
                 if !self.all {
                     break;
                 }
