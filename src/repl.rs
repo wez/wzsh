@@ -92,7 +92,7 @@ fn compile_and_run(prog: &str, env_bits: &mut EnvBits) -> Fallible<Status> {
     compiler.compile_command(&command)?;
     let prog = compiler.finish()?;
     let mut machine = Machine::new(&Program::new(prog), Some(env_bits.env.clone()))?;
-    machine.set_host(Arc::new(Host::new(job)));
+    machine.set_host(Arc::new(Host::with_job_control(job)));
     let status = machine.run();
 
     let (cwd, env) = machine.top_environment();

@@ -15,12 +15,21 @@ use std::sync::{Arc, Mutex};
 #[derive(Debug)]
 pub struct Host {
     job: Mutex<Job>,
+    job_control_enabled: bool,
 }
 
 impl Host {
     pub fn new(job: Job) -> Self {
         Self {
             job: Mutex::new(job),
+            job_control_enabled: false,
+        }
+    }
+
+    pub fn with_job_control(job: Job) -> Self {
+        Self {
+            job: Mutex::new(job),
+            job_control_enabled: true,
         }
     }
 }
@@ -90,17 +99,20 @@ impl ShellHost for Host {
                 #[cfg(unix)]
                 unsafe {
                     use std::os::unix::process::CommandExt;
+                    let job_control = self.job_control_enabled;
                     child_cmd.pre_exec(move || {
                         let pid = libc::getpid();
-                        if process_group_id == 0 {
-                            /*
-                            if asynchronous {
-                                make_own_process_group(pid);
-                            } else {}
-                            */
-                            make_foreground_process_group(pid);
-                        } else {
-                            add_to_process_group(pid, process_group_id);
+                        if job_control {
+                            if process_group_id == 0 {
+                                /*
+                                if asynchronous {
+                                    make_own_process_group(pid);
+                                } else {}
+                                */
+                                make_foreground_process_group(pid);
+                            } else {
+                                add_to_process_group(pid, process_group_id);
+                            }
                         }
                         for s in &[
                             libc::SIGINT,
@@ -120,23 +132,25 @@ impl ShellHost for Host {
                 let child = child_cmd.spawn().context(format!("spawning {:?}", argv))?;
                 let child = ChildProcess::new(child);
 
-                // To avoid a race condition with starting up the child, we
-                // need to also munge the process group assignment here in
-                // the parent.  Note that the loser of the race will experience
-                // errors in attempting this block, so we willfully ignore
-                // the return values here: we cannot do anything about them.
-                #[cfg(unix)]
-                {
-                    let pid = child.pid();
-                    if process_group_id == 0 {
-                        /*
-                        if asynchronous {
-                            make_own_process_group(pid);
-                        } else {}
-                        */
-                        make_foreground_process_group(pid);
-                    } else {
-                        add_to_process_group(pid, process_group_id);
+                if self.job_control_enabled {
+                    // To avoid a race condition with starting up the child, we
+                    // need to also munge the process group assignment here in
+                    // the parent.  Note that the loser of the race will experience
+                    // errors in attempting this block, so we willfully ignore
+                    // the return values here: we cannot do anything about them.
+                    #[cfg(unix)]
+                    {
+                        let pid = child.pid();
+                        if process_group_id == 0 {
+                            /*
+                            if asynchronous {
+                                make_own_process_group(pid);
+                            } else {}
+                            */
+                            make_foreground_process_group(pid);
+                        } else {
+                            add_to_process_group(pid, process_group_id);
+                        }
                     }
                 }
 

@@ -1,6 +1,8 @@
 use failure::Error;
 use shell_lexer::{LexError, Span};
 use shell_parser::ParseErrorKind;
+use std::io::Read;
+use std::path::Path;
 
 fn extract_error_range(e: &Error) -> Option<Span> {
     if let Some(lex_err) = e.downcast_ref::<LexError>() {
@@ -12,6 +14,24 @@ fn extract_error_range(e: &Error) -> Option<Span> {
     } else {
         None
     }
+}
+
+pub fn print_error_path(e: &Error, path: &Path) {
+    let mut file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(err) => {
+            eprintln!("wzsh: {}: while opening: {}", path.display(), err);
+            return;
+        }
+    };
+    let mut input = String::new();
+    if let Err(err) = file.read_to_string(&mut input) {
+        eprintln!("wzsh: {}: while reading: {}", path.display(), err);
+        return;
+    }
+
+    eprintln!("wzsh: {}: error:", path.display());
+    print_error(e, &input);
 }
 
 pub fn print_error(e: &Error, input: &str) {
