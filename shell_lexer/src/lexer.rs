@@ -119,6 +119,15 @@ impl Token {
         false
     }
 
+    pub fn is_any_reserved_word(&self) -> bool {
+        if let Some(literal) = self.as_single_literal_word_string() {
+            if let Some(_) = RESERVED_WORDS.lookup(literal) {
+                return true;
+            }
+        }
+        false
+    }
+
     /// Returns the span for the token
     pub fn span(&self) -> Span {
         match self {

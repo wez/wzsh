@@ -1,6 +1,7 @@
 use crate::types::*;
 use failure::{bail, Error, Fail, Fallible};
 use shell_lexer::{Lexer, Operator, ReservedWord, Token};
+use std::collections::VecDeque;
 use std::io::Read;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,7 +25,7 @@ pub enum ParseErrorKind {
 
 pub struct Parser<R: Read> {
     lexer: Lexer<R>,
-    lookahead: Option<Token>,
+    lookahead: VecDeque<Token>,
 }
 
 impl<R: Read> Parser<R> {
@@ -32,7 +33,7 @@ impl<R: Read> Parser<R> {
         let lexer = Lexer::new(stream);
         Self {
             lexer,
-            lookahead: None,
+            lookahead: VecDeque::new(),
         }
     }
 
@@ -79,7 +80,7 @@ impl<R: Read> Parser<R> {
 
     /// Consume the next token
     fn next_token(&mut self) -> Fallible<Token> {
-        if let Some(tok) = self.lookahead.take() {
+        if let Some(tok) = self.lookahead.pop_front() {
             Ok(tok)
         } else {
             self.lexer.next_token()
@@ -90,8 +91,7 @@ impl<R: Read> Parser<R> {
     /// The lookahead must be vacant, or else this will cause
     /// a panic; we only support a single lookahead.
     fn unget_token(&mut self, tok: Token) {
-        assert!(self.lookahead.is_none());
-        self.lookahead.replace(tok);
+        self.lookahead.push_front(tok);
     }
 }
 
@@ -206,7 +206,9 @@ impl<R: Read> Parser<R> {
     }
 
     fn command(&mut self) -> Fallible<Option<Command>> {
-        if let Some(cmd) = self.compound_command()? {
+        if let Some(command) = self.function_definition()? {
+            Ok(Some(command))
+        } else if let Some(cmd) = self.compound_command()? {
             Ok(Some(cmd))
         } else if let Some(group) = self.subshell()? {
             Ok(Some(Command {
@@ -221,8 +223,61 @@ impl<R: Read> Parser<R> {
                 redirects: vec![],
             }))
         } else {
-            // TODO: function_definition
             Ok(None)
+        }
+    }
+
+    fn function_definition(&mut self) -> Fallible<Option<Command>> {
+        if let Some(fname) = self.fname()? {
+            if self
+                .next_token_is_operator(&[Operator::LeftParen])?
+                .is_none()
+            {
+                self.unget_token(fname);
+                return Ok(None);
+            }
+
+            if self
+                .next_token_is_operator(&[Operator::RightParen])?
+                .is_none()
+            {
+                return Err(self.unexpected_next_token(ParseErrorContext::ExpectingRightParen));
+            }
+
+            if let Some(cmd) = self.compound_command()? {
+                Ok(Some(Command {
+                    command: CommandType::FunctionDefinition {
+                        name: fname
+                            .as_single_literal_word_string()
+                            .expect("already verified fname is single literal")
+                            .to_owned(),
+                        body: Box::new(cmd),
+                    },
+                    asynchronous: false,
+                    redirects: vec![],
+                }))
+            } else {
+                Ok(None)
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn fname(&mut self) -> Fallible<Option<Token>> {
+        let tok = self.next_token()?;
+
+        if tok.is_any_reserved_word() {
+            self.unget_token(tok);
+            return Ok(None);
+        }
+
+        match tok.as_single_literal_word_string() {
+            None => {
+                self.unget_token(tok);
+                Ok(None)
+            }
+            Some(_) => Ok(Some(tok)),
         }
     }
 
@@ -249,10 +304,15 @@ impl<R: Read> Parser<R> {
     }
 
     fn subshell(&mut self) -> Fallible<Option<CompoundList>> {
-        if self
-            .next_token_is_operator(&[Operator::LeftParen])?
-            .is_none()
-        {
+        let left_paren = match self.next_token_is_operator(&[Operator::LeftParen])? {
+            None => return Ok(None),
+            Some(tok) => tok,
+        };
+
+        // Slightly gross hack to disambiguate with function definition
+        if let Some(right_paren) = self.next_token_is_operator(&[Operator::RightParen])? {
+            self.unget_token(right_paren);
+            self.unget_token(left_paren);
             return Ok(None);
         }
 

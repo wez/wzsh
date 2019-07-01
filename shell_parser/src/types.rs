@@ -26,6 +26,7 @@ pub enum CommandType {
     If(If),
     UntilLoop(UntilLoop),
     WhileLoop(WhileLoop),
+    FunctionDefinition { name: String, body: Box<Command> },
     // TODO: Case
 }
 
