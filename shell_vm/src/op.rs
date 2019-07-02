@@ -234,6 +234,11 @@ op!(
     Wait { status: Operand },
     /// Invert the truthiness of the last wait status
     InvertLastWait {},
+    /// Define a function
+    DefineFunction {
+        name: String,
+        program: Arc<Program>,
+    },
 );
 
 impl Dispatch for Copy {
@@ -735,6 +740,19 @@ impl Dispatch for SpawnCommand {
 
         *machine.operand_mut(&self.status)? = Value::WaitableStatus(status);
 
+        Ok(Status::Running)
+    }
+}
+
+impl Dispatch for DefineFunction {
+    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+        let host = machine.host.as_mut().ok_or_else(|| {
+            err_msg("unable to DefineFunction because no shell host has been configured")
+        })?;
+        host.define_function(&self.name, &self.program)?;
+        machine.last_wait_status.replace(Value::WaitableStatus(
+            Status::Complete(Value::Integer(0)).into(),
+        ));
         Ok(Status::Running)
     }
 }

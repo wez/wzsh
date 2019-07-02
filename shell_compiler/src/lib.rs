@@ -573,6 +573,17 @@ impl Compiler {
                     self.push(op::InvertLastWait {});
                 }
             }
+
+            CommandType::FunctionDefinition { name, body } => {
+                let mut compiler = Self::new();
+                compiler.compile_command(&*body)?;
+                let program = Program::new(compiler.finish()?);
+                self.push(op::DefineFunction {
+                    name: name.to_string(),
+                    program,
+                });
+            }
+
             _ => bail!("unhandled command type: {:?}", command),
         };
 

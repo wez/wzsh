@@ -143,7 +143,7 @@ pub enum InstructionAddress {
     Relative(isize),
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct Program {
     opcodes: Vec<Operation>,
 }

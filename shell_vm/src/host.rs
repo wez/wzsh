@@ -1,4 +1,4 @@
-use crate::{Environment, IoEnvironment, Status, Value};
+use crate::{Environment, IoEnvironment, Program, Status, Value};
 use failure::Fallible;
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -123,4 +123,6 @@ pub trait ShellHost: std::fmt::Debug {
         current_directory: &mut PathBuf,
         io_env: &IoEnvironment,
     ) -> Fallible<WaitableStatus>;
+
+    fn define_function(&self, name: &str, program: &Arc<Program>) -> Fallible<()>;
 }

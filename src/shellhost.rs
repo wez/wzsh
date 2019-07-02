@@ -6,7 +6,7 @@ use crate::job::{Job, JOB_LIST};
 use cancel::Token;
 use failure::{bail, err_msg, format_err, Fallible, ResultExt};
 use pathsearch::PathSearcher;
-use shell_vm::{Environment, IoEnvironment, ShellHost, Status, Value, WaitableStatus};
+use shell_vm::{Environment, IoEnvironment, Program, ShellHost, Status, Value, WaitableStatus};
 use std::ffi::OsString;
 use std::io::Write;
 use std::path::PathBuf;
@@ -170,5 +170,10 @@ impl ShellHost for Host {
             writeln!(io_env.stderr(), "wzsh: {:?} not found", &argv[0])?;
         }
         Ok(Status::Complete(127.into()).into())
+    }
+
+    fn define_function(&self, name: &str, program: &Arc<Program>) -> Fallible<()> {
+        eprintln!("define_function {}", name);
+        Ok(())
     }
 }
