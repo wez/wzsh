@@ -1,4 +1,5 @@
 use crate::builtins::Builtin;
+use crate::shellhost::FunctionRegistry;
 use cancel::Token;
 use failure::Fallible;
 use shell_vm::{Environment, IoEnvironment, Status, WaitableStatus};
@@ -22,6 +23,7 @@ impl Builtin for ColonCommand {
         _current_directory: &mut PathBuf,
         _io_env: &IoEnvironment,
         _cancel: Arc<Token>,
+        _functions: &Arc<FunctionRegistry>,
     ) -> Fallible<WaitableStatus> {
         Ok(Status::Complete(0.into()).into())
     }

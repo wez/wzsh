@@ -6,30 +6,59 @@ use crate::job::{Job, JOB_LIST};
 use cancel::Token;
 use failure::{bail, err_msg, format_err, Fallible, ResultExt};
 use pathsearch::PathSearcher;
-use shell_vm::{Environment, IoEnvironment, Program, ShellHost, Status, Value, WaitableStatus};
+use shell_vm::{
+    Environment, IoEnvironment, Machine, Program, ShellHost, Status, Value, WaitableStatus,
+};
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 #[derive(Debug)]
-pub struct Host {
-    job: Mutex<Job>,
-    job_control_enabled: bool,
+pub struct FunctionRegistry {
+    functions: Mutex<HashMap<String, Arc<Program>>>,
 }
 
-impl Host {
-    pub fn new(job: Job) -> Self {
+impl FunctionRegistry {
+    pub fn new() -> Self {
         Self {
-            job: Mutex::new(job),
-            job_control_enabled: false,
+            functions: Mutex::new(HashMap::new()),
         }
     }
 
-    pub fn with_job_control(job: Job) -> Self {
+    pub fn define_function(&self, name: &str, program: &Arc<Program>) {
+        let mut funcs = self.functions.lock().unwrap();
+        funcs.insert(name.to_owned(), Arc::clone(program));
+    }
+
+    pub fn lookup_function(&self, name: &str) -> Option<Arc<Program>> {
+        let funcs = self.functions.lock().unwrap();
+        funcs.get(name).map(Arc::clone)
+    }
+}
+
+#[derive(Debug)]
+pub struct Host {
+    job: Mutex<Job>,
+    job_control_enabled: bool,
+    funcs: Arc<FunctionRegistry>,
+}
+
+impl Host {
+    pub fn new(job: Job, funcs: &Arc<FunctionRegistry>) -> Self {
+        Self {
+            job: Mutex::new(job),
+            job_control_enabled: false,
+            funcs: Arc::clone(funcs),
+        }
+    }
+
+    pub fn with_job_control(job: Job, funcs: &Arc<FunctionRegistry>) -> Self {
         Self {
             job: Mutex::new(job),
             job_control_enabled: true,
+            funcs: Arc::clone(funcs),
         }
     }
 }
@@ -38,6 +67,7 @@ impl ShellHost for Host {
     fn lookup_homedir(&self, _user: Option<&str>) -> Fallible<OsString> {
         bail!("lookup_homedir not implemented");
     }
+
     fn spawn_command(
         &self,
         argv: &Vec<Value>,
@@ -57,6 +87,27 @@ impl ShellHost for Host {
             (true, true, &argv[..])
         };
 
+        if let Some(name) = argv[0].as_str() {
+            if let Some(prog) = self.funcs.lookup_function(name) {
+                // Execute the function.
+                // This is blocking and not subjectable to job control.
+                let job = Job::new_empty(name.to_string());
+                let mut machine =
+                    Machine::new(&prog, Some(environment.clone()), &current_directory)?;
+                machine.set_host(Arc::new(Host::new(job, &self.funcs)));
+
+                // TODO: pass parameters along!
+
+                let status = machine.run();
+
+                let (new_cwd, new_env) = machine.top_environment();
+                *current_directory = new_cwd;
+                *environment = new_env;
+
+                return status.map(Into::into);
+            }
+        }
+
         if search_builtin {
             if let Some(builtin) = lookup_builtin(&argv[0]) {
                 // Create a token for cancellation.
@@ -65,7 +116,14 @@ impl ShellHost for Host {
                 // This needs to be connected to CTRL-C from the REPL or from a
                 // signal handler.
                 let token = Arc::new(Token::new());
-                return builtin(&argv[..], environment, current_directory, io_env, token);
+                return builtin(
+                    &argv[..],
+                    environment,
+                    current_directory,
+                    io_env,
+                    token,
+                    &self.funcs,
+                );
             }
         }
 
@@ -173,7 +231,7 @@ impl ShellHost for Host {
     }
 
     fn define_function(&self, name: &str, program: &Arc<Program>) -> Fallible<()> {
-        eprintln!("define_function {}", name);
+        self.funcs.define_function(name, program);
         Ok(())
     }
 }

@@ -1,4 +1,5 @@
 use crate::builtins::Builtin;
+use crate::shellhost::FunctionRegistry;
 use cancel::Token;
 use failure::Fallible;
 use shell_vm::{Environment, IoEnvironment, Status, WaitableStatus};
@@ -21,6 +22,7 @@ impl Builtin for BuiltinsCommand {
         _current_directory: &mut PathBuf,
         io_env: &IoEnvironment,
         _cancel: Arc<Token>,
+        _functions: &Arc<FunctionRegistry>,
     ) -> Fallible<WaitableStatus> {
         let mut builtins: Vec<&'static str> = super::BUILTINS.iter().map(|(k, _)| *k).collect();
         builtins.sort_unstable();

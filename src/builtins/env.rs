@@ -1,4 +1,5 @@
 use crate::builtins::Builtin;
+use crate::shellhost::FunctionRegistry;
 use cancel::Token;
 use failure::Fallible;
 use shell_vm::{Environment, IoEnvironment, Status, WaitableStatus};
@@ -28,6 +29,7 @@ impl Builtin for ExportCommand {
         _current_directory: &mut PathBuf,
         io_env: &IoEnvironment,
         cancel: Arc<Token>,
+        _functions: &Arc<FunctionRegistry>,
     ) -> Fallible<WaitableStatus> {
         if self.print {
             for (k, v) in environment.iter() {
@@ -72,6 +74,7 @@ impl Builtin for UnsetCommand {
         _current_directory: &mut PathBuf,
         _io_env: &IoEnvironment,
         _cancel: Arc<Token>,
+        _functions: &Arc<FunctionRegistry>,
     ) -> Fallible<WaitableStatus> {
         for name in &self.names {
             environment.unset(name);

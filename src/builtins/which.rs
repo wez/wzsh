@@ -1,4 +1,5 @@
 use crate::builtins::{lookup_builtin, Builtin};
+use crate::shellhost::FunctionRegistry;
 use cancel::Token;
 use failure::Fallible;
 use pathsearch::PathSearcher;
@@ -38,8 +39,18 @@ impl Builtin for WhichCommand {
         _current_directory: &mut PathBuf,
         io_env: &IoEnvironment,
         cancel: Arc<Token>,
+        functions: &Arc<FunctionRegistry>,
     ) -> Fallible<WaitableStatus> {
         let mut found = false;
+
+        if let Some(name) = self.command.to_str() {
+            if let Some(_) = functions.lookup_function(name) {
+                found = true;
+                if !self.quiet {
+                    writeln!(io_env.stdout(), "{}: shell function", name)?;
+                }
+            }
+        }
         if let Some(_) = lookup_builtin(&Value::OsString(self.command.as_os_str().to_os_string())) {
             found = true;
             if !self.quiet {

@@ -1,5 +1,6 @@
 use crate::builtins::Builtin;
 use crate::job::JOB_LIST;
+use crate::shellhost::FunctionRegistry;
 use cancel::Token;
 use failure::{err_msg, Fallible};
 use shell_vm::{Environment, IoEnvironment, Status, WaitableStatus};
@@ -22,6 +23,7 @@ impl Builtin for FgCommand {
         _current_directory: &mut PathBuf,
         io_env: &IoEnvironment,
         _cancel: Arc<Token>,
+        _functions: &Arc<FunctionRegistry>,
     ) -> Fallible<WaitableStatus> {
         let mut jobs = JOB_LIST.jobs();
         if let Some(mut job) = jobs.pop() {
@@ -62,6 +64,7 @@ impl Builtin for JobsCommand {
         _current_directory: &mut PathBuf,
         io_env: &IoEnvironment,
         _cancel: Arc<Token>,
+        _functions: &Arc<FunctionRegistry>,
     ) -> Fallible<WaitableStatus> {
         let mut jobs = JOB_LIST.jobs();
         for job in &mut jobs {

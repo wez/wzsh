@@ -1,4 +1,5 @@
 use crate::builtins::Builtin;
+use crate::shellhost::FunctionRegistry;
 use cancel::Token;
 use failure::{err_msg, Fallible};
 use shell_vm::{Environment, IoEnvironment, Status, WaitableStatus};
@@ -31,6 +32,7 @@ impl Builtin for PwdCommand {
         current_directory: &mut PathBuf,
         io_env: &IoEnvironment,
         _cancel: Arc<Token>,
+        _functions: &Arc<FunctionRegistry>,
     ) -> Fallible<WaitableStatus> {
         let pwd = if self.physical {
             current_directory.canonicalize()?
@@ -106,6 +108,7 @@ impl Builtin for CdCommand {
         current_directory: &mut PathBuf,
         io_env: &IoEnvironment,
         _cancel: Arc<Token>,
+        _functions: &Arc<FunctionRegistry>,
     ) -> Fallible<WaitableStatus> {
         let directory = match self.directory.take() {
             Some(dir) => dir,

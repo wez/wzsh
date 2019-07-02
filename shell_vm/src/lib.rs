@@ -4,7 +4,7 @@ use failure::{bail, err_msg, format_err, Error, Fallible};
 use filedescriptor::FileDescriptor;
 use std::collections::VecDeque;
 use std::ffi::{OsStr, OsString};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 mod environment;
@@ -227,20 +227,18 @@ fn split_by_ifs<'a>(value: &'a str, ifs: &str) -> Vec<&'a str> {
 }
 
 impl Machine {
-    pub fn new(program: &Arc<Program>, env: Option<Environment>) -> Fallible<Self> {
+    pub fn new(program: &Arc<Program>, env: Option<Environment>, cwd: &Path) -> Fallible<Self> {
         let mut environment = VecDeque::new();
         environment.push_back(env.unwrap_or_else(Environment::new));
 
         let mut io_env = VecDeque::new();
         io_env.push_back(IoEnvironment::new()?);
 
-        let cwd = std::env::current_dir()?;
-
         Ok(Self {
             program: Arc::clone(program),
             environment,
             io_env,
-            cwd,
+            cwd: cwd.to_path_buf(),
             ..Default::default()
         })
     }
@@ -422,7 +420,7 @@ mod test {
     }
 
     fn machine(ops: &[Operation]) -> Machine {
-        Machine::new(&prog(ops), None).unwrap()
+        Machine::new(&prog(ops), None, &std::env::current_dir().unwrap()).unwrap()
     }
 
     fn run_err(m: &mut Machine) -> String {

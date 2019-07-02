@@ -1,3 +1,4 @@
+use crate::shellhost::FunctionRegistry;
 use cancel::Token;
 use failure::{err_msg, Fallible};
 use lazy_static::lazy_static;
@@ -24,6 +25,7 @@ pub trait Builtin: StructOpt {
         current_directory: &mut PathBuf,
         io_env: &IoEnvironment,
         cancel: Arc<Token>,
+        functions: &Arc<FunctionRegistry>,
     ) -> Fallible<WaitableStatus>
     where
         Self: Sized,
@@ -40,7 +42,7 @@ pub trait Builtin: StructOpt {
             );
         }
         let mut args = Self::from_clap(&app.get_matches_from_safe(os_args.iter())?);
-        args.run(environment, current_directory, io_env, cancel)
+        args.run(environment, current_directory, io_env, cancel, functions)
     }
 
     fn name() -> &'static str;
@@ -51,6 +53,7 @@ pub trait Builtin: StructOpt {
         current_directory: &mut PathBuf,
         io_env: &IoEnvironment,
         cancel: Arc<Token>,
+        functions: &Arc<FunctionRegistry>,
     ) -> Fallible<WaitableStatus>;
 }
 
@@ -60,6 +63,7 @@ pub type BuiltinFunc = fn(
     current_directory: &mut PathBuf,
     io_env: &IoEnvironment,
     cancel: Arc<Token>,
+    functions: &Arc<FunctionRegistry>,
 ) -> Fallible<WaitableStatus>;
 
 pub fn lookup_builtin(name: &Value) -> Option<BuiltinFunc> {

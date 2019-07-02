@@ -1,6 +1,6 @@
 use crate::errorprint::print_error;
 use crate::job::{put_shell_in_foreground, Job, JOB_LIST};
-use crate::shellhost::Host;
+use crate::shellhost::{FunctionRegistry, Host};
 use failure::{Error, Fail, Fallible};
 use shell_compiler::Compiler;
 use shell_lexer::{LexError, LexErrorKind};
@@ -82,6 +82,7 @@ fn init_job_control() -> Fallible<()> {
 struct EnvBits {
     cwd: PathBuf,
     env: Environment,
+    funcs: Arc<FunctionRegistry>,
 }
 
 fn compile_and_run(prog: &str, env_bits: &mut EnvBits) -> Fallible<Status> {
@@ -91,8 +92,12 @@ fn compile_and_run(prog: &str, env_bits: &mut EnvBits) -> Fallible<Status> {
     let mut compiler = Compiler::new();
     compiler.compile_command(&command)?;
     let prog = compiler.finish()?;
-    let mut machine = Machine::new(&Program::new(prog), Some(env_bits.env.clone()))?;
-    machine.set_host(Arc::new(Host::with_job_control(job)));
+    let mut machine = Machine::new(
+        &Program::new(prog),
+        Some(env_bits.env.clone()),
+        &env_bits.cwd,
+    )?;
+    machine.set_host(Arc::new(Host::with_job_control(job, &env_bits.funcs)));
     let status = machine.run();
 
     let (cwd, env) = machine.top_environment();
@@ -125,8 +130,12 @@ impl LineEditorHost for EditHost {
     }
 }
 
-pub fn repl(cwd: PathBuf, env: Environment) -> Fallible<()> {
-    let mut env = EnvBits { cwd, env };
+pub fn repl(cwd: PathBuf, env: Environment, funcs: &Arc<FunctionRegistry>) -> Fallible<()> {
+    let mut env = EnvBits {
+        cwd,
+        env,
+        funcs: Arc::clone(funcs),
+    };
 
     #[cfg(unix)]
     init_job_control()?;

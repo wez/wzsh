@@ -772,6 +772,10 @@ mod test {
             });
             Ok(status)
         }
+
+        fn define_function(&self, name: &str, program: &Arc<Program>) -> Fallible<()> {
+            bail!("define_function not impl");
+        }
     }
 
     fn compile(prog: &str) -> Fallible<Vec<Operation>> {
@@ -783,7 +787,11 @@ mod test {
     }
 
     fn run(prog: Vec<Operation>) -> Fallible<Status> {
-        let mut machine = Machine::new(&Program::new(prog), Some(Environment::new_empty()))?;
+        let mut machine = Machine::new(
+            &Program::new(prog),
+            Some(Environment::new_empty()),
+            &std::env::current_dir()?,
+        )?;
         machine.run()
     }
 
@@ -820,7 +828,11 @@ mod test {
         prog: Vec<Operation>,
     ) -> Fallible<(Status, Vec<SpawnEntry>, String, String)> {
         print_prog(&prog);
-        let mut machine = Machine::new(&Program::new(prog), Some(Environment::new_empty()))?;
+        let mut machine = Machine::new(
+            &Program::new(prog),
+            Some(Environment::new_empty()),
+            &std::env::current_dir()?,
+        )?;
 
         let host = TestHost::default();
         let log = Arc::clone(&host.spawn_log);

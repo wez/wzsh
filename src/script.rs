@@ -1,5 +1,5 @@
 use crate::job::Job;
-use crate::shellhost::Host;
+use crate::shellhost::{FunctionRegistry, Host};
 use failure::Fallible;
 use shell_compiler::Compiler;
 use shell_parser::Parser;
@@ -11,6 +11,7 @@ pub fn compile_and_run_script_file(
     path: &Path,
     cwd: &mut PathBuf,
     env: &mut Environment,
+    funcs: &Arc<FunctionRegistry>,
 ) -> Fallible<Status> {
     let job = Job::new_empty(path.to_string_lossy().to_string());
     let file = std::fs::File::open(path)?;
@@ -21,8 +22,8 @@ pub fn compile_and_run_script_file(
     compiler.compile_command(&command)?;
     let prog = compiler.finish()?;
 
-    let mut machine = Machine::new(&Program::new(prog), Some(env.clone()))?;
-    machine.set_host(Arc::new(Host::new(job)));
+    let mut machine = Machine::new(&Program::new(prog), Some(env.clone()), &cwd)?;
+    machine.set_host(Arc::new(Host::new(job, funcs)));
     let status = machine.run();
 
     let (new_cwd, new_env) = machine.top_environment();

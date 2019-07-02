@@ -1,7 +1,9 @@
 use crate::errorprint::print_error_path;
+use crate::shellhost::FunctionRegistry;
 use failure::Fallible;
 use shell_vm::Environment;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 mod builtins;
 mod errorprint;
@@ -21,14 +23,17 @@ fn config_dir() -> PathBuf {
 fn main() -> Fallible<()> {
     let mut cwd = std::env::current_dir()?;
     let mut env = Environment::new();
+    let funcs = Arc::new(FunctionRegistry::new());
 
     let startup_script = config_dir().join("startup.wzsh");
     if startup_script.exists() {
-        if let Err(err) = script::compile_and_run_script_file(&startup_script, &mut cwd, &mut env) {
+        if let Err(err) =
+            script::compile_and_run_script_file(&startup_script, &mut cwd, &mut env, &funcs)
+        {
             print_error_path(&err, &startup_script);
             eprintln!("wzsh: ignoring error during startup processing.");
         }
     }
 
-    repl::repl(cwd, env)
+    repl::repl(cwd, env, &funcs)
 }
