@@ -92,8 +92,7 @@ op!(
     Exit { value: Operand },
     /// Emit an error and halt the program
     Error { message: Operand },
-    /// Append the value from the source to the list
-    /// value at the destination.
+    /// Append the value from the source to the list value at the destination.
     /// If split is true, split value using the current IFS value
     /// before appending, and append the generated elements instead.
     /// If glob is true and the element(s) are
@@ -105,6 +104,10 @@ op!(
         split: bool,
         glob: bool,
         remove_backslash: bool,
+    },
+    ListAppendList {
+        src_list: Operand,
+        dest_list: Operand,
     },
     /// destination = a + b
     Add {
@@ -332,12 +335,43 @@ impl Dispatch for PopIo {
 
 impl Dispatch for GetEnv {
     fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
-        let value = machine
-            .environment()?
-            .get(machine.operand_as_os_str(&self.name)?)
-            .map(|x| Value::OsString(x.into()))
-            .unwrap_or(Value::None);
-        *machine.operand_mut(&self.target)? = value;
+        let name = machine.operand_as_str(&self.name)?;
+        if name == "@" || name == "*" {
+            /*
+            let joined = join_list_ifs(
+                machine,
+                Value::List(machine.positional.iter().skip(1).cloned().collect()),
+            )?;
+            *machine.operand_mut(&self.target)? = joined.into();
+            */
+            *machine.operand_mut(&self.target)? =
+                Value::List(machine.positional.iter().skip(1).cloned().collect());
+        } else if name == "#" {
+            *machine.operand_mut(&self.target)? =
+                Value::String(machine.positional.len().saturating_sub(1).to_string());
+        } else if let Ok(numeric) = name.parse::<usize>() {
+            let value = if numeric == 0 {
+                machine
+                    .positional
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| Value::String("wzsh".to_owned()))
+            } else {
+                machine
+                    .positional
+                    .get(numeric)
+                    .cloned()
+                    .unwrap_or(Value::None)
+            };
+            *machine.operand_mut(&self.target)? = value;
+        } else {
+            let value = machine
+                .environment()?
+                .get(name)
+                .map(|x| Value::OsString(x.into()))
+                .unwrap_or(Value::None);
+            *machine.operand_mut(&self.target)? = value;
+        }
         Ok(Status::Running)
     }
 }
@@ -435,30 +469,34 @@ impl Dispatch for StringAppend {
     }
 }
 
-impl JoinList {
-    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
-        let mut dest = BString::new();
-        let ifs = machine.ifs()?.to_owned();
-        let join_char = ifs.chars().next();
+fn join_list_ifs(machine: &mut Machine, list: Value) -> Fallible<Value> {
+    let mut dest = BString::new();
+    let ifs = machine.ifs()?.to_owned();
+    let join_char = ifs.chars().next();
 
-        let list = machine.operand(&self.list)?;
-        let list = match list {
-            Value::List(list) => list,
-            _ => bail!("JoinList called on non-list value {:?}", list),
-        };
+    let list = match list {
+        Value::List(list) => list,
+        _ => bail!("JoinList called on non-list value {:?}", list),
+    };
 
-        for element in list {
-            if !dest.is_empty() && join_char.is_some() {
-                dest.push_char(*join_char.as_ref().unwrap());
-            }
-
-            let element = element
-                .as_bstr()
-                .ok_or_else(|| err_msg("JoinList: element is not representable as BString"))?;
-            dest.push(element);
+    for element in list {
+        if !dest.is_empty() && join_char.is_some() {
+            dest.push_char(*join_char.as_ref().unwrap());
         }
 
-        *machine.operand_mut(&self.destination)? = dest.try_into()?;
+        let element = element
+            .as_bstr()
+            .ok_or_else(|| err_msg("JoinList: element is not representable as BString"))?;
+        dest.push(element);
+    }
+    Ok(dest.try_into()?)
+}
+
+impl JoinList {
+    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+        let dest = join_list_ifs(machine, machine.operand(&self.list)?.clone())?;
+        *machine.operand_mut(&self.destination)? = dest;
+
         Ok(Status::Running)
     }
 }
@@ -490,6 +528,24 @@ impl Dispatch for ListAppend {
             machine.push_with_glob(&mut list, self.glob, self.remove_backslash, src)?;
         }
         *machine.operand_mut(&self.list)? = list.into();
+        Ok(Status::Running)
+    }
+}
+
+impl Dispatch for ListAppendList {
+    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+        let mut src_list = match machine.operand_mut(&self.src_list)? {
+            Value::List(list) => list.clone(),
+            _ => bail!("cannot ListAppendList from non-list"),
+        };
+        let mut dest_list = match machine.operand_mut(&self.dest_list)? {
+            Value::List(dest) => std::mem::replace(dest, Vec::new()),
+            _ => bail!("cannot ListAppendList to non-list"),
+        };
+
+        dest_list.append(&mut src_list);
+
+        *machine.operand_mut(&self.dest_list)? = dest_list.into();
         Ok(Status::Running)
     }
 }

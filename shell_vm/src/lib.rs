@@ -152,6 +152,10 @@ impl Program {
     pub fn new(opcodes: Vec<Operation>) -> Arc<Program> {
         Arc::new(Self { opcodes })
     }
+
+    pub fn opcodes(&self) -> &[Operation] {
+        &self.opcodes
+    }
 }
 
 #[derive(Debug, Default)]
@@ -173,6 +177,7 @@ pub struct Machine {
     frames: VecDeque<Frame>,
     environment: VecDeque<Environment>,
     io_env: VecDeque<IoEnvironment>,
+    positional: Vec<Value>,
     cwd: PathBuf,
     host: Option<Arc<ShellHost>>,
     pipes: VecDeque<FileDescriptor>,
@@ -208,7 +213,7 @@ fn split_by_ifs<'a>(value: &'a str, ifs: &str) -> Vec<&'a str> {
     for (idx, c) in value.char_indices() {
         if ifs.contains(&c) {
             if let Some(start) = run_start.take() {
-                if idx > start + 1 {
+                if idx > start {
                     split.push(&value[start..idx]);
                 }
             }
@@ -241,6 +246,10 @@ impl Machine {
             cwd: cwd.to_path_buf(),
             ..Default::default()
         })
+    }
+
+    pub fn set_positional(&mut self, argv: Vec<Value>) {
+        self.positional = argv;
     }
 
     pub fn top_environment(&self) -> (PathBuf, Environment) {
@@ -355,6 +364,17 @@ impl Machine {
         value.as_os_str().ok_or_else(|| {
             format_err!(
                 "operand {:?} of value {:?} is not representable as OsStr",
+                operand,
+                value
+            )
+        })
+    }
+
+    pub fn operand_as_str<'a>(&'a self, operand: &'a Operand) -> Fallible<&'a str> {
+        let value = self.operand(operand)?;
+        value.as_str().ok_or_else(|| {
+            format_err!(
+                "operand {:?} of value {:?} is not representable as String",
                 operand,
                 value
             )
@@ -498,6 +518,7 @@ mod test {
     #[test]
     fn test_split_by_ifs() {
         let ifs = " \t\n";
+        assert_eq!(split_by_ifs("a b", ifs), vec!["a", "b"]);
         assert_eq!(split_by_ifs("foo", ifs), vec!["foo"]);
         assert_eq!(split_by_ifs("foo bar", ifs), vec!["foo", "bar"]);
         assert_eq!(split_by_ifs("foo  bar ", ifs), vec!["foo", "bar"]);

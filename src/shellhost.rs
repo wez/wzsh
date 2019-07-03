@@ -96,7 +96,7 @@ impl ShellHost for Host {
                     Machine::new(&prog, Some(environment.clone()), &current_directory)?;
                 machine.set_host(Arc::new(Host::new(job, &self.funcs)));
 
-                // TODO: pass parameters along!
+                machine.set_positional(argv.to_vec());
 
                 let status = machine.run();
 

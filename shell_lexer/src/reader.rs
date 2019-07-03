@@ -208,6 +208,9 @@ impl<R: Read> CharReader<R> {
         assert!(len < self.line_idx);
         self.line_idx -= len;
         self.position.col -= 1;
-        assert!(self.line_buffer[self.line_idx..].chars().next().unwrap() == c.c);
+        assert_eq!(
+            self.line_buffer[self.line_idx..].chars().next().unwrap(),
+            c.c
+        );
     }
 }

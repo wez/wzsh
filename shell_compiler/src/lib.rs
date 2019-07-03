@@ -362,6 +362,32 @@ impl Compiler {
     /// are subject to field splitting based on the runtime value of
     /// the IFS variable.
     fn word_expand(&mut self, argv: usize, word: &Vec<WordComponent>) -> Fallible<()> {
+        // Hideous "special parameters" special casing
+        if word.len() == 1 {
+            if let WordComponentKind::ParamExpand(ParamExpr {
+                name,
+                word,
+                kind: ParamOper::Get,
+            }) = &word[0].kind
+            {
+                if word.is_empty() && (name == "@" || name == "*") {
+                    let positional = self.allocate_string()?;
+                    self.push(op::GetEnv {
+                        name: Operand::Immediate(name.to_owned().into()),
+                        target: Operand::FrameRelative(positional),
+                    });
+
+                    self.push(op::ListAppendList {
+                        src_list: Operand::FrameRelative(positional),
+                        dest_list: Operand::FrameRelative(argv),
+                    });
+                    self.frame()?.free(positional);
+
+                    return Ok(());
+                }
+            }
+        }
+
         let expanded_word = self.allocate_string()?;
 
         let mut split = true;
@@ -607,6 +633,7 @@ mod test {
     use filedescriptor::{FileDescriptor, Pipe};
     use pretty_assertions::assert_eq;
     use shell_parser::Parser;
+    use std::collections::HashMap;
     use std::ffi::{OsStr, OsString};
     use std::io::{Read, Write};
     use std::path::PathBuf;
@@ -639,6 +666,13 @@ mod test {
     #[derive(Default, Debug)]
     struct TestHost {
         spawn_log: Arc<Mutex<Vec<SpawnEntry>>>,
+        funcs: Arc<Mutex<HashMap<String, Arc<Program>>>>,
+    }
+
+    impl TestHost {
+        fn lookup_function(&self, name: &str) -> Option<Arc<Program>> {
+            self.funcs.lock().unwrap().get(name).map(Arc::clone)
+        }
     }
 
     #[derive(Debug)]
@@ -729,13 +763,36 @@ mod test {
             current_directory: &mut PathBuf,
             io_env: &IoEnvironment,
         ) -> Fallible<WaitableStatus> {
-            let mut log = self.spawn_log.lock().unwrap();
-
             let command = argv
                 .get(0)
                 .ok_or_else(|| err_msg("argv0 is missing"))?
                 .as_os_str()
                 .ok_or_else(|| err_msg("argv0 is not a string"))?;
+
+            if let Some(prog) = self.lookup_function(command.to_str().unwrap()) {
+                // Execute the function.
+                // This is blocking and not subjectable to job control.
+                let mut machine =
+                    Machine::new(&prog, Some(environment.clone()), &current_directory)?;
+                machine.set_host(Arc::new(TestHost {
+                    funcs: Arc::clone(&self.funcs),
+                    spawn_log: Arc::clone(&self.spawn_log),
+                }));
+
+                print_prog(prog.opcodes());
+                machine.set_positional(argv.clone());
+
+                let status = machine.run();
+
+                let (new_cwd, new_env) = machine.top_environment();
+                *current_directory = new_cwd;
+                *environment = new_env;
+
+                return status.map(Into::into);
+            }
+            eprintln!("looking up for spawn {:?}", argv);
+
+            let mut log = self.spawn_log.lock().unwrap();
             let status: WaitableStatus = if command == "true" {
                 Status::Complete(0.into()).into()
             } else if command == "echo" {
@@ -774,7 +831,9 @@ mod test {
         }
 
         fn define_function(&self, name: &str, program: &Arc<Program>) -> Fallible<()> {
-            bail!("define_function not impl");
+            let mut funcs = self.funcs.lock().unwrap();
+            funcs.insert(name.to_owned(), Arc::clone(program));
+            Ok(())
         }
     }
 
@@ -795,7 +854,7 @@ mod test {
         machine.run()
     }
 
-    fn print_prog(prog: &Vec<Operation>) {
+    fn print_prog(prog: &[Operation]) {
         eprintln!("--");
         eprintln!("program of length {}", prog.len());
         for (idx, op) in prog.iter().enumerate() {
@@ -1304,6 +1363,91 @@ mod test {
                 vec![SpawnEntry::new(vec!["echo".into(),]),],
                 "\n".to_owned(),
                 "".to_owned(),
+            )
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn positional_at() -> Fallible<()> {
+        assert_eq!(
+            run_with_log(compile("echo $@")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec!["echo".into()]),]
+            )
+        );
+        assert_eq!(
+            run_with_log(compile("f() { echo $@ }\nf 1")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec!["echo".into(), "1".into()]),]
+            )
+        );
+        assert_eq!(
+            run_with_log(compile("f() { echo $@ }\nf a b")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec!["echo".into(), "a".into(), "b".into()]),]
+            )
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn param_n() -> Fallible<()> {
+        assert_eq!(
+            run_with_log(compile("echo $0")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec!["echo".into(), "wzsh".into()]),]
+            )
+        );
+        assert_eq!(
+            run_with_log(compile("echo ${000}")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec!["echo".into(), "wzsh".into()]),]
+            )
+        );
+        assert_eq!(
+            run_with_log(compile("f() { echo $0 }\nf")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec!["echo".into(), "f".into()]),]
+            )
+        );
+        assert_eq!(
+            run_with_log(compile("f() { echo $1 }\nf a b")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec!["echo".into(), "a".into()]),]
+            )
+        );
+        assert_eq!(
+            run_with_log(compile("f() { echo \"$1\" }\nf \"a b\"")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec!["echo".into(), "a b".into()]),]
+            )
+        );
+        assert_eq!(
+            run_with_log(compile("f() { echo $2 }\nf a b")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec!["echo".into(), "b".into()]),]
+            )
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn positional_len() -> Fallible<()> {
+        assert_eq!(
+            run_with_log(compile("f() { echo $# }\nf a b")?)?,
+            (
+                Status::Complete(0.into()),
+                vec![SpawnEntry::new(vec!["echo".into(), "2".into()]),]
             )
         );
         Ok(())

@@ -13,8 +13,8 @@ use std::io::Read;
 lazy_static! {
     static ref TILE_EXPAND_RE: Regex =
         Regex::new(r"^~([a-zA-Z_][a-zA-Z0-9_]+)?(/|$)").expect("failed to compile TILE_EXPAND_RE");
-    static ref PARAM_RE: Regex =
-        Regex::new(r"^([0-9]|[a-zA-Z_][a-zA-Z0-9_]+)").expect("failed to compile NAME_RE");
+    static ref PARAM_RE: Regex = Regex::new(r"^([0-9]+|[@*#?$!-]|[a-zA-Z_][a-zA-Z0-9_]+)")
+        .expect("failed to compile PARAM_RE");
     static ref OPER_RE: Regex = Regex::new(r"^[%#:]?[%#-=?+]").expect("failed to compile OPER_RE");
 }
 
