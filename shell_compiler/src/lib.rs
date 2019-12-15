@@ -629,6 +629,7 @@ impl Compiler {
 #[cfg(test)]
 mod test {
     use super::*;
+    use anyhow::Context;
     use filedescriptor::{FileDescriptor, Pipe};
     use pretty_assertions::assert_eq;
     use shell_parser::Parser;
@@ -873,8 +874,8 @@ mod test {
             Ok(_) => {}
             Err(err) => {
                 if err.kind() != std::io::ErrorKind::BrokenPipe {
-                    let err: Error = err.into();
-                    Err(err.context("consume_pipe: read_to_string"))?
+                    let err: anyhow::Error = err.into();
+                    Err(err).context("consume_pipe: read_to_string")?
                 }
             }
         };
