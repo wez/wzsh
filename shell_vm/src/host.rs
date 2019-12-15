@@ -40,7 +40,7 @@ impl From<Status> for WaitableStatus {
 /// so that the status is visible to the vm.
 #[derive(Clone, Debug)]
 pub struct WaitableStatus {
-    waiter: Arc<WaitForStatus>,
+    waiter: Arc<dyn WaitForStatus>,
 }
 
 /// PartialEq is required by the Value enum.  This is a simple test for
@@ -57,7 +57,7 @@ impl PartialEq for WaitableStatus {
 impl Eq for WaitableStatus {}
 
 impl WaitableStatus {
-    pub fn new(waiter: Arc<WaitForStatus>) -> Self {
+    pub fn new(waiter: Arc<dyn WaitForStatus>) -> Self {
         Self { waiter }
     }
 

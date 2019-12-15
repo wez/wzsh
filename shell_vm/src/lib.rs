@@ -179,7 +179,7 @@ pub struct Machine {
     io_env: VecDeque<IoEnvironment>,
     positional: Vec<Value>,
     cwd: PathBuf,
-    host: Option<Arc<ShellHost>>,
+    host: Option<Arc<dyn ShellHost>>,
     pipes: VecDeque<FileDescriptor>,
 
     program: Arc<Program>,
@@ -260,7 +260,7 @@ impl Machine {
         (self.cwd.clone(), self.environment.front().unwrap().clone())
     }
 
-    pub fn set_host(&mut self, host: Arc<ShellHost>) {
+    pub fn set_host(&mut self, host: Arc<dyn ShellHost>) {
         self.host = Some(host)
     }
 
