@@ -1,7 +1,7 @@
 use crate::errorprint::print_error;
 use crate::job::{put_shell_in_foreground, Job, JOB_LIST};
 use crate::shellhost::{FunctionRegistry, Host};
-use failure::{Error, Fail, Fallible};
+use anyhow::{anyhow, Context, Error};
 use shell_compiler::Compiler;
 use shell_lexer::{LexError, LexErrorKind};
 use shell_parser::{ParseErrorKind, Parser};
@@ -37,7 +37,7 @@ fn is_recoverable_parse_error(e: &Error) -> bool {
 }
 
 #[cfg(unix)]
-fn init_job_control() -> Fallible<()> {
+fn init_job_control() -> anyhow::Result<()> {
     let pty_fd = 0;
     unsafe {
         // Loop until we are in the foreground.
@@ -66,9 +66,8 @@ fn init_job_control() -> Fallible<()> {
         // Put ourselves in our own process group
         let shell_pgid = libc::getpid();
         if libc::setpgid(shell_pgid, shell_pgid) != 0 {
-            return Err(std::io::Error::last_os_error()
-                .context("unable to put shell into its own process group")
-                .into());
+            return Err(std::io::Error::last_os_error())
+                .context("unable to put shell into its own process group");
         }
 
         // Grab control of the terminal
@@ -85,7 +84,7 @@ struct EnvBits {
     funcs: Arc<FunctionRegistry>,
 }
 
-fn compile_and_run(prog: &str, env_bits: &mut EnvBits) -> Fallible<Status> {
+fn compile_and_run(prog: &str, env_bits: &mut EnvBits) -> anyhow::Result<Status> {
     let job = Job::new_empty(prog.to_owned());
     let mut parser = Parser::new(prog.as_bytes());
     let command = parser.parse()?;
@@ -130,7 +129,7 @@ impl LineEditorHost for EditHost {
     }
 }
 
-pub fn repl(cwd: PathBuf, env: Environment, funcs: &Arc<FunctionRegistry>) -> Fallible<()> {
+pub fn repl(cwd: PathBuf, env: Environment, funcs: &Arc<FunctionRegistry>) -> anyhow::Result<()> {
     let mut env = EnvBits {
         cwd,
         env,
@@ -140,7 +139,7 @@ pub fn repl(cwd: PathBuf, env: Environment, funcs: &Arc<FunctionRegistry>) -> Fa
     #[cfg(unix)]
     init_job_control()?;
 
-    let mut editor = line_editor()?;
+    let mut editor = line_editor().map_err(Error::msg)?;
     let mut host = EditHost::default();
 
     let mut input = String::new();
@@ -183,7 +182,7 @@ pub fn repl(cwd: PathBuf, env: Environment, funcs: &Arc<FunctionRegistry>) -> Fa
                 continue;
             }
             Err(err) => {
-                print_error(&err.context("during readline").into(), "");
+                print_error(&anyhow!("during readline: {}", err), "");
                 break;
             }
         }

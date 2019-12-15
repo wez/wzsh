@@ -1,4 +1,4 @@
-use failure::Error;
+use anyhow::Error;
 use shell_lexer::{LexError, Span};
 use shell_parser::ParseErrorKind;
 use std::io::Read;
@@ -35,7 +35,7 @@ pub fn print_error_path(e: &Error, path: &Path) {
 }
 
 pub fn print_error(e: &Error, input: &str) {
-    for item in e.iter_chain() {
+    for item in e.chain() {
         eprintln!("wzsh: {}", item);
     }
     if let Some(span) = extract_error_range(e) {

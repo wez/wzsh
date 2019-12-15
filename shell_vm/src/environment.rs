@@ -1,5 +1,5 @@
+use anyhow::bail;
 use caseless::{canonical_caseless_match_str, Caseless};
-use failure::{bail, Fallible};
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
@@ -187,7 +187,10 @@ impl Environment {
         }
     }
 
-    pub fn get_str<K: AsRef<OsStr> + std::fmt::Debug>(&self, key: K) -> Fallible<Option<&str>> {
+    pub fn get_str<K: AsRef<OsStr> + std::fmt::Debug>(
+        &self,
+        key: K,
+    ) -> anyhow::Result<Option<&str>> {
         match self.get(key.as_ref()) {
             None => Ok(None),
             Some(v) => match v.to_str() {

@@ -1,6 +1,5 @@
 use crate::job::Job;
 use crate::shellhost::{FunctionRegistry, Host};
-use failure::Fallible;
 use shell_compiler::Compiler;
 use shell_parser::Parser;
 use shell_vm::{Environment, Machine, Program, Status};
@@ -12,7 +11,7 @@ pub fn compile_and_run_script_file(
     cwd: &mut PathBuf,
     env: &mut Environment,
     funcs: &Arc<FunctionRegistry>,
-) -> Fallible<Status> {
+) -> anyhow::Result<Status> {
     let job = Job::new_empty(path.to_string_lossy().to_string());
     let file = std::fs::File::open(path)?;
     let mut parser = Parser::new(file);

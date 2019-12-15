@@ -1,6 +1,6 @@
 use crate::tokenenum::{LiteralMatcher, MatchResult};
 use crate::{Pos, Span};
-use failure::{Error, Fallible};
+use anyhow::Error;
 use lazy_static::lazy_static;
 use regex::{Captures, Regex};
 use std::io::{BufRead, BufReader, Read};
@@ -55,7 +55,7 @@ impl<R: Read> CharReader<R> {
     pub fn matches_literal<T: Copy>(
         &mut self,
         matcher: &LiteralMatcher<T>,
-    ) -> Fallible<MatchResult<T>> {
+    ) -> anyhow::Result<MatchResult<T>> {
         match self.check_and_fill_buffer() {
             Next::Eof(_) => Ok(MatchResult::No),
             Next::Error(err, pos) => return Err(err.context(pos).into()),
@@ -66,7 +66,7 @@ impl<R: Read> CharReader<R> {
     pub fn next_literal<T: Copy>(
         &mut self,
         matcher: &LiteralMatcher<T>,
-    ) -> Fallible<Option<(T, Span)>> {
+    ) -> anyhow::Result<Option<(T, Span)>> {
         match self.matches_literal(matcher)? {
             MatchResult::No => Ok(None),
             MatchResult::Match(value, len) => {
@@ -79,7 +79,7 @@ impl<R: Read> CharReader<R> {
         }
     }
 
-    pub fn matches_regex(&mut self, regex: &Regex) -> Fallible<Option<(Captures, Pos)>> {
+    pub fn matches_regex(&mut self, regex: &Regex) -> anyhow::Result<Option<(Captures, Pos)>> {
         match self.check_and_fill_buffer() {
             Next::Eof(_) => Ok(None),
             Next::Error(err, pos) => return Err(err.context(pos).into()),
@@ -95,7 +95,7 @@ impl<R: Read> CharReader<R> {
         self.position.col += length;
     }
 
-    pub fn matches_io_number(&mut self) -> Fallible<bool> {
+    pub fn matches_io_number(&mut self) -> anyhow::Result<bool> {
         match self.check_and_fill_buffer() {
             Next::Eof(_) => Ok(false),
             Next::Error(err, pos) => return Err(err.context(pos).into()),
@@ -103,7 +103,7 @@ impl<R: Read> CharReader<R> {
         }
     }
 
-    pub fn next_io_number(&mut self) -> Fallible<Option<(usize, Span)>> {
+    pub fn next_io_number(&mut self) -> anyhow::Result<Option<(usize, Span)>> {
         match self.check_and_fill_buffer() {
             Next::Eof(_) => Ok(None),
             Next::Error(err, pos) => return Err(err.context(pos).into()),
@@ -125,7 +125,7 @@ impl<R: Read> CharReader<R> {
         }
     }
 
-    pub fn matches_assignment_word(&mut self) -> Fallible<bool> {
+    pub fn matches_assignment_word(&mut self) -> anyhow::Result<bool> {
         match self.check_and_fill_buffer() {
             Next::Eof(_) => Ok(false),
             Next::Error(err, pos) => return Err(err.context(pos).into()),
@@ -133,7 +133,7 @@ impl<R: Read> CharReader<R> {
         }
     }
 
-    pub fn next_assignment_word(&mut self) -> Fallible<Option<(String, Span)>> {
+    pub fn next_assignment_word(&mut self) -> anyhow::Result<Option<(String, Span)>> {
         match self.check_and_fill_buffer() {
             Next::Eof(_) => Ok(None),
             Next::Error(err, pos) => return Err(err.context(pos).into()),

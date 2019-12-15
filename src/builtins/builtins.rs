@@ -1,7 +1,6 @@
 use crate::builtins::Builtin;
 use crate::shellhost::FunctionRegistry;
 use cancel::Token;
-use failure::Fallible;
 use shell_vm::{Environment, IoEnvironment, Status, WaitableStatus};
 use std::io::Write;
 use std::path::PathBuf;
@@ -23,7 +22,7 @@ impl Builtin for BuiltinsCommand {
         io_env: &IoEnvironment,
         _cancel: Arc<Token>,
         _functions: &Arc<FunctionRegistry>,
-    ) -> Fallible<WaitableStatus> {
+    ) -> anyhow::Result<WaitableStatus> {
         let mut builtins: Vec<&'static str> = super::BUILTINS.iter().map(|(k, _)| *k).collect();
         builtins.sort_unstable();
         for k in builtins {

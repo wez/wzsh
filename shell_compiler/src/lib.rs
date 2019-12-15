@@ -1,5 +1,5 @@
 #![allow(dead_code, unused_imports)]
-use failure::{bail, err_msg, Fallible};
+use anyhow::{anyhow, bail};
 use shell_lexer::{Assignment, ParamExpr, ParamOper, WordComponent, WordComponentKind};
 use shell_parser::{Command, CommandType, CompoundList, Redirection};
 pub use shell_vm::*;
@@ -40,7 +40,7 @@ impl Compiler {
         Default::default()
     }
 
-    pub fn finish(mut self) -> Fallible<Vec<Operation>> {
+    pub fn finish(mut self) -> anyhow::Result<Vec<Operation>> {
         self.push(op::Exit {
             value: Operand::LastWaitStatus,
         });
@@ -69,11 +69,11 @@ impl Compiler {
     /// to complement the PushFrame instruction emitted by reserve_frame().
     /// Patches up the PushFrame instruction that reserve_frame() emitted
     /// so that it reflects the size of this frame.
-    fn commit_frame(&mut self) -> Fallible<()> {
+    fn commit_frame(&mut self) -> anyhow::Result<()> {
         let frame = self
             .frames
             .pop_back()
-            .ok_or_else(|| err_msg("no frame to commit"))?;
+            .ok_or_else(|| anyhow!("no frame to commit"))?;
         self.program[frame.frame_start_program_address] = op::PushFrame {
             size: frame.frame_size(),
         }
@@ -82,13 +82,13 @@ impl Compiler {
         Ok(())
     }
 
-    fn frame(&mut self) -> Fallible<&mut FrameCompiler> {
-        self.frames.back_mut().ok_or_else(|| err_msg("no frame"))
+    fn frame(&mut self) -> anyhow::Result<&mut FrameCompiler> {
+        self.frames.back_mut().ok_or_else(|| anyhow!("no frame"))
     }
 
     /// Allocate a new empty list and return the frame relative
     /// slot associated with it.
-    fn allocate_list(&mut self) -> Fallible<usize> {
+    fn allocate_list(&mut self) -> anyhow::Result<usize> {
         let slot = self.frame()?.allocate();
         self.push(op::Copy {
             source: Operand::Immediate(Value::List(vec![])),
@@ -103,7 +103,7 @@ impl Compiler {
 
     /// Allocate a new empty string and return the frame relative
     /// slot associated with it.
-    fn allocate_string(&mut self) -> Fallible<usize> {
+    fn allocate_string(&mut self) -> anyhow::Result<usize> {
         let slot = self.frame()?.allocate();
         self.push(op::Copy {
             source: Operand::Immediate(Value::String(String::new())),
@@ -125,14 +125,14 @@ impl Compiler {
     /// .DONE
     /// ```
     fn if_then_else<
-        THEN: FnMut(&mut Compiler) -> Fallible<()>,
-        ELSE: FnMut(&mut Compiler) -> Fallible<()>,
+        THEN: FnMut(&mut Compiler) -> anyhow::Result<()>,
+        ELSE: FnMut(&mut Compiler) -> anyhow::Result<()>,
     >(
         &mut self,
         condition: Operand,
         mut then_: THEN,
         mut else_: ELSE,
-    ) -> Fallible<()> {
+    ) -> anyhow::Result<()> {
         // Remember the opcode that we need to patch
         let first_jump = self.program.len();
         self.push(op::JumpIfZero {
@@ -166,7 +166,7 @@ impl Compiler {
         Ok(())
     }
 
-    fn parameter_expand(&mut self, target_string: usize, expr: &ParamExpr) -> Fallible<()> {
+    fn parameter_expand(&mut self, target_string: usize, expr: &ParamExpr) -> anyhow::Result<()> {
         let slot = self.frame()?.allocate();
         self.push(op::GetEnv {
             name: Operand::Immediate(expr.name.as_str().into()),
@@ -361,7 +361,7 @@ impl Compiler {
     /// However, some elements may be splittable which means that they
     /// are subject to field splitting based on the runtime value of
     /// the IFS variable.
-    fn word_expand(&mut self, argv: usize, word: &Vec<WordComponent>) -> Fallible<()> {
+    fn word_expand(&mut self, argv: usize, word: &Vec<WordComponent>) -> anyhow::Result<()> {
         // Hideous "special parameters" special casing
         if word.len() == 1 {
             if let WordComponentKind::ParamExpand(ParamExpr {
@@ -448,7 +448,7 @@ impl Compiler {
         Ok(())
     }
 
-    fn apply_redirection(&mut self, redir: &Vec<Redirection>) -> Fallible<bool> {
+    fn apply_redirection(&mut self, redir: &Vec<Redirection>) -> anyhow::Result<bool> {
         if redir.is_empty() {
             return Ok(false);
         }
@@ -487,7 +487,7 @@ impl Compiler {
         }
     }
 
-    fn process_assignments(&mut self, assignments: &Vec<Assignment>) -> Fallible<()> {
+    fn process_assignments(&mut self, assignments: &Vec<Assignment>) -> anyhow::Result<()> {
         for a in assignments {
             let value = self.allocate_list()?;
             self.word_expand(value, &a.value)?;
@@ -505,7 +505,7 @@ impl Compiler {
         Ok(())
     }
 
-    pub fn compile_command(&mut self, command: &Command) -> Fallible<()> {
+    pub fn compile_command(&mut self, command: &Command) -> anyhow::Result<()> {
         self.reserve_frame();
         let pop_outer_redir = self.apply_redirection(&command.redirects)?;
 
@@ -618,7 +618,7 @@ impl Compiler {
         Ok(())
     }
 
-    fn compound_list(&mut self, list: &CompoundList) -> Fallible<()> {
+    fn compound_list(&mut self, list: &CompoundList) -> anyhow::Result<()> {
         for command in &list.commands {
             self.compile_command(command)?;
         }
@@ -629,7 +629,6 @@ impl Compiler {
 #[cfg(test)]
 mod test {
     use super::*;
-    use failure::{Error, ResultExt};
     use filedescriptor::{FileDescriptor, Pipe};
     use pretty_assertions::assert_eq;
     use shell_parser::Parser;
@@ -747,7 +746,7 @@ mod test {
     }
 
     impl ShellHost for TestHost {
-        fn lookup_homedir(&self, user: Option<&str>) -> Fallible<OsString> {
+        fn lookup_homedir(&self, user: Option<&str>) -> anyhow::Result<OsString> {
             Ok(match user {
                 Some("wez") => "/home/wez".into(),
                 None => "/home/wez".into(),
@@ -762,12 +761,12 @@ mod test {
             environment: &mut Environment,
             current_directory: &mut PathBuf,
             io_env: &IoEnvironment,
-        ) -> Fallible<WaitableStatus> {
+        ) -> anyhow::Result<WaitableStatus> {
             let command = argv
                 .get(0)
-                .ok_or_else(|| err_msg("argv0 is missing"))?
+                .ok_or_else(|| anyhow!("argv0 is missing"))?
                 .as_os_str()
-                .ok_or_else(|| err_msg("argv0 is not a string"))?;
+                .ok_or_else(|| anyhow!("argv0 is not a string"))?;
 
             if let Some(prog) = self.lookup_function(command.to_str().unwrap()) {
                 // Execute the function.
@@ -830,14 +829,14 @@ mod test {
             Ok(status)
         }
 
-        fn define_function(&self, name: &str, program: &Arc<Program>) -> Fallible<()> {
+        fn define_function(&self, name: &str, program: &Arc<Program>) -> anyhow::Result<()> {
             let mut funcs = self.funcs.lock().unwrap();
             funcs.insert(name.to_owned(), Arc::clone(program));
             Ok(())
         }
     }
 
-    fn compile(prog: &str) -> Fallible<Vec<Operation>> {
+    fn compile(prog: &str) -> anyhow::Result<Vec<Operation>> {
         let mut parser = Parser::new(prog.as_bytes());
         let command = parser.parse()?;
         let mut compiler = Compiler::new();
@@ -845,7 +844,7 @@ mod test {
         compiler.finish()
     }
 
-    fn run(prog: Vec<Operation>) -> Fallible<Status> {
+    fn run(prog: Vec<Operation>) -> anyhow::Result<Status> {
         let mut machine = Machine::new(
             &Program::new(prog),
             Some(Environment::new_empty()),
@@ -863,12 +862,12 @@ mod test {
         eprintln!("--");
     }
 
-    fn run_with_log(prog: Vec<Operation>) -> Fallible<(Status, Vec<SpawnEntry>)> {
+    fn run_with_log(prog: Vec<Operation>) -> anyhow::Result<(Status, Vec<SpawnEntry>)> {
         let (status, logs, _out, _err) = run_with_log_and_output(prog)?;
         Ok((status, logs))
     }
 
-    fn consume_pipe(mut fd: FileDescriptor) -> Fallible<String> {
+    fn consume_pipe(mut fd: FileDescriptor) -> anyhow::Result<String> {
         let mut res = String::new();
         match fd.read_to_string(&mut res) {
             Ok(_) => {}
@@ -885,7 +884,7 @@ mod test {
 
     fn run_with_log_and_output(
         prog: Vec<Operation>,
-    ) -> Fallible<(Status, Vec<SpawnEntry>, String, String)> {
+    ) -> anyhow::Result<(Status, Vec<SpawnEntry>, String, String)> {
         print_prog(&prog);
         let mut machine = Machine::new(
             &Program::new(prog),
@@ -920,7 +919,7 @@ mod test {
     }
 
     #[test]
-    fn basic_echo() -> Fallible<()> {
+    fn basic_echo() -> anyhow::Result<()> {
         let ops = compile("echo hello")?;
         assert_eq!(
             ops,
@@ -987,7 +986,7 @@ mod test {
     }
 
     #[test]
-    fn test_conditional_pipe() -> Fallible<()> {
+    fn test_conditional_pipe() -> anyhow::Result<()> {
         assert_eq!(
             run_with_log(compile("true || false")?)?,
             (
@@ -1021,7 +1020,7 @@ mod test {
     }
 
     #[test]
-    fn test_param_get() -> Fallible<()> {
+    fn test_param_get() -> anyhow::Result<()> {
         assert_eq!(
             run_with_log(compile("echo $foo")?)?,
             (
@@ -1050,7 +1049,7 @@ mod test {
     }
 
     #[test]
-    fn test_param_get_default() -> Fallible<()> {
+    fn test_param_get_default() -> anyhow::Result<()> {
         assert_eq!(
             run_with_log(compile("echo ${foo:-bar}")?)?,
             (
@@ -1107,7 +1106,7 @@ mod test {
     }
 
     #[test]
-    fn test_param_len() -> Fallible<()> {
+    fn test_param_len() -> anyhow::Result<()> {
         assert_eq!(
             run_with_log(compile("echo ${#foo}")?)?,
             (
@@ -1126,7 +1125,7 @@ mod test {
     }
 
     #[test]
-    fn test_param_assign_default() -> Fallible<()> {
+    fn test_param_assign_default() -> anyhow::Result<()> {
         assert_eq!(
             run_with_log(compile("echo ${foo:=bar}")?)?,
             (
@@ -1183,7 +1182,7 @@ mod test {
     }
 
     #[test]
-    fn test_param_check_set() -> Fallible<()> {
+    fn test_param_check_set() -> anyhow::Result<()> {
         assert_eq!(
             run_with_log_and_output(compile("echo ${foo:?bar}")?)?,
             (
@@ -1206,7 +1205,7 @@ mod test {
     }
 
     #[test]
-    fn test_param_alternative_value() -> Fallible<()> {
+    fn test_param_alternative_value() -> anyhow::Result<()> {
         assert_eq!(
             run_with_log(compile("echo ${foo:+bar}")?)?,
             (
@@ -1243,7 +1242,7 @@ mod test {
     }
 
     #[test]
-    fn test_brace_group() -> Fallible<()> {
+    fn test_brace_group() -> anyhow::Result<()> {
         assert_eq!(
             run_with_log(compile("{ true ; false }")?)?,
             (
@@ -1258,7 +1257,7 @@ mod test {
     }
 
     #[test]
-    fn test_program() -> Fallible<()> {
+    fn test_program() -> anyhow::Result<()> {
         assert_eq!(
             run_with_log(compile("true\nfalse")?)?,
             (
@@ -1273,7 +1272,7 @@ mod test {
     }
 
     #[test]
-    fn test_simple_inverted_pipeline() -> Fallible<()> {
+    fn test_simple_inverted_pipeline() -> anyhow::Result<()> {
         assert_eq!(
             run_with_log(compile("! true")?)?,
             (
@@ -1285,7 +1284,7 @@ mod test {
     }
 
     #[test]
-    fn test_pipeline() -> Fallible<()> {
+    fn test_pipeline() -> anyhow::Result<()> {
         assert_eq!(
             run_with_log_and_output(compile("echo a | uppercase")?)?,
             (
@@ -1302,7 +1301,7 @@ mod test {
     }
 
     #[test]
-    fn test_glob() -> Fallible<()> {
+    fn test_glob() -> anyhow::Result<()> {
         assert_eq!(
             run_with_log_and_output(compile("echo **/*.rs")?)?,
             (
@@ -1333,7 +1332,7 @@ mod test {
     }
 
     #[test]
-    fn test_backslash() -> Fallible<()> {
+    fn test_backslash() -> anyhow::Result<()> {
         assert_eq!(
             run_with_log_and_output(compile("echo fo\\o")?)?,
             (
@@ -1369,7 +1368,7 @@ mod test {
     }
 
     #[test]
-    fn positional_at() -> Fallible<()> {
+    fn positional_at() -> anyhow::Result<()> {
         assert_eq!(
             run_with_log(compile("echo $@")?)?,
             (
@@ -1395,7 +1394,7 @@ mod test {
     }
 
     #[test]
-    fn param_n() -> Fallible<()> {
+    fn param_n() -> anyhow::Result<()> {
         assert_eq!(
             run_with_log(compile("echo $0")?)?,
             (
@@ -1442,7 +1441,7 @@ mod test {
     }
 
     #[test]
-    fn positional_len() -> Fallible<()> {
+    fn positional_len() -> anyhow::Result<()> {
         assert_eq!(
             run_with_log(compile("f() { echo $# }\nf a b")?)?,
             (

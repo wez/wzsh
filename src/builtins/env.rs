@@ -1,7 +1,6 @@
 use crate::builtins::Builtin;
 use crate::shellhost::FunctionRegistry;
 use cancel::Token;
-use failure::Fallible;
 use shell_vm::{Environment, IoEnvironment, Status, WaitableStatus};
 use std::io::Write;
 use std::path::PathBuf;
@@ -30,7 +29,7 @@ impl Builtin for ExportCommand {
         io_env: &IoEnvironment,
         cancel: Arc<Token>,
         _functions: &Arc<FunctionRegistry>,
-    ) -> Fallible<WaitableStatus> {
+    ) -> anyhow::Result<WaitableStatus> {
         if self.print {
             for (k, v) in environment.iter() {
                 cancel.check_cancel()?;
@@ -75,7 +74,7 @@ impl Builtin for UnsetCommand {
         _io_env: &IoEnvironment,
         _cancel: Arc<Token>,
         _functions: &Arc<FunctionRegistry>,
-    ) -> Fallible<WaitableStatus> {
+    ) -> anyhow::Result<WaitableStatus> {
         for name in &self.names {
             environment.unset(name);
         }

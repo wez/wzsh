@@ -1,4 +1,4 @@
-use failure::{format_err, Fallible};
+use anyhow::anyhow;
 use filedescriptor::FileDescriptor;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -19,7 +19,7 @@ pub struct Readable {
 }
 
 impl Readable {
-    pub fn dup(&self) -> Fallible<FileDescriptor> {
+    pub fn dup(&self) -> anyhow::Result<FileDescriptor> {
         self.fd.lock().unwrap().try_clone()
     }
 }
@@ -35,7 +35,7 @@ pub struct Writable {
 }
 
 impl Writable {
-    pub fn dup(&self) -> Fallible<FileDescriptor> {
+    pub fn dup(&self) -> anyhow::Result<FileDescriptor> {
         self.fd.lock().unwrap().try_clone()
     }
 }
@@ -51,7 +51,7 @@ impl std::io::Write for Writable {
 }
 
 impl IoEnvironment {
-    pub fn new() -> Fallible<Self> {
+    pub fn new() -> anyhow::Result<Self> {
         let mut fds = HashMap::new();
 
         macro_rules! stdio {
@@ -86,21 +86,21 @@ impl IoEnvironment {
         self.fds.insert(fd_number, Arc::new(Mutex::new(fd)));
     }
 
-    pub fn duplicate_to(&mut self, src_fd: usize, dest_fd: usize) -> Fallible<()> {
+    pub fn duplicate_to(&mut self, src_fd: usize, dest_fd: usize) -> anyhow::Result<()> {
         let fd = Arc::clone(
             self.fds
                 .get(&src_fd)
-                .ok_or_else(|| format_err!("duplicate_to: src_fd {} not present", src_fd))?,
+                .ok_or_else(|| anyhow!("duplicate_to: src_fd {} not present", src_fd))?,
         );
         self.fds.insert(dest_fd, fd);
         Ok(())
     }
 
-    pub fn fd_as_stdio(&self, fd_number: usize) -> Fallible<std::process::Stdio> {
+    pub fn fd_as_stdio(&self, fd_number: usize) -> anyhow::Result<std::process::Stdio> {
         let fd = self
             .fds
             .get(&fd_number)
-            .ok_or_else(|| format_err!("fd_as_stdio: fd {} not present", fd_number))?;
+            .ok_or_else(|| anyhow!("fd_as_stdio: fd {} not present", fd_number))?;
         fd.lock().unwrap().as_stdio()
     }
 }

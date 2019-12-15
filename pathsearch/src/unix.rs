@@ -1,5 +1,4 @@
 use crate::SimplePathSearcher;
-use failure::Fallible;
 use std::ffi::{OsStr, OsString};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
@@ -7,7 +6,7 @@ use std::path::{Path, PathBuf};
 /// Returns true if the specified path has executable access permissions
 /// for the current process.  The check is made using the access(2)
 /// syscall.
-pub fn is_executable(path: &Path) -> Fallible<bool> {
+pub fn is_executable(path: &Path) -> anyhow::Result<bool> {
     use libc::{access, X_OK};
 
     let cstr = std::ffi::CString::new(path.as_os_str().as_bytes().to_vec())?;

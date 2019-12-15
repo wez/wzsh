@@ -1,7 +1,7 @@
 use crate::builtins::Builtin;
 use crate::shellhost::FunctionRegistry;
+use anyhow::anyhow;
 use cancel::Token;
-use failure::{err_msg, Fallible};
 use shell_vm::{Environment, IoEnvironment, Status, WaitableStatus};
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
@@ -33,7 +33,7 @@ impl Builtin for PwdCommand {
         io_env: &IoEnvironment,
         _cancel: Arc<Token>,
         _functions: &Arc<FunctionRegistry>,
-    ) -> Fallible<WaitableStatus> {
+    ) -> anyhow::Result<WaitableStatus> {
         let pwd = if self.physical {
             current_directory.canonicalize()?
         } else {
@@ -89,7 +89,7 @@ fn normalize_path<P: AsRef<Path>>(p: P) -> PathBuf {
     normalized
 }
 
-fn canonicalize_path<P: AsRef<Path>>(p: P, physical: bool) -> Fallible<PathBuf> {
+fn canonicalize_path<P: AsRef<Path>>(p: P, physical: bool) -> anyhow::Result<PathBuf> {
     if physical {
         p.as_ref().canonicalize().map_err(|e| e.into())
     } else {
@@ -109,7 +109,7 @@ impl Builtin for CdCommand {
         io_env: &IoEnvironment,
         _cancel: Arc<Token>,
         _functions: &Arc<FunctionRegistry>,
-    ) -> Fallible<WaitableStatus> {
+    ) -> anyhow::Result<WaitableStatus> {
         let directory = match self.directory.take() {
             Some(dir) => dir,
             None => {
@@ -131,7 +131,7 @@ impl Builtin for CdCommand {
             PathBuf::from(
                 environment
                     .get("OLDPWD")
-                    .ok_or_else(|| err_msg("OLDPWD is not set"))?,
+                    .ok_or_else(|| anyhow!("OLDPWD is not set"))?,
             )
         } else {
             current_directory.join(directory)

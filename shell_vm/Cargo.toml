@@ -7,8 +7,7 @@ edition = "2018"
 [dependencies]
 bstr = "0.1"
 caseless = "0.2"
-failure = "0.1"
-failure_derive = "0.1"
+anyhow = "1.0"
 filedescriptor = { path = "../filedescriptor" }
 filenamegen = { path = "../filenamegen" }
 lazy_static = "1.3"

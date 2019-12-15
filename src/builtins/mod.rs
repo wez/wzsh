@@ -1,6 +1,6 @@
 use crate::shellhost::FunctionRegistry;
+use anyhow::anyhow;
 use cancel::Token;
-use failure::{err_msg, Fallible};
 use lazy_static::lazy_static;
 use shell_vm::{Environment, IoEnvironment, Value, WaitableStatus};
 use std::collections::HashMap;
@@ -26,7 +26,7 @@ pub trait Builtin: StructOpt {
         io_env: &IoEnvironment,
         cancel: Arc<Token>,
         functions: &Arc<FunctionRegistry>,
-    ) -> Fallible<WaitableStatus>
+    ) -> anyhow::Result<WaitableStatus>
     where
         Self: Sized,
     {
@@ -38,7 +38,7 @@ pub trait Builtin: StructOpt {
         for arg in argv {
             os_args.push(
                 arg.as_os_str()
-                    .ok_or_else(|| err_msg("argument is not representable as osstr"))?,
+                    .ok_or_else(|| anyhow!("argument is not representable as osstr"))?,
             );
         }
         let mut args = Self::from_clap(&app.get_matches_from_safe(os_args.iter())?);
@@ -54,7 +54,7 @@ pub trait Builtin: StructOpt {
         io_env: &IoEnvironment,
         cancel: Arc<Token>,
         functions: &Arc<FunctionRegistry>,
-    ) -> Fallible<WaitableStatus>;
+    ) -> anyhow::Result<WaitableStatus>;
 }
 
 pub type BuiltinFunc = fn(
@@ -64,7 +64,7 @@ pub type BuiltinFunc = fn(
     io_env: &IoEnvironment,
     cancel: Arc<Token>,
     functions: &Arc<FunctionRegistry>,
-) -> Fallible<WaitableStatus>;
+) -> anyhow::Result<WaitableStatus>;
 
 pub fn lookup_builtin(name: &Value) -> Option<BuiltinFunc> {
     if let Some(s) = name.as_str() {

@@ -1,7 +1,6 @@
 use crate::builtins::Builtin;
 use crate::shellhost::FunctionRegistry;
 use cancel::Token;
-use failure::Fallible;
 use shell_vm::{Environment, IoEnvironment, Status, WaitableStatus};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -23,7 +22,7 @@ impl Builtin for TrueCommand {
         _io_env: &IoEnvironment,
         _cancel: Arc<Token>,
         _functions: &Arc<FunctionRegistry>,
-    ) -> Fallible<WaitableStatus> {
+    ) -> anyhow::Result<WaitableStatus> {
         Ok(Status::Complete(0.into()).into())
     }
 }
@@ -44,7 +43,7 @@ impl Builtin for FalseCommand {
         _io_env: &IoEnvironment,
         _cancel: Arc<Token>,
         _functions: &Arc<FunctionRegistry>,
-    ) -> Fallible<WaitableStatus> {
+    ) -> anyhow::Result<WaitableStatus> {
         Ok(Status::Complete(1.into()).into())
     }
 }

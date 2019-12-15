@@ -3,8 +3,8 @@ use crate::exitstatus::ChildProcess;
 #[cfg(unix)]
 use crate::job::{add_to_process_group, make_foreground_process_group};
 use crate::job::{Job, JOB_LIST};
+use anyhow::{anyhow, bail, Context};
 use cancel::Token;
-use failure::{bail, err_msg, format_err, Fallible, ResultExt};
 use pathsearch::PathSearcher;
 use shell_vm::{
     Environment, IoEnvironment, Machine, Program, ShellHost, Status, Value, WaitableStatus,
@@ -64,7 +64,7 @@ impl Host {
 }
 
 impl ShellHost for Host {
-    fn lookup_homedir(&self, _user: Option<&str>) -> Fallible<OsString> {
+    fn lookup_homedir(&self, _user: Option<&str>) -> anyhow::Result<OsString> {
         bail!("lookup_homedir not implemented");
     }
 
@@ -74,7 +74,7 @@ impl ShellHost for Host {
         environment: &mut Environment,
         current_directory: &mut PathBuf,
         io_env: &IoEnvironment,
-    ) -> Fallible<WaitableStatus> {
+    ) -> anyhow::Result<WaitableStatus> {
         if argv.is_empty() {
             return Ok(Status::Complete(0.into()).into());
         }
@@ -131,7 +131,7 @@ impl ShellHost for Host {
             if let Some(exe) = PathSearcher::new(
                 argv[0]
                     .as_os_str()
-                    .ok_or_else(|| err_msg("argv0 is not convertible to OsStr"))?,
+                    .ok_or_else(|| anyhow!("argv0 is not convertible to OsStr"))?,
                 environment.get("PATH"),
                 environment.get("PATHEXT"),
             )
@@ -141,7 +141,7 @@ impl ShellHost for Host {
                 for (i, arg) in argv.iter().enumerate().skip(1) {
                     child_cmd.arg(
                         arg.as_os_str()
-                            .ok_or_else(|| format_err!("argv{} is not convertible to OsStr", i))?,
+                            .ok_or_else(|| anyhow!("argv{} is not convertible to OsStr", i))?,
                     );
                 }
                 child_cmd.env_clear();
@@ -187,7 +187,9 @@ impl ShellHost for Host {
                     });
                 }
 
-                let child = child_cmd.spawn().context(format!("spawning {:?}", argv))?;
+                let child = child_cmd
+                    .spawn()
+                    .with_context(|| format!("spawning {:?}", argv))?;
                 let child = ChildProcess::new(child);
 
                 if self.job_control_enabled {
@@ -230,7 +232,7 @@ impl ShellHost for Host {
         Ok(Status::Complete(127.into()).into())
     }
 
-    fn define_function(&self, name: &str, program: &Arc<Program>) -> Fallible<()> {
+    fn define_function(&self, name: &str, program: &Arc<Program>) -> anyhow::Result<()> {
         self.funcs.define_function(name, program);
         Ok(())
     }

@@ -1,23 +1,23 @@
 use crate::position::Span;
-use failure::Fail;
+use thiserror::*;
 
-#[derive(Debug, Clone, Copy, Fail)]
+#[derive(Debug, Clone, Copy, Error)]
 pub enum LexErrorKind {
-    #[fail(display = "EOF while lexing backslash escape")]
+    #[error("EOF while lexing backslash escape")]
     EofDuringBackslash,
-    #[fail(display = "EOF while lexing comment")]
+    #[error("EOF while lexing comment")]
     EofDuringComment,
-    #[fail(display = "EOF while lexing single quoted string")]
+    #[error("EOF while lexing single quoted string")]
     EofDuringSingleQuotedString,
-    #[fail(display = "EOF while lexing double quoted string")]
+    #[error("EOF while lexing double quoted string")]
     EofDuringDoubleQuotedString,
-    #[fail(display = "EOF while lexing parameter expansion")]
+    #[error("EOF while lexing parameter expansion")]
     EofDuringParameterExpansion,
-    #[fail(display = "EOF while lexing assignment word")]
+    #[error("EOF while lexing assignment word")]
     EofDuringAssignmentWord,
-    #[fail(display = "EOF while lexing command substitution")]
+    #[error("EOF while lexing command substitution")]
     EofDuringCommandSubstitution,
-    #[fail(display = "IO Error")]
+    #[error("IO Error")]
     IoError,
 }
 
@@ -27,8 +27,8 @@ impl LexErrorKind {
     }
 }
 
-#[derive(Debug, Clone, Fail)]
-#[fail(display = "{} at {}", kind, span)]
+#[derive(Debug, Clone, Error)]
+#[error("{} at {}", kind, span)]
 pub struct LexError {
     pub kind: LexErrorKind,
     pub span: Span,

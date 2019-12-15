@@ -1,8 +1,8 @@
 use crate::builtins::Builtin;
 use crate::job::JOB_LIST;
 use crate::shellhost::FunctionRegistry;
+use anyhow::anyhow;
 use cancel::Token;
-use failure::{err_msg, Fallible};
 use shell_vm::{Environment, IoEnvironment, Status, WaitableStatus};
 use std::io::Write;
 use std::path::PathBuf;
@@ -24,7 +24,7 @@ impl Builtin for FgCommand {
         io_env: &IoEnvironment,
         _cancel: Arc<Token>,
         _functions: &Arc<FunctionRegistry>,
-    ) -> Fallible<WaitableStatus> {
+    ) -> anyhow::Result<WaitableStatus> {
         let mut jobs = JOB_LIST.jobs();
         if let Some(mut job) = jobs.pop() {
             writeln!(
@@ -36,7 +36,7 @@ impl Builtin for FgCommand {
             job.put_in_foreground()?;
             let status = job
                 .wait()
-                .ok_or_else(|| err_msg("job.wait returned None?"))?;
+                .ok_or_else(|| anyhow!("job.wait returned None?"))?;
             writeln!(
                 io_env.stderr(),
                 "wzsh: after fg, wait returned {:?}",
@@ -65,7 +65,7 @@ impl Builtin for JobsCommand {
         io_env: &IoEnvironment,
         _cancel: Arc<Token>,
         _functions: &Arc<FunctionRegistry>,
-    ) -> Fallible<WaitableStatus> {
+    ) -> anyhow::Result<WaitableStatus> {
         let mut jobs = JOB_LIST.jobs();
         for job in &mut jobs {
             match job.poll() {

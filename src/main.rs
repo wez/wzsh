@@ -1,6 +1,5 @@
 use crate::errorprint::print_error_path;
 use crate::shellhost::FunctionRegistry;
-use failure::Fallible;
 use shell_vm::Environment;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -20,7 +19,7 @@ fn config_dir() -> PathBuf {
         .join("wzsh")
 }
 
-fn main() -> Fallible<()> {
+fn main() -> anyhow::Result<()> {
     let mut cwd = std::env::current_dir()?;
     let mut env = Environment::new();
     let funcs = Arc::new(FunctionRegistry::new());

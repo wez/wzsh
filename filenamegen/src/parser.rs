@@ -1,7 +1,7 @@
 use crate::new_binary_pattern_string;
 use crate::node::{Node, RegexAndTokens};
 use crate::token::Token;
-use failure::{ensure, format_err, Fallible};
+use anyhow::{anyhow, ensure};
 use regex::bytes::Regex;
 
 struct Parser<'a> {
@@ -12,7 +12,7 @@ struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
-    fn parse(&mut self) -> Fallible<()> {
+    fn parse(&mut self) -> anyhow::Result<()> {
         while let Some(c) = self.next() {
             match c {
                 '\\' => {
@@ -80,13 +80,13 @@ impl<'a> Parser<'a> {
         Some(s)
     }
 
-    fn compile_to_regex(&mut self) -> Fallible<Regex> {
+    fn compile_to_regex(&mut self) -> anyhow::Result<Regex> {
         let mut pattern = new_binary_pattern_string();
         for (i, token) in self.tokens.iter().enumerate() {
             token.append_regex(&mut pattern, i == 0);
         }
         pattern.push('$');
-        Regex::new(&pattern).map_err(|e| format_err!("error compiling regex: {}: {}", pattern, e))
+        Regex::new(&pattern).map_err(|e| anyhow!("error compiling regex: {}: {}", pattern, e))
     }
 
     fn next(&mut self) -> Option<char> {
@@ -100,7 +100,7 @@ impl<'a> Parser<'a> {
 }
 
 /// Parse a pattern string into a Node.
-pub fn parse(pattern: &str) -> Fallible<Node> {
+pub fn parse(pattern: &str) -> anyhow::Result<Node> {
     let mut parser = Parser {
         chars: pattern.chars().peekable(),
         tokens: vec![],

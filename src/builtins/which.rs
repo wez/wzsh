@@ -1,7 +1,6 @@
 use crate::builtins::{lookup_builtin, Builtin};
 use crate::shellhost::FunctionRegistry;
 use cancel::Token;
-use failure::Fallible;
 use pathsearch::PathSearcher;
 use shell_vm::{Environment, IoEnvironment, Status, Value, WaitableStatus};
 use std::io::Write;
@@ -40,7 +39,7 @@ impl Builtin for WhichCommand {
         io_env: &IoEnvironment,
         cancel: Arc<Token>,
         functions: &Arc<FunctionRegistry>,
-    ) -> Fallible<WaitableStatus> {
+    ) -> anyhow::Result<WaitableStatus> {
         let mut found = false;
 
         if let Some(name) = self.command.to_str() {

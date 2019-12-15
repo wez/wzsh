@@ -7,7 +7,7 @@ edition = "2018"
 [dependencies]
 cancel = "0.1"
 dirs = "2.0"
-failure = "0.1"
+anyhow = "1.0"
 filedescriptor = { path = "filedescriptor" }
 lazy_static = "1.3"
 libc = "0.2"

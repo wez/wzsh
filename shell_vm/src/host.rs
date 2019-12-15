@@ -1,5 +1,4 @@
 use crate::{Environment, IoEnvironment, Program, Status, Value};
-use failure::Fallible;
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -79,7 +78,7 @@ impl WaitableStatus {
 pub trait ShellHost: std::fmt::Debug {
     /// Look up the home directory for the specified user.
     /// If user is not specified, look it up for the current user.
-    fn lookup_homedir(&self, user: Option<&str>) -> Fallible<OsString>;
+    fn lookup_homedir(&self, user: Option<&str>) -> anyhow::Result<OsString>;
 
     /// Spawn a command.
     /// The argument vector is pre-built, and the cwd, IO and environment
@@ -122,7 +121,7 @@ pub trait ShellHost: std::fmt::Debug {
         environment: &mut Environment,
         current_directory: &mut PathBuf,
         io_env: &IoEnvironment,
-    ) -> Fallible<WaitableStatus>;
+    ) -> anyhow::Result<WaitableStatus>;
 
-    fn define_function(&self, name: &str, program: &Arc<Program>) -> Fallible<()>;
+    fn define_function(&self, name: &str, program: &Arc<Program>) -> anyhow::Result<()>;
 }

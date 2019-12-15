@@ -1,5 +1,4 @@
 use crate::exitstatus::{ChildProcess, Pid};
-use failure::Fallible;
 use lazy_static::lazy_static;
 use shell_vm::{Status, WaitForStatus};
 use std::collections::HashMap;
@@ -44,12 +43,12 @@ pub fn make_foreground_process_group(pid: i32) {
 }
 
 #[cfg(unix)]
-fn send_cont(pid: libc::pid_t) -> Fallible<()> {
-    use failure::Fail;
+fn send_cont(pid: libc::pid_t) -> anyhow::Result<()> {
     unsafe {
+        use anyhow::Context;
         if libc::kill(pid, libc::SIGCONT) != 0 {
             let err = std::io::Error::last_os_error();
-            Err(err.context(format!("SIGCONT pid {}", pid)).into())
+            Err(err).with_context(|| format!("SIGCONT pid {}", pid))
         } else {
             Ok(())
         }
@@ -91,7 +90,7 @@ impl Job {
         }
     }
 
-    pub fn add(&mut self, proc: ChildProcess) -> Fallible<()> {
+    pub fn add(&mut self, proc: ChildProcess) -> anyhow::Result<()> {
         let process_group_id = proc.pid();
 
         let mut inner = self.inner.lock().unwrap();
@@ -124,7 +123,7 @@ impl Job {
         0
     }
 
-    pub fn put_in_background(&mut self) -> Fallible<()> {
+    pub fn put_in_background(&mut self) -> anyhow::Result<()> {
         #[cfg(unix)]
         {
             let inner = self.inner.lock().unwrap();
@@ -133,7 +132,7 @@ impl Job {
         Ok(())
     }
 
-    pub fn put_in_foreground(&mut self) -> Fallible<()> {
+    pub fn put_in_foreground(&mut self) -> anyhow::Result<()> {
         #[cfg(unix)]
         {
             let inner = self.inner.lock().unwrap();

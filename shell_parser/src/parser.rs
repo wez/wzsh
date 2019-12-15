@@ -1,8 +1,9 @@
 use crate::types::*;
-use failure::{bail, Error, Fail, Fallible};
+use anyhow::{bail, Error};
 use shell_lexer::{Lexer, Operator, ReservedWord, Token};
 use std::collections::VecDeque;
 use std::io::Read;
+use thiserror::*;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParseErrorContext {
@@ -17,9 +18,9 @@ pub enum ParseErrorContext {
     ExpectingRightParen,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Fail)]
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum ParseErrorKind {
-    #[fail(display = "Unexpected token {:?} while parsing {:?}", 0, 1)]
+    #[error("Unexpected token {:?} while parsing {:?}", 0, 1)]
     UnexpectedToken(Token, ParseErrorContext),
 }
 
@@ -38,7 +39,7 @@ impl<R: Read> Parser<R> {
     }
 
     /// Main entry point to the parser; parses a program
-    pub fn parse(&mut self) -> Fallible<Command> {
+    pub fn parse(&mut self) -> anyhow::Result<Command> {
         self.program()
     }
 }
@@ -54,7 +55,7 @@ impl<R: Read> Parser<R> {
     /// If the next token is an operator with a kind that matches
     /// any of those in the candidates slice, get that token and
     /// return it.  Otherwise returns None.
-    fn next_token_is_operator(&mut self, candidates: &[Operator]) -> Fallible<Option<Token>> {
+    fn next_token_is_operator(&mut self, candidates: &[Operator]) -> anyhow::Result<Option<Token>> {
         let tok = self.next_token()?;
         if let Token::Operator(operator, ..) = &tok {
             for op in candidates {
@@ -69,7 +70,7 @@ impl<R: Read> Parser<R> {
 
     /// If the next token is the requested reserved word, consume it
     /// and return true.  Otherwise, put it back and return false.
-    fn next_token_is_reserved_word(&mut self, reserved: ReservedWord) -> Fallible<bool> {
+    fn next_token_is_reserved_word(&mut self, reserved: ReservedWord) -> anyhow::Result<bool> {
         let tok = self.next_token()?;
         if tok.is_reserved_word(reserved) {
             return Ok(true);
@@ -79,7 +80,7 @@ impl<R: Read> Parser<R> {
     }
 
     /// Consume the next token
-    fn next_token(&mut self) -> Fallible<Token> {
+    fn next_token(&mut self) -> anyhow::Result<Token> {
         if let Some(tok) = self.lookahead.pop_front() {
             Ok(tok)
         } else {
@@ -98,7 +99,7 @@ impl<R: Read> Parser<R> {
 impl<R: Read> Parser<R> {
     /// Parse the top level program syntax, a potentially empty list
     /// of child commands.
-    fn program(&mut self) -> Fallible<Command> {
+    fn program(&mut self) -> anyhow::Result<Command> {
         let mut cmd = match self.and_or()? {
             Some(cmd) => cmd,
             None => {
@@ -129,7 +130,7 @@ impl<R: Read> Parser<R> {
         }
     }
 
-    fn and_or(&mut self) -> Fallible<Option<Command>> {
+    fn and_or(&mut self) -> anyhow::Result<Option<Command>> {
         if let Some(pipeline) = self.pipeline()? {
             match self.next_token_is_operator(&[Operator::AndIf, Operator::OrIf])? {
                 Some(Token::Operator(operator, ..)) => {
@@ -146,7 +147,7 @@ impl<R: Read> Parser<R> {
         &mut self,
         condition: Pipeline,
         op: Operator,
-    ) -> Fallible<Option<Command>> {
+    ) -> anyhow::Result<Option<Command>> {
         self.linebreak()?;
 
         let then: CompoundList = Command::from(self.pipeline()?.ok_or_else(|| {
@@ -171,7 +172,7 @@ impl<R: Read> Parser<R> {
         ))
     }
 
-    fn pipeline(&mut self) -> Fallible<Option<Pipeline>> {
+    fn pipeline(&mut self) -> anyhow::Result<Option<Pipeline>> {
         let inverted = self.next_token_is_reserved_word(ReservedWord::Bang)?;
         if let Some(commands) = self.pipe_sequence()? {
             Ok(Some(Pipeline { inverted, commands }))
@@ -182,7 +183,7 @@ impl<R: Read> Parser<R> {
         }
     }
 
-    fn pipe_sequence(&mut self) -> Fallible<Option<Vec<Command>>> {
+    fn pipe_sequence(&mut self) -> anyhow::Result<Option<Vec<Command>>> {
         let command = match self.command()? {
             None => return Ok(None),
             Some(cmd) => cmd,
@@ -205,7 +206,7 @@ impl<R: Read> Parser<R> {
         Ok(Some(commands))
     }
 
-    fn command(&mut self) -> Fallible<Option<Command>> {
+    fn command(&mut self) -> anyhow::Result<Option<Command>> {
         if let Some(command) = self.function_definition()? {
             Ok(Some(command))
         } else if let Some(cmd) = self.compound_command()? {
@@ -227,7 +228,7 @@ impl<R: Read> Parser<R> {
         }
     }
 
-    fn function_definition(&mut self) -> Fallible<Option<Command>> {
+    fn function_definition(&mut self) -> anyhow::Result<Option<Command>> {
         if let Some(fname) = self.fname()? {
             if self
                 .next_token_is_operator(&[Operator::LeftParen])?
@@ -264,7 +265,7 @@ impl<R: Read> Parser<R> {
         }
     }
 
-    fn fname(&mut self) -> Fallible<Option<Token>> {
+    fn fname(&mut self) -> anyhow::Result<Option<Token>> {
         let tok = self.next_token()?;
 
         if tok.is_any_reserved_word() {
@@ -281,7 +282,7 @@ impl<R: Read> Parser<R> {
         }
     }
 
-    fn compound_command(&mut self) -> Fallible<Option<Command>> {
+    fn compound_command(&mut self) -> anyhow::Result<Option<Command>> {
         let mut command = if let Some(group) = self.brace_group()? {
             Command {
                 command: CommandType::BraceGroup(group),
@@ -303,7 +304,7 @@ impl<R: Read> Parser<R> {
         Ok(Some(command))
     }
 
-    fn subshell(&mut self) -> Fallible<Option<CompoundList>> {
+    fn subshell(&mut self) -> anyhow::Result<Option<CompoundList>> {
         let left_paren = match self.next_token_is_operator(&[Operator::LeftParen])? {
             None => return Ok(None),
             Some(tok) => tok,
@@ -328,7 +329,7 @@ impl<R: Read> Parser<R> {
         }
     }
 
-    fn compound_list(&mut self) -> Fallible<CompoundList> {
+    fn compound_list(&mut self) -> anyhow::Result<CompoundList> {
         let mut commands = vec![];
 
         loop {
@@ -346,7 +347,7 @@ impl<R: Read> Parser<R> {
         Ok(CompoundList { commands })
     }
 
-    fn brace_group(&mut self) -> Fallible<Option<CompoundList>> {
+    fn brace_group(&mut self) -> anyhow::Result<Option<CompoundList>> {
         if !self.next_token_is_reserved_word(ReservedWord::LeftBrace)? {
             return Ok(None);
         }
@@ -360,7 +361,7 @@ impl<R: Read> Parser<R> {
         }
     }
 
-    fn redirect_list(&mut self) -> Fallible<Vec<Redirection>> {
+    fn redirect_list(&mut self) -> anyhow::Result<Vec<Redirection>> {
         let mut redirections = vec![];
         loop {
             if let Some(redir) = self.io_redirect()? {
@@ -371,7 +372,7 @@ impl<R: Read> Parser<R> {
         }
     }
 
-    fn io_redirect(&mut self) -> Fallible<Option<Redirection>> {
+    fn io_redirect(&mut self) -> anyhow::Result<Option<Redirection>> {
         let t = self.next_token()?;
         if let Token::IoNumber(fd_number, ..) = &t {
             match self.io_file(Some(*fd_number))? {
@@ -385,7 +386,7 @@ impl<R: Read> Parser<R> {
         self.io_file(None)
     }
 
-    fn io_file(&mut self, fd_number: Option<usize>) -> Fallible<Option<Redirection>> {
+    fn io_file(&mut self, fd_number: Option<usize>) -> anyhow::Result<Option<Redirection>> {
         let t = self.next_token()?;
         let oper = if let Token::Operator(oper, ..) = &t {
             match oper {
@@ -475,7 +476,7 @@ impl<R: Read> Parser<R> {
         }
     }
 
-    fn simple_command(&mut self) -> Fallible<Option<SimpleCommand>> {
+    fn simple_command(&mut self) -> anyhow::Result<Option<SimpleCommand>> {
         let mut assignments = vec![];
         let mut words = vec![];
         let mut redirects = vec![];
@@ -524,7 +525,7 @@ impl<R: Read> Parser<R> {
 
 impl<R: Read> Parser<R> {
     /// Consumes an optional sequence of newline tokens.
-    fn linebreak(&mut self) -> Fallible<()> {
+    fn linebreak(&mut self) -> anyhow::Result<()> {
         self.newline_list()?;
         Ok(())
     }
@@ -532,7 +533,7 @@ impl<R: Read> Parser<R> {
     /// Consumes a sequence of newline tokens.
     /// Returns true if any newline tokens were seen,
     /// false if none were seen.
-    fn newline_list(&mut self) -> Fallible<bool> {
+    fn newline_list(&mut self) -> anyhow::Result<bool> {
         let mut seen = false;
         loop {
             let t = self.next_token()?;
@@ -549,7 +550,7 @@ impl<R: Read> Parser<R> {
     /// This is used in fd redirection for constructs
     /// like `1>&1`.  The first number is recognized as
     /// an IoNumber and we are called for the second number.
-    fn number(&mut self) -> Fallible<Option<usize>> {
+    fn number(&mut self) -> anyhow::Result<Option<usize>> {
         let t = self.next_token()?;
         if let Some(word) = t.as_single_literal_word_string() {
             if let Ok(num) = usize::from_str_radix(word, 10) {
@@ -561,7 +562,7 @@ impl<R: Read> Parser<R> {
     }
 
     /// Matches a single `;` or `&` separator operator
-    fn separator_op(&mut self) -> Fallible<Option<Separator>> {
+    fn separator_op(&mut self) -> anyhow::Result<Option<Separator>> {
         match self.next_token_is_operator(&[Operator::Semicolon, Operator::Ampersand])? {
             Some(Token::Operator(Operator::Semicolon, ..)) => Ok(Some(Separator::Sync)),
             Some(Token::Operator(Operator::Ampersand, ..)) => Ok(Some(Separator::Async)),
@@ -571,7 +572,7 @@ impl<R: Read> Parser<R> {
 
     /// Matches either an explicit separator operator or an implicit
     /// synchronous separator in the form of a newline.
-    fn separator(&mut self) -> Fallible<Option<Separator>> {
+    fn separator(&mut self) -> anyhow::Result<Option<Separator>> {
         if let Some(sep) = self.separator_op()? {
             self.linebreak()?;
             Ok(Some(sep))
@@ -584,7 +585,7 @@ impl<R: Read> Parser<R> {
 
     /// Matches an optional separator, returning true if that separator
     /// is async, or false if it is sync or not present.
-    fn separator_is_async(&mut self) -> Fallible<bool> {
+    fn separator_is_async(&mut self) -> anyhow::Result<bool> {
         Ok(self.separator()?.unwrap_or(Separator::Sync) == Separator::Async)
     }
 }

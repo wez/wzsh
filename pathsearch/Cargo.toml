@@ -1,6 +1,6 @@
 [package]
 name = "pathsearch"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Wez Furlong"]
 edition = "2018"
 repository = "https://github.com/wez/wzsh"
@@ -9,6 +9,6 @@ license = "MIT"
 documentation = "https://docs.rs/pathsearch"
 
 [dependencies]
-failure = "0.1"
+anyhow = "1.0"
 libc = "0.2"
 

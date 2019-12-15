@@ -1,6 +1,6 @@
 #![allow(dead_code)]
+use anyhow::{anyhow, bail, Error};
 use bstr::{BStr, BString};
-use failure::{bail, err_msg, format_err, Error, Fallible};
 use filedescriptor::FileDescriptor;
 use std::collections::VecDeque;
 use std::ffi::{OsStr, OsString};
@@ -232,7 +232,11 @@ fn split_by_ifs<'a>(value: &'a str, ifs: &str) -> Vec<&'a str> {
 }
 
 impl Machine {
-    pub fn new(program: &Arc<Program>, env: Option<Environment>, cwd: &Path) -> Fallible<Self> {
+    pub fn new(
+        program: &Arc<Program>,
+        env: Option<Environment>,
+        cwd: &Path,
+    ) -> anyhow::Result<Self> {
         let mut environment = VecDeque::new();
         environment.push_back(env.unwrap_or_else(Environment::new));
 
@@ -260,42 +264,42 @@ impl Machine {
         self.host = Some(host)
     }
 
-    fn environment(&self) -> Fallible<&Environment> {
+    fn environment(&self) -> anyhow::Result<&Environment> {
         self.environment
             .back()
-            .ok_or_else(|| err_msg("no current environment"))
+            .ok_or_else(|| anyhow!("no current environment"))
     }
 
-    fn environment_mut(&mut self) -> Fallible<&mut Environment> {
+    fn environment_mut(&mut self) -> anyhow::Result<&mut Environment> {
         self.environment
             .back_mut()
-            .ok_or_else(|| err_msg("no current environment"))
+            .ok_or_else(|| anyhow!("no current environment"))
     }
 
     /// Compute the effective value of IFS
-    fn ifs(&self) -> Fallible<&str> {
+    fn ifs(&self) -> anyhow::Result<&str> {
         Ok(self.environment()?.get_str("IFS")?.unwrap_or(" \t\n"))
     }
 
-    pub fn io_env(&self) -> Fallible<&IoEnvironment> {
+    pub fn io_env(&self) -> anyhow::Result<&IoEnvironment> {
         self.io_env
             .back()
-            .ok_or_else(|| err_msg("no current IoEnvironment"))
+            .ok_or_else(|| anyhow!("no current IoEnvironment"))
     }
 
-    pub fn io_env_mut(&mut self) -> Fallible<&mut IoEnvironment> {
+    pub fn io_env_mut(&mut self) -> anyhow::Result<&mut IoEnvironment> {
         self.io_env
             .back_mut()
-            .ok_or_else(|| err_msg("no current IoEnvironment"))
+            .ok_or_else(|| anyhow!("no current IoEnvironment"))
     }
 
     /// Attempt to make a single step of progress with the program.
-    pub fn step(&mut self) -> Fallible<Status> {
+    pub fn step(&mut self) -> anyhow::Result<Status> {
         let program = Arc::clone(&self.program);
         let op = program
             .opcodes
             .get(self.program_counter)
-            .ok_or_else(|| err_msg("walked off the end of the program"))?;
+            .ok_or_else(|| anyhow!("walked off the end of the program"))?;
         let pc = self.program_counter;
         self.program_counter += 1;
         match op.dispatch(self) {
@@ -304,14 +308,14 @@ impl Machine {
                 self.program_counter -= 1;
                 status
             }
-            Err(e) => Err(format_err!("PC={}: {}", pc, e)),
+            Err(e) => Err(anyhow!("PC={}: {}", pc, e)),
             status => status,
         }
     }
 
     /// Continually invoke step() while the status == Running.
     /// Returns either Stopped or Complete at the appropriate time.
-    pub fn run(&mut self) -> Fallible<Status> {
+    pub fn run(&mut self) -> anyhow::Result<Status> {
         loop {
             match self.step()? {
                 Status::Running => continue,
@@ -321,7 +325,7 @@ impl Machine {
     }
 
     /// Resolve an operand for write.
-    pub fn operand_mut(&mut self, operand: &Operand) -> Fallible<&mut Value> {
+    pub fn operand_mut(&mut self, operand: &Operand) -> anyhow::Result<&mut Value> {
         match operand {
             Operand::Immediate(_) => bail!("cannot mutably reference an Immediate operand"),
             Operand::LastWaitStatus => bail!("cannot mutably reference LastWaitStatus"),
@@ -330,39 +334,39 @@ impl Machine {
                 .get_mut(
                     self.frames
                         .back()
-                        .ok_or_else(|| err_msg("no frame?"))?
+                        .ok_or_else(|| anyhow!("no frame?"))?
                         .frame_pointer
                         - offset,
                 )
-                .ok_or_else(|| err_msg("FrameRelative offset out of range")),
+                .ok_or_else(|| anyhow!("FrameRelative offset out of range")),
         }
     }
 
     /// Resolve an operand for read.
-    pub fn operand<'a>(&'a self, operand: &'a Operand) -> Fallible<&'a Value> {
+    pub fn operand<'a>(&'a self, operand: &'a Operand) -> anyhow::Result<&'a Value> {
         match operand {
             Operand::Immediate(value) => Ok(value),
             Operand::LastWaitStatus => self
                 .last_wait_status
                 .as_ref()
-                .ok_or_else(|| err_msg("cannot reference LastWaitStatus as it has not been set")),
+                .ok_or_else(|| anyhow!("cannot reference LastWaitStatus as it has not been set")),
             Operand::FrameRelative(offset) => self
                 .stack
                 .get(
                     self.frames
                         .back()
-                        .ok_or_else(|| err_msg("no frame?"))?
+                        .ok_or_else(|| anyhow!("no frame?"))?
                         .frame_pointer
                         - offset,
                 )
-                .ok_or_else(|| err_msg("FrameRelative offset out of range")),
+                .ok_or_else(|| anyhow!("FrameRelative offset out of range")),
         }
     }
 
-    pub fn operand_as_os_str<'a>(&'a self, operand: &'a Operand) -> Fallible<&'a OsStr> {
+    pub fn operand_as_os_str<'a>(&'a self, operand: &'a Operand) -> anyhow::Result<&'a OsStr> {
         let value = self.operand(operand)?;
         value.as_os_str().ok_or_else(|| {
-            format_err!(
+            anyhow!(
                 "operand {:?} of value {:?} is not representable as OsStr",
                 operand,
                 value
@@ -370,10 +374,10 @@ impl Machine {
         })
     }
 
-    pub fn operand_as_str<'a>(&'a self, operand: &'a Operand) -> Fallible<&'a str> {
+    pub fn operand_as_str<'a>(&'a self, operand: &'a Operand) -> anyhow::Result<&'a str> {
         let value = self.operand(operand)?;
         value.as_str().ok_or_else(|| {
-            format_err!(
+            anyhow!(
                 "operand {:?} of value {:?} is not representable as String",
                 operand,
                 value
@@ -383,7 +387,7 @@ impl Machine {
 
     /// Resolve an operand for read, and return true if its value
     /// evaluates as true in a trutihness test.
-    pub fn operand_truthy(&self, operand: &Operand) -> Fallible<bool> {
+    pub fn operand_truthy(&self, operand: &Operand) -> anyhow::Result<bool> {
         Ok(self.operand(operand)?.truthy())
     }
 
@@ -393,11 +397,11 @@ impl Machine {
         glob: bool,
         remove_backslash: bool,
         v: Value,
-    ) -> Fallible<()> {
+    ) -> anyhow::Result<()> {
         if glob && contains_glob_specials(&v) {
             let pattern = v
                 .as_str()
-                .ok_or_else(|| err_msg("contains_glob_specials returned true for non String?"))?;
+                .ok_or_else(|| anyhow!("contains_glob_specials returned true for non String?"))?;
             let glob = filenamegen::Glob::new(pattern)?;
             for item in glob.walk(&self.cwd) {
                 list.push(item.into_os_string().into())
@@ -448,7 +452,7 @@ mod test {
     }
 
     #[test]
-    fn test_exit() -> Fallible<()> {
+    fn test_exit() -> anyhow::Result<()> {
         let mut m = machine(&[Operation::Exit(Exit {
             value: Operand::Immediate(Value::None),
         })]);
@@ -500,7 +504,7 @@ mod test {
     }
 
     #[test]
-    fn test_copy() -> Fallible<()> {
+    fn test_copy() -> anyhow::Result<()> {
         let mut m = machine(&[
             Operation::PushFrame(PushFrame { size: 1 }),
             Operation::Copy(Copy {

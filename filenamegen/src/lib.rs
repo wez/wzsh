@@ -4,7 +4,6 @@
 //! * Can generate paths relative to a specified dir rather than
 //!   assuming the current working dir
 
-use failure::Fallible;
 use std::collections::VecDeque;
 use std::path::{Component, Path, PathBuf};
 
@@ -49,7 +48,7 @@ impl Glob {
     ///
     /// `{foo,bar}.rs` matches both `foo.rs` and `bar.rs`.  The curly braces
     ///    define an alternation regex.
-    pub fn new(pattern: &str) -> Fallible<Glob> {
+    pub fn new(pattern: &str) -> anyhow::Result<Glob> {
         let mut nodes = vec![];
         for comp in Path::new(pattern).components() {
             let token = match comp {
@@ -178,7 +177,7 @@ mod test {
     use tempdir::TempDir;
 
     #[allow(unused)]
-    fn make_dirs_in(root: &TempDir, dirs: &[&str]) -> Fallible<()> {
+    fn make_dirs_in(root: &TempDir, dirs: &[&str]) -> anyhow::Result<()> {
         for d in dirs {
             let p = root.path().join(d);
             std::fs::create_dir_all(p)?;
@@ -186,7 +185,7 @@ mod test {
         Ok(())
     }
 
-    fn touch_file<P: AsRef<Path>>(path: P) -> Fallible<()> {
+    fn touch_file<P: AsRef<Path>>(path: P) -> anyhow::Result<()> {
         eprintln!("touch_file {}", path.as_ref().display());
         let _file = std::fs::OpenOptions::new()
             .write(true)
@@ -195,7 +194,7 @@ mod test {
         Ok(())
     }
 
-    fn touch_files_in(root: &TempDir, files: &[&str]) -> Fallible<()> {
+    fn touch_files_in(root: &TempDir, files: &[&str]) -> anyhow::Result<()> {
         for f in files {
             let p = root.path().join(f);
             let d = p.parent().unwrap();
@@ -205,12 +204,12 @@ mod test {
         Ok(())
     }
 
-    fn make_fixture() -> Fallible<TempDir> {
+    fn make_fixture() -> anyhow::Result<TempDir> {
         Ok(TempDir::new("filenamegen")?)
     }
 
     #[test]
-    fn test_simple() -> Fallible<()> {
+    fn test_simple() -> anyhow::Result<()> {
         let root = make_fixture()?;
         touch_files_in(&root, &["src/lib.rs"])?;
         let glob = Glob::new("src/*.rs")?;
@@ -219,7 +218,7 @@ mod test {
     }
 
     #[test]
-    fn non_utf8_node_match() -> Fallible<()> {
+    fn non_utf8_node_match() -> anyhow::Result<()> {
         let node = parse("*.rs")?;
         use bstr::B;
         let pound = B(b"\xa3.rs");
@@ -233,7 +232,7 @@ mod test {
 
     #[test]
     #[cfg(windows)]
-    fn case_insensitive() -> Fallible<()> {
+    fn case_insensitive() -> anyhow::Result<()> {
         let node = parse("foo/bar.rs")?;
         use bstr::B;
         let upper = B(b"FOO/bAr.rs");
@@ -244,7 +243,7 @@ mod test {
 
     #[test]
     #[cfg(all(unix, not(target_os = "macos")))]
-    fn test_non_utf8_on_disk() -> Fallible<()> {
+    fn test_non_utf8_on_disk() -> anyhow::Result<()> {
         use bstr::B;
         let root = make_fixture()?;
         let pound = B(b"\xa3.rs").to_path()?;
@@ -256,7 +255,7 @@ mod test {
     }
 
     #[test]
-    fn test_more() -> Fallible<()> {
+    fn test_more() -> anyhow::Result<()> {
         let root = make_fixture()?;
         touch_files_in(
             &root,
@@ -286,7 +285,7 @@ mod test {
     }
 
     #[test]
-    fn test_doublestar() -> Fallible<()> {
+    fn test_doublestar() -> anyhow::Result<()> {
         let root = make_fixture()?;
         touch_files_in(
             &root,
@@ -320,7 +319,7 @@ mod test {
     }
 
     #[test]
-    fn glob_up() -> Fallible<()> {
+    fn glob_up() -> anyhow::Result<()> {
         let root = make_fixture()?;
         touch_files_in(
             &root,
@@ -340,7 +339,7 @@ mod test {
     }
 
     #[test]
-    fn alternative() -> Fallible<()> {
+    fn alternative() -> anyhow::Result<()> {
         let root = make_fixture()?;
         touch_files_in(&root, &["foo.rs", "bar.rs"])?;
         let glob = Glob::new("{foo,bar}.rs")?;
@@ -352,7 +351,7 @@ mod test {
     }
 
     #[test]
-    fn bogus_alternative() -> Fallible<()> {
+    fn bogus_alternative() -> anyhow::Result<()> {
         assert_eq!(
             format!("{}", Glob::new("{{").unwrap_err()),
             "cannot start an alternative inside an alternative"
@@ -365,7 +364,7 @@ mod test {
     }
 
     #[test]
-    fn class() -> Fallible<()> {
+    fn class() -> anyhow::Result<()> {
         let root = make_fixture()?;
         touch_files_in(&root, &["foo.o", "foo.a"])?;
         let glob = Glob::new("foo.[oa]")?;

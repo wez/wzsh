@@ -5,7 +5,7 @@ use crate::position::{Pos, Span};
 use crate::reader::{CharReader, Next, PositionedChar};
 use crate::tokenenum::MatchResult;
 use crate::{Operator, ReservedWord, OPERATORS, RESERVED_WORDS};
-use failure::{bail, Fallible};
+use anyhow::bail;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::io::Read;
@@ -226,7 +226,7 @@ impl<R: Read> Lexer<R> {
         }
     }
 
-    pub fn next_token(&mut self) -> Fallible<Token> {
+    pub fn next_token(&mut self) -> anyhow::Result<Token> {
         match self.state().state {
             State::CommandSubstitution(_)
             | State::Top
@@ -253,7 +253,7 @@ impl<R: Read> Lexer<R> {
         self.last_token.replace(token);
     }
 
-    fn top(&mut self) -> Fallible<Token> {
+    fn top(&mut self) -> anyhow::Result<Token> {
         loop {
             if let Some(token) = self.last_token.take() {
                 return Ok(token);
@@ -411,7 +411,7 @@ impl<R: Read> Lexer<R> {
         }
     }
 
-    fn next_char_or_err(&mut self, err: LexErrorKind) -> Fallible<PositionedChar> {
+    fn next_char_or_err(&mut self, err: LexErrorKind) -> anyhow::Result<PositionedChar> {
         match self.reader.next_char() {
             Next::Char(b) => Ok(b),
             Next::Eof(pos) => Err(err.at(pos.into()).into()),
@@ -442,14 +442,14 @@ impl<R: Read> Lexer<R> {
         }
     }
 
-    fn backslash(&mut self, backslash: PositionedChar) -> Fallible<()> {
+    fn backslash(&mut self, backslash: PositionedChar) -> anyhow::Result<()> {
         let quoted = self.next_char_or_err(LexErrorKind::EofDuringBackslash)?;
         self.add_char_to_word(backslash);
         self.add_char_to_word(quoted);
         Ok(())
     }
 
-    fn single_quotes(&mut self, start: Pos) -> Fallible<()> {
+    fn single_quotes(&mut self, start: Pos) -> anyhow::Result<()> {
         let mut accumulator = String::new();
         let mut end;
         loop {
@@ -472,7 +472,7 @@ impl<R: Read> Lexer<R> {
         Ok(())
     }
 
-    fn dollar(&mut self, start: Pos) -> Fallible<()> {
+    fn dollar(&mut self, start: Pos) -> anyhow::Result<()> {
         let c = self.next_char_or_err(LexErrorKind::EofDuringParameterExpansion)?;
         if c.c == '(' {
             let maybe_paren = self.next_char_or_err(LexErrorKind::EofDuringParameterExpansion)?;
@@ -487,7 +487,7 @@ impl<R: Read> Lexer<R> {
         }
     }
 
-    fn command(&mut self, start: Pos, opener: PositionedChar) -> Fallible<()> {
+    fn command(&mut self, start: Pos, opener: PositionedChar) -> anyhow::Result<()> {
         let closer = match opener.c {
             '(' => ')',
             '`' => '`',
@@ -526,11 +526,11 @@ impl<R: Read> Lexer<R> {
         Ok(())
     }
 
-    fn arithmetic(&mut self, _start: Pos) -> Fallible<()> {
+    fn arithmetic(&mut self, _start: Pos) -> anyhow::Result<()> {
         bail!("arithmetic not done");
     }
 
-    fn parameter_expansion(&mut self, start: Pos, c: PositionedChar) -> Fallible<()> {
+    fn parameter_expansion(&mut self, start: Pos, c: PositionedChar) -> anyhow::Result<()> {
         let curlies = if c.c != '{' {
             self.reader.unget(c);
             false
@@ -627,7 +627,7 @@ impl<R: Read> Lexer<R> {
         Ok(())
     }
 
-    fn double_quotes(&mut self, start: Pos) -> Fallible<()> {
+    fn double_quotes(&mut self, start: Pos) -> anyhow::Result<()> {
         self.push_state(State::DoubleQuotes);
 
         let mut backslash = false;

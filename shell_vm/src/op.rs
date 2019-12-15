@@ -1,5 +1,5 @@
 use super::*;
-use failure::{bail, ensure, format_err, ResultExt};
+use anyhow::{anyhow, bail, ensure, Context};
 use filedescriptor::{FileDescriptor, Pipe};
 use std::convert::TryInto;
 use std::io::Write;
@@ -13,7 +13,7 @@ use std::io::Write;
 /// will rewind the program counter such that that same operation
 /// will be retried on a subsequent step call.
 pub trait Dispatch {
-    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status>;
+    fn dispatch(&self, machine: &mut Machine) -> anyhow::Result<Status>;
 }
 
 macro_rules! op {
@@ -55,7 +55,7 @@ $(
 }
 
 impl Dispatch for Operation {
-    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+    fn dispatch(&self, machine: &mut Machine) -> anyhow::Result<Status> {
         match self {
             $(
                 Operation::$name(inner) => inner.dispatch(machine),
@@ -245,7 +245,7 @@ op!(
 );
 
 impl Dispatch for Copy {
-    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+    fn dispatch(&self, machine: &mut Machine) -> anyhow::Result<Status> {
         let copy = machine.operand(&self.source)?.clone();
         *machine.operand_mut(&self.destination)? = copy;
         Ok(Status::Running)
@@ -253,7 +253,7 @@ impl Dispatch for Copy {
 }
 
 impl Dispatch for PushFrame {
-    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+    fn dispatch(&self, machine: &mut Machine) -> anyhow::Result<Status> {
         let new_size = machine.stack.len() + self.size;
         machine.stack.resize(new_size, Value::None);
 
@@ -266,11 +266,11 @@ impl Dispatch for PushFrame {
 }
 
 impl Dispatch for PopFrame {
-    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+    fn dispatch(&self, machine: &mut Machine) -> anyhow::Result<Status> {
         let frame = machine
             .frames
             .pop_back()
-            .ok_or_else(|| err_msg("frame underflow"))?;
+            .ok_or_else(|| anyhow!("frame underflow"))?;
         let new_size = frame.frame_pointer - frame.frame_size;
         machine.stack.resize(new_size, Value::None);
         Ok(Status::Running)
@@ -278,7 +278,7 @@ impl Dispatch for PopFrame {
 }
 
 impl Dispatch for PushEnvironment {
-    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+    fn dispatch(&self, machine: &mut Machine) -> anyhow::Result<Status> {
         let cloned = machine.environment()?.clone();
         machine.environment.push_back(cloned);
         Ok(Status::Running)
@@ -286,17 +286,17 @@ impl Dispatch for PushEnvironment {
 }
 
 impl Dispatch for PopEnvironment {
-    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+    fn dispatch(&self, machine: &mut Machine) -> anyhow::Result<Status> {
         machine
             .environment
             .pop_back()
-            .ok_or_else(|| err_msg("environment underflow"))?;
+            .ok_or_else(|| anyhow!("environment underflow"))?;
         Ok(Status::Running)
     }
 }
 
 impl Dispatch for PushPipe {
-    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+    fn dispatch(&self, machine: &mut Machine) -> anyhow::Result<Status> {
         let pipe = Pipe::new()?;
         machine.io_env_mut()?.assign_fd(1, pipe.write);
         machine.pipes.push_back(pipe.read);
@@ -305,18 +305,18 @@ impl Dispatch for PushPipe {
 }
 
 impl Dispatch for PopPipe {
-    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+    fn dispatch(&self, machine: &mut Machine) -> anyhow::Result<Status> {
         let stdin = machine
             .pipes
             .pop_back()
-            .ok_or_else(|| err_msg("pipe stack underflow"))?;
+            .ok_or_else(|| anyhow!("pipe stack underflow"))?;
         machine.io_env_mut()?.assign_fd(0, stdin);
         Ok(Status::Running)
     }
 }
 
 impl Dispatch for PushIo {
-    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+    fn dispatch(&self, machine: &mut Machine) -> anyhow::Result<Status> {
         let cloned = machine.io_env()?.clone();
         machine.io_env.push_back(cloned);
         Ok(Status::Running)
@@ -324,17 +324,17 @@ impl Dispatch for PushIo {
 }
 
 impl Dispatch for PopIo {
-    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+    fn dispatch(&self, machine: &mut Machine) -> anyhow::Result<Status> {
         machine
             .io_env
             .pop_back()
-            .ok_or_else(|| err_msg("IoEnvironment underflow"))?;
+            .ok_or_else(|| anyhow!("IoEnvironment underflow"))?;
         Ok(Status::Running)
     }
 }
 
 impl Dispatch for GetEnv {
-    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+    fn dispatch(&self, machine: &mut Machine) -> anyhow::Result<Status> {
         let name = machine.operand_as_str(&self.name)?;
         if name == "@" || name == "*" {
             /*
@@ -377,7 +377,7 @@ impl Dispatch for GetEnv {
 }
 
 impl Dispatch for SetEnv {
-    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+    fn dispatch(&self, machine: &mut Machine) -> anyhow::Result<Status> {
         let name = machine.operand_as_os_str(&self.name)?.to_os_string();
         let value = machine.operand_as_os_str(&self.value)?.to_os_string();
         machine.environment_mut()?.set(name, value);
@@ -386,7 +386,7 @@ impl Dispatch for SetEnv {
 }
 
 impl Dispatch for Exit {
-    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+    fn dispatch(&self, machine: &mut Machine) -> anyhow::Result<Status> {
         let value = match machine.operand(&self.value)? {
             Value::String(s) => {
                 if let Ok(n) = isize::from_str_radix(s, 10) {
@@ -417,7 +417,7 @@ impl Dispatch for Exit {
 }
 
 impl Dispatch for Error {
-    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+    fn dispatch(&self, machine: &mut Machine) -> anyhow::Result<Status> {
         let mut stderr = machine.io_env_mut()?.stderr();
         match machine.operand(&self.message)? {
             Value::String(s) => write!(stderr, "{}", s),
@@ -429,7 +429,7 @@ impl Dispatch for Error {
 }
 
 impl Dispatch for StringLength {
-    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+    fn dispatch(&self, machine: &mut Machine) -> anyhow::Result<Status> {
         let len = match machine.operand(&self.string)? {
             Value::String(s) => s.len(),
             Value::None => 0,
@@ -446,11 +446,11 @@ impl Dispatch for StringLength {
 }
 
 impl Dispatch for StringAppend {
-    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+    fn dispatch(&self, machine: &mut Machine) -> anyhow::Result<Status> {
         let src = machine
             .operand(&self.source)?
             .as_bstr()
-            .ok_or_else(|| err_msg("StringAppend: operand is not representable as a BStr"))?
+            .ok_or_else(|| anyhow!("StringAppend: operand is not representable as a BStr"))?
             .to_bstring();
 
         if src.is_empty() {
@@ -460,7 +460,7 @@ impl Dispatch for StringAppend {
 
         let dest = std::mem::replace(machine.operand_mut(&self.destination)?, Value::None);
         let mut dest = dest.into_bstring().ok_or_else(|| {
-            err_msg("StringAppend: destinatination is not representable as a BString")
+            anyhow!("StringAppend: destinatination is not representable as a BString")
         })?;
 
         dest.push(src);
@@ -469,7 +469,7 @@ impl Dispatch for StringAppend {
     }
 }
 
-fn join_list_ifs(machine: &mut Machine, list: Value) -> Fallible<Value> {
+fn join_list_ifs(machine: &mut Machine, list: Value) -> anyhow::Result<Value> {
     let mut dest = BString::new();
     let ifs = machine.ifs()?.to_owned();
     let join_char = ifs.chars().next();
@@ -486,14 +486,14 @@ fn join_list_ifs(machine: &mut Machine, list: Value) -> Fallible<Value> {
 
         let element = element
             .as_bstr()
-            .ok_or_else(|| err_msg("JoinList: element is not representable as BString"))?;
+            .ok_or_else(|| anyhow!("JoinList: element is not representable as BString"))?;
         dest.push(element);
     }
     Ok(dest.try_into()?)
 }
 
 impl JoinList {
-    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+    fn dispatch(&self, machine: &mut Machine) -> anyhow::Result<Status> {
         let dest = join_list_ifs(machine, machine.operand(&self.list)?.clone())?;
         *machine.operand_mut(&self.destination)? = dest;
 
@@ -502,7 +502,7 @@ impl JoinList {
 }
 
 impl Dispatch for ListAppend {
-    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+    fn dispatch(&self, machine: &mut Machine) -> anyhow::Result<Status> {
         let ifs = machine.ifs()?.to_owned();
         let src = machine.operand(&self.value)?.clone();
         let mut list = match machine.operand_mut(&self.list)? {
@@ -533,7 +533,7 @@ impl Dispatch for ListAppend {
 }
 
 impl Dispatch for ListAppendList {
-    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+    fn dispatch(&self, machine: &mut Machine) -> anyhow::Result<Status> {
         let mut src_list = match machine.operand_mut(&self.src_list)? {
             Value::List(list) => list.clone(),
             _ => bail!("cannot ListAppendList from non-list"),
@@ -551,7 +551,7 @@ impl Dispatch for ListAppendList {
 }
 
 impl Dispatch for DupFd {
-    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+    fn dispatch(&self, machine: &mut Machine) -> anyhow::Result<Status> {
         machine
             .io_env_mut()?
             .duplicate_to(self.src_fd, self.dest_fd)?;
@@ -560,7 +560,7 @@ impl Dispatch for DupFd {
 }
 
 impl Dispatch for OpenFile {
-    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+    fn dispatch(&self, machine: &mut Machine) -> anyhow::Result<Status> {
         let file_name = match machine.operand(&self.name)? {
             Value::OsString(s) => s.clone(),
             Value::String(s) => OsStr::new(s).to_os_string(),
@@ -602,7 +602,7 @@ impl Dispatch for OpenFile {
 }
 
 /// Calculate the new program counter value after applying target.
-fn compute_jump_target(machine: &mut Machine, target: InstructionAddress) -> Fallible<usize> {
+fn compute_jump_target(machine: &mut Machine, target: InstructionAddress) -> anyhow::Result<usize> {
     // we need to account for the fact that the
     // program counter is pre-incremented prior to calling Dispatch::dispatch.
     let pc = machine.program_counter - 1;
@@ -610,7 +610,7 @@ fn compute_jump_target(machine: &mut Machine, target: InstructionAddress) -> Fal
         InstructionAddress::Absolute(dest) => dest,
         InstructionAddress::Relative(offset) if offset >= 0 => {
             pc.checked_add(offset as usize).ok_or_else(|| {
-                format_err!(
+                anyhow!(
                     "overflow while computing jump target; PC={} target={:?}",
                     pc,
                     target
@@ -619,7 +619,7 @@ fn compute_jump_target(machine: &mut Machine, target: InstructionAddress) -> Fal
         }
         InstructionAddress::Relative(offset) => {
             pc.checked_sub(offset as usize).ok_or_else(|| {
-                format_err!(
+                anyhow!(
                     "overflow while computing jump target; PC={} target={:?}",
                     pc,
                     target
@@ -639,7 +639,7 @@ fn compute_jump_target(machine: &mut Machine, target: InstructionAddress) -> Fal
 }
 
 impl Dispatch for Jump {
-    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+    fn dispatch(&self, machine: &mut Machine) -> anyhow::Result<Status> {
         let target = compute_jump_target(machine, self.target)?;
         machine.program_counter = target;
         Ok(Status::Running)
@@ -647,7 +647,7 @@ impl Dispatch for Jump {
 }
 
 impl Dispatch for JumpIfZero {
-    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+    fn dispatch(&self, machine: &mut Machine) -> anyhow::Result<Status> {
         if !machine.operand_truthy(&self.condition)? {
             let target = compute_jump_target(machine, self.target)?;
             machine.program_counter = target;
@@ -657,7 +657,7 @@ impl Dispatch for JumpIfZero {
 }
 
 impl Dispatch for JumpIfNonZero {
-    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+    fn dispatch(&self, machine: &mut Machine) -> anyhow::Result<Status> {
         if machine.operand_truthy(&self.condition)? {
             let target = compute_jump_target(machine, self.target)?;
             machine.program_counter = target;
@@ -667,7 +667,7 @@ impl Dispatch for JumpIfNonZero {
 }
 
 impl Dispatch for IsNone {
-    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+    fn dispatch(&self, machine: &mut Machine) -> anyhow::Result<Status> {
         let is_none = match machine.operand(&self.source)? {
             Value::None => 1,
             _ => 0,
@@ -680,7 +680,7 @@ impl Dispatch for IsNone {
 }
 
 impl Dispatch for IsNoneOrEmptyString {
-    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+    fn dispatch(&self, machine: &mut Machine) -> anyhow::Result<Status> {
         let is_none = match machine.operand(&self.source)? {
             Value::None => 1,
             Value::String(s) if s.is_empty() => 1,
@@ -695,7 +695,7 @@ impl Dispatch for IsNoneOrEmptyString {
 }
 
 impl Dispatch for TildeExpand {
-    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+    fn dispatch(&self, machine: &mut Machine) -> anyhow::Result<Status> {
         let name = match machine.operand(&self.name)? {
             Value::None => None,
             Value::String(s) => Some(s.to_owned()),
@@ -710,7 +710,7 @@ impl Dispatch for TildeExpand {
         }
 
         let host = machine.host.as_ref().ok_or_else(|| {
-            format_err!(
+            anyhow!(
                 "unable to TildeExpand {:?} because no shell host has been configured",
                 name
             )
@@ -727,7 +727,7 @@ impl Dispatch for TildeExpand {
 }
 
 impl Dispatch for Wait {
-    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+    fn dispatch(&self, machine: &mut Machine) -> anyhow::Result<Status> {
         let status = match machine.operand(&self.status)? {
             Value::WaitableStatus(status) => status.clone(),
             bad => bail!("attempted to Wait on non-WaitableStatus value {:?}", bad),
@@ -751,7 +751,7 @@ impl Dispatch for Wait {
 }
 
 impl Dispatch for InvertLastWait {
-    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+    fn dispatch(&self, machine: &mut Machine) -> anyhow::Result<Status> {
         let inverted_status = match machine.last_wait_status.take() {
             Some(value) => {
                 if value.truthy() {
@@ -773,24 +773,24 @@ impl Dispatch for InvertLastWait {
 }
 
 impl Dispatch for SpawnCommand {
-    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+    fn dispatch(&self, machine: &mut Machine) -> anyhow::Result<Status> {
         let argv = match machine.operand(&self.argv)? {
             Value::List(argv) => argv.clone(),
             argv => bail!("SpawnCommand argv must be a list, got {:?}", argv),
         };
 
         let host = machine.host.as_mut().ok_or_else(|| {
-            err_msg("unable to SpawnCommand because no shell host has been configured")
+            anyhow!("unable to SpawnCommand because no shell host has been configured")
         })?;
 
         let env = machine
             .environment
             .back_mut()
-            .ok_or_else(|| err_msg("SpawnCommand: no current environment"))?;
+            .ok_or_else(|| anyhow!("SpawnCommand: no current environment"))?;
         let io_env = machine
             .io_env
             .back_mut()
-            .ok_or_else(|| err_msg("SpawnCommand: no current io_env"))?;
+            .ok_or_else(|| anyhow!("SpawnCommand: no current io_env"))?;
 
         let status = host.spawn_command(&argv, env, &mut machine.cwd, io_env)?;
 
@@ -801,9 +801,9 @@ impl Dispatch for SpawnCommand {
 }
 
 impl Dispatch for DefineFunction {
-    fn dispatch(&self, machine: &mut Machine) -> Fallible<Status> {
+    fn dispatch(&self, machine: &mut Machine) -> anyhow::Result<Status> {
         let host = machine.host.as_mut().ok_or_else(|| {
-            err_msg("unable to DefineFunction because no shell host has been configured")
+            anyhow!("unable to DefineFunction because no shell host has been configured")
         })?;
         host.define_function(&self.name, &self.program)?;
         machine.last_wait_status.replace(Value::WaitableStatus(
@@ -817,7 +817,7 @@ macro_rules! notyet {
     ($($name:ty),* $(,)?) => {
         $(
 impl Dispatch for $name {
-    fn dispatch(&self, _machine: &mut Machine) -> Fallible<Status> {
+    fn dispatch(&self, _machine: &mut Machine) -> anyhow::Result<Status> {
         bail!("dispatch not impl for {:?}", self)
     }
 }

@@ -1,9 +1,8 @@
 use super::*;
-use failure::Fallible;
 use pretty_assertions::assert_eq;
 use shell_lexer::{Assignment, Pos, Span, Token, WordComponent, WordComponentKind};
 
-fn parse(text: &str) -> Fallible<Command> {
+fn parse(text: &str) -> anyhow::Result<Command> {
     let mut parser = Parser::new(text.as_bytes());
     parser.parse()
 }
