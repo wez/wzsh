@@ -4,6 +4,9 @@ version = "0.1.0"
 authors = ["Wez Furlong"]
 edition = "2018"
 
+[build-dependencies]
+vergen = "3"
+
 [dependencies]
 cancel = "0.1"
 dirs = "2.0"
