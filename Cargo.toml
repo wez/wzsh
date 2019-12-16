@@ -8,6 +8,7 @@ edition = "2018"
 vergen = "3"
 
 [dependencies]
+atty = "0.2"
 cancel = "0.1"
 dirs = "2.0"
 anyhow = "1.0"

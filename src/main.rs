@@ -1,6 +1,7 @@
-use crate::errorprint::print_error_path;
+use crate::errorprint::{print_error, print_error_path};
 use crate::shellhost::FunctionRegistry;
 use shell_vm::Environment;
+use std::io::Read;
 use std::path::PathBuf;
 use std::sync::Arc;
 use structopt::StructOpt;
@@ -55,10 +56,19 @@ fn main() -> anyhow::Result<()> {
     }
 
     if let Some(file) = opts.file.as_ref() {
-        if let Err(err) =
-            script::compile_and_run_script_file(file, &mut cwd, &mut env, &funcs)
-        {
+        if let Err(err) = script::compile_and_run_script_file(file, &mut cwd, &mut env, &funcs) {
             print_error_path(&err, file);
+            std::process::exit(1);
+        }
+        Ok(())
+    } else if atty::isnt(atty::Stream::Stdin) {
+        let mut stdin = String::new();
+        std::io::stdin().lock().read_to_string(&mut stdin)?;
+
+        if let Err(err) =
+            script::compile_and_run_script(stdin.as_bytes(), "stdin", &mut cwd, &mut env, &funcs)
+        {
+            print_error(&err, &stdin);
             std::process::exit(1);
         }
         Ok(())

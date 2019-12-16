@@ -6,14 +6,14 @@ use shell_vm::{Environment, Machine, Program, Status};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-pub fn compile_and_run_script_file(
-    path: &Path,
+pub fn compile_and_run_script<R: std::io::Read>(
+    file: R,
+    file_name: &str,
     cwd: &mut PathBuf,
     env: &mut Environment,
     funcs: &Arc<FunctionRegistry>,
 ) -> anyhow::Result<Status> {
-    let job = Job::new_empty(path.to_string_lossy().to_string());
-    let file = std::fs::File::open(path)?;
+    let job = Job::new_empty(file_name.to_string());
     let mut parser = Parser::new(file);
 
     let command = parser.parse()?;
@@ -30,4 +30,15 @@ pub fn compile_and_run_script_file(
     *env = new_env;
 
     status
+}
+
+pub fn compile_and_run_script_file(
+    path: &Path,
+    cwd: &mut PathBuf,
+    env: &mut Environment,
+    funcs: &Arc<FunctionRegistry>,
+) -> anyhow::Result<Status> {
+    let file_name = path.to_string_lossy();
+    let file = std::fs::File::open(path)?;
+    compile_and_run_script(file, &file_name, cwd, env, funcs)
 }
