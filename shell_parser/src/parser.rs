@@ -16,11 +16,13 @@ pub enum ParseErrorContext {
     FdRedirectionExpectsNumber,
     ExpectingRightBrace,
     ExpectingRightParen,
+    ExpectingThen,
+    ExpectingFi,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum ParseErrorKind {
-    #[error("Unexpected token {:?} while parsing {:?}", 0, 1)]
+    #[error("Unexpected token {:?} while parsing {:?}", .0, .1)]
     UnexpectedToken(Token, ParseErrorContext),
 }
 
@@ -295,13 +297,69 @@ impl<R: Read> Parser<R> {
                 asynchronous: false,
                 redirects: vec![],
             }
+        } else if let Some(if_) = self.if_clause()? {
+            Command {
+                command: CommandType::If(if_),
+                asynchronous: false,
+                redirects: vec![],
+            }
         } else {
-            // TODO: for_clause, case_clause, if_clause, while_clause, until_clause
+            // TODO: for_clause, case_clause, while_clause, until_clause
             return Ok(None);
         };
 
         command.redirects = self.redirect_list()?;
         Ok(Some(command))
+    }
+
+    fn if_clause(&mut self) -> anyhow::Result<Option<If>> {
+        if !self.next_token_is_reserved_word(ReservedWord::If)? {
+            return Ok(None);
+        }
+        let condition = self.compound_list()?;
+        if !self.next_token_is_reserved_word(ReservedWord::Then)? {
+            return Err(self.unexpected_next_token(ParseErrorContext::ExpectingThen));
+        }
+        let true_part = self.compound_list()?;
+        let false_part = self.else_part()?;
+
+        if !self.next_token_is_reserved_word(ReservedWord::Fi)? {
+            Err(self.unexpected_next_token(ParseErrorContext::ExpectingFi))
+        } else {
+            Ok(Some(If {
+                condition,
+                true_part: Some(true_part),
+                false_part,
+            }))
+        }
+    }
+
+    fn else_part(&mut self) -> anyhow::Result<Option<CompoundList>> {
+        if self.next_token_is_reserved_word(ReservedWord::Else)? {
+            let false_part = self.compound_list()?;
+            Ok(Some(false_part))
+        } else if self.next_token_is_reserved_word(ReservedWord::Elif)? {
+            let condition = self.compound_list()?;
+            if !self.next_token_is_reserved_word(ReservedWord::Then)? {
+                return Err(self.unexpected_next_token(ParseErrorContext::ExpectingThen));
+            }
+            let true_part = self.compound_list()?;
+            let false_part = self.else_part()?;
+
+            Ok(Some(CompoundList {
+                commands: vec![Command {
+                    asynchronous: false,
+                    command: CommandType::If(If {
+                        condition,
+                        true_part: Some(true_part),
+                        false_part,
+                    }),
+                    redirects: vec![],
+                }],
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     fn subshell(&mut self) -> anyhow::Result<Option<CompoundList>> {
@@ -480,6 +538,16 @@ impl<R: Read> Parser<R> {
         let mut assignments = vec![];
         let mut words = vec![];
         let mut redirects = vec![];
+
+        // Apply shell grammar rule 1: the first word of a command, if it
+        // matches a reserved word, is parsed as that token rather than a
+        // command
+        let tok = self.next_token()?;
+        let is_reserved = tok.is_any_reserved_word();
+        self.unget_token(tok);
+        if is_reserved {
+            return Ok(None);
+        }
 
         loop {
             if let Some(redir) = self.io_redirect()? {

@@ -527,3 +527,261 @@ fn brace_group_sep_newlien() {
         }))
     );
 }
+
+#[test]
+fn if_clause() {
+    let cmd = parse("if true\nthen\n\techo yes\nfi\n").unwrap();
+    assert_eq!(
+        cmd,
+        Command::from(CommandType::If(If {
+            condition: CompoundList {
+                commands: vec![Command::from(CommandType::SimpleCommand(SimpleCommand {
+                    assignments: vec![],
+                    redirects: vec![],
+                    words: vec![vec![WordComponent {
+                        kind: WordComponentKind::literal("true"),
+                        span: Span::new_to(0, 3, 6),
+                        splittable: true,
+                        remove_backslash: true
+                    }],]
+                }))]
+            },
+
+            true_part: Some(CompoundList {
+                commands: vec![Command::from(CommandType::SimpleCommand(SimpleCommand {
+                    assignments: vec![],
+                    redirects: vec![],
+                    words: vec![
+                        vec![WordComponent {
+                            kind: WordComponentKind::literal("echo"),
+                            span: Span::new_to(2, 1, 4),
+                            splittable: true,
+                            remove_backslash: true
+                        }],
+                        vec![WordComponent {
+                            kind: WordComponentKind::literal("yes"),
+                            span: Span::new_to(2, 6, 8),
+                            splittable: true,
+                            remove_backslash: true
+                        }],
+                    ]
+                })),]
+            }),
+
+            false_part: None,
+        }))
+    );
+}
+
+#[test]
+fn if_clause_with_semicolon() {
+    let cmd = parse("if true ; then\n\techo yes\nfi\n").unwrap();
+    assert_eq!(
+        cmd,
+        Command::from(CommandType::If(If {
+            condition: CompoundList {
+                commands: vec![Command::from(CommandType::SimpleCommand(SimpleCommand {
+                    assignments: vec![],
+                    redirects: vec![],
+                    words: vec![vec![WordComponent {
+                        kind: WordComponentKind::literal("true"),
+                        span: Span::new_to(0, 3, 6),
+                        splittable: true,
+                        remove_backslash: true
+                    }],]
+                }))]
+            },
+
+            true_part: Some(CompoundList {
+                commands: vec![Command::from(CommandType::SimpleCommand(SimpleCommand {
+                    assignments: vec![],
+                    redirects: vec![],
+                    words: vec![
+                        vec![WordComponent {
+                            kind: WordComponentKind::literal("echo"),
+                            span: Span::new_to(1, 1, 4),
+                            splittable: true,
+                            remove_backslash: true
+                        }],
+                        vec![WordComponent {
+                            kind: WordComponentKind::literal("yes"),
+                            span: Span::new_to(1, 6, 8),
+                            splittable: true,
+                            remove_backslash: true
+                        }],
+                    ]
+                })),]
+            }),
+
+            false_part: None,
+        }))
+    );
+}
+
+#[test]
+fn if_clause_with_else() {
+    let cmd = parse("if true\nthen\n\techo yes\nelse echo no ; fi\n").unwrap();
+    assert_eq!(
+        cmd,
+        Command::from(CommandType::If(If {
+            condition: CompoundList {
+                commands: vec![Command::from(CommandType::SimpleCommand(SimpleCommand {
+                    assignments: vec![],
+                    redirects: vec![],
+                    words: vec![vec![WordComponent {
+                        kind: WordComponentKind::literal("true"),
+                        span: Span::new_to(0, 3, 6),
+                        splittable: true,
+                        remove_backslash: true
+                    }],]
+                }))]
+            },
+
+            true_part: Some(CompoundList {
+                commands: vec![Command::from(CommandType::SimpleCommand(SimpleCommand {
+                    assignments: vec![],
+                    redirects: vec![],
+                    words: vec![
+                        vec![WordComponent {
+                            kind: WordComponentKind::literal("echo"),
+                            span: Span::new_to(2, 1, 4),
+                            splittable: true,
+                            remove_backslash: true
+                        }],
+                        vec![WordComponent {
+                            kind: WordComponentKind::literal("yes"),
+                            span: Span::new_to(2, 6, 8),
+                            splittable: true,
+                            remove_backslash: true
+                        }],
+                    ]
+                })),]
+            }),
+
+            false_part: Some(CompoundList {
+                commands: vec![Command::from(CommandType::SimpleCommand(SimpleCommand {
+                    assignments: vec![],
+                    redirects: vec![],
+                    words: vec![
+                        vec![WordComponent {
+                            kind: WordComponentKind::literal("echo"),
+                            span: Span::new_to(3, 5, 8),
+                            splittable: true,
+                            remove_backslash: true
+                        }],
+                        vec![WordComponent {
+                            kind: WordComponentKind::literal("no"),
+                            span: Span::new_to(3, 10, 11),
+                            splittable: true,
+                            remove_backslash: true
+                        }],
+                    ]
+                })),]
+            }),
+        }))
+    );
+}
+
+#[test]
+fn if_clause_with_else_if() {
+    let cmd =
+        parse("if true\nthen\n\techo yes\nelif false ; then echo middle ; else echo no ; fi\n")
+            .unwrap();
+    assert_eq!(
+        cmd,
+        Command::from(CommandType::If(If {
+            condition: CompoundList {
+                commands: vec![Command::from(CommandType::SimpleCommand(SimpleCommand {
+                    assignments: vec![],
+                    redirects: vec![],
+                    words: vec![vec![WordComponent {
+                        kind: WordComponentKind::literal("true"),
+                        span: Span::new_to(0, 3, 6),
+                        splittable: true,
+                        remove_backslash: true
+                    }],]
+                }))]
+            },
+
+            true_part: Some(CompoundList {
+                commands: vec![Command::from(CommandType::SimpleCommand(SimpleCommand {
+                    assignments: vec![],
+                    redirects: vec![],
+                    words: vec![
+                        vec![WordComponent {
+                            kind: WordComponentKind::literal("echo"),
+                            span: Span::new_to(2, 1, 4),
+                            splittable: true,
+                            remove_backslash: true
+                        }],
+                        vec![WordComponent {
+                            kind: WordComponentKind::literal("yes"),
+                            span: Span::new_to(2, 6, 8),
+                            splittable: true,
+                            remove_backslash: true
+                        }],
+                    ]
+                })),]
+            }),
+
+            false_part: Some(CompoundList {
+                commands: vec![Command::from(CommandType::If(If {
+                    condition: CompoundList {
+                        commands: vec![Command::from(CommandType::SimpleCommand(SimpleCommand {
+                            assignments: vec![],
+                            redirects: vec![],
+                            words: vec![vec![WordComponent {
+                                kind: WordComponentKind::literal("false"),
+                                span: Span::new_to(3, 5, 9),
+                                splittable: true,
+                                remove_backslash: true
+                            }],]
+                        }))]
+                    },
+
+                    true_part: Some(CompoundList {
+                        commands: vec![Command::from(CommandType::SimpleCommand(SimpleCommand {
+                            assignments: vec![],
+                            redirects: vec![],
+                            words: vec![
+                                vec![WordComponent {
+                                    kind: WordComponentKind::literal("echo"),
+                                    span: Span::new_to(3, 18, 21),
+                                    splittable: true,
+                                    remove_backslash: true
+                                }],
+                                vec![WordComponent {
+                                    kind: WordComponentKind::literal("middle"),
+                                    span: Span::new_to(3, 23, 28),
+                                    splittable: true,
+                                    remove_backslash: true
+                                }],
+                            ]
+                        })),]
+                    }),
+
+                    false_part: Some(CompoundList {
+                        commands: vec![Command::from(CommandType::SimpleCommand(SimpleCommand {
+                            assignments: vec![],
+                            redirects: vec![],
+                            words: vec![
+                                vec![WordComponent {
+                                    kind: WordComponentKind::literal("echo"),
+                                    span: Span::new_to(3, 37, 40),
+                                    splittable: true,
+                                    remove_backslash: true
+                                }],
+                                vec![WordComponent {
+                                    kind: WordComponentKind::literal("no"),
+                                    span: Span::new_to(3, 42, 43),
+                                    splittable: true,
+                                    remove_backslash: true
+                                }],
+                            ]
+                        })),]
+                    }),
+                }))]
+            })
+        }))
+    );
+}
