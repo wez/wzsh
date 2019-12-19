@@ -409,8 +409,19 @@ impl Machine {
         } else {
             match (remove_backslash, v.as_str()) {
                 (true, Some(s)) => {
-                    let mut string = s.to_owned();
-                    string.retain(|c| c != '\\');
+                    let mut string = String::with_capacity(s.len());
+                    let mut current = s.chars();
+                    while let Some(c) = current.next() {
+                        if c == '\\' {
+                            if let Some(n) = current.next() {
+                                string.push(n);
+                            } else {
+                                string.push(c);
+                            }
+                        } else {
+                            string.push(c);
+                        }
+                    }
                     list.push(string.into());
                 }
                 _ => list.push(v),
