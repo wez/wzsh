@@ -102,6 +102,7 @@ impl Job {
         Ok(())
     }
 
+    #[allow(unused)]
     pub fn is_background(&self) -> bool {
         #[cfg(unix)]
         {
@@ -123,6 +124,7 @@ impl Job {
         0
     }
 
+    #[allow(unused)]
     pub fn put_in_background(&mut self) -> anyhow::Result<()> {
         #[cfg(unix)]
         {

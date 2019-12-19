@@ -1,7 +1,7 @@
 use crate::errorprint::print_error;
 use crate::job::{put_shell_in_foreground, Job, JOB_LIST};
 use crate::shellhost::{FunctionRegistry, Host};
-use anyhow::{anyhow, Context, Error};
+use anyhow::{anyhow, Error};
 use shell_compiler::Compiler;
 use shell_lexer::{LexError, LexErrorKind};
 use shell_parser::{ParseErrorKind, Parser};
@@ -38,6 +38,8 @@ fn is_recoverable_parse_error(e: &Error) -> bool {
 
 #[cfg(unix)]
 fn init_job_control() -> anyhow::Result<()> {
+    use anyhow::Context;
+
     let pty_fd = 0;
     unsafe {
         // Loop until we are in the foreground.
