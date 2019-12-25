@@ -20,7 +20,7 @@ pub struct EchoCommand {
 
     /// Disable interpretation of backslash escapes (default)
     #[structopt(short = "E", overrides_with = "enable_escapes")]
-    disable_escapes: bool,
+    _disable_escapes: bool,
 
     /// The strings to output
     strings: Vec<String>,
