@@ -8,7 +8,7 @@ edition = "2018"
 bstr = "0.1"
 caseless = "0.2"
 anyhow = "1.0"
-filedescriptor = { path = "../filedescriptor" }
+filedescriptor = "0.7"
 filenamegen = { path = "../filenamegen" }
 lazy_static = "1.3"
 
