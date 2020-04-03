@@ -60,27 +60,42 @@ pub struct LsCommand {
     sort_by_time: bool,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum FileType {
+    File,
+    Directory,
+    Symlink,
+}
+
+impl From<std::fs::FileType> for FileType {
+    fn from(ft: std::fs::FileType) -> FileType {
+        if ft.is_symlink() {
+            FileType::Symlink
+        } else if ft.is_dir() {
+            FileType::Directory
+        } else if ft.is_file() {
+            FileType::File
+        } else {
+            unreachable!();
+        }
+    }
+}
+
 #[derive(Debug)]
 struct Data {
     name: PathBuf,
-    meta: std::io::Result<std::fs::Metadata>,
+    file_type: FileType,
+    meta: Option<std::fs::Metadata>,
     modified: Option<std::time::SystemTime>,
+    error: Option<String>,
 }
 
 impl Data {
     pub fn classify(&self) -> &'static str {
-        match &self.meta {
-            Ok(meta) => {
-                let ft = meta.file_type();
-                if ft.is_dir() {
-                    "/"
-                } else if ft.is_symlink() {
-                    "@"
-                } else {
-                    ""
-                }
-            }
-            _ => "",
+        match &self.file_type {
+            FileType::File => "",
+            FileType::Symlink => "@",
+            FileType::Directory => "/",
         }
     }
 }
@@ -92,6 +107,7 @@ impl LsCommand {
         top_level: bool,
         results: &mut HashMap<PathBuf, Vec<Data>>,
         cancel: &Arc<Token>,
+        opt_file_type: Option<FileType>,
     ) -> anyhow::Result<()> {
         cancel.check_cancel()?;
 
@@ -101,45 +117,82 @@ impl LsCommand {
             }
         }
 
-        match std::fs::symlink_metadata(name) {
-            Ok(meta) => {
-                if meta.is_dir() && !self.directory && (top_level || self.recursive) {
-                    if let Ok(dir) = std::fs::read_dir(name) {
-                        for entry in dir {
-                            cancel.check_cancel()?;
-                            if let Ok(entry) = entry {
-                                self.consider(&entry.path(), false, results, cancel)?;
-                            }
-                        }
+        let mut meta = None;
+        let mut error = None;
+
+        let file_type: FileType = match opt_file_type {
+            Some(f) => f,
+            None => {
+                match std::fs::symlink_metadata(name) {
+                    Ok(m) => {
+                        let ft = m.file_type().into();
+                        meta = Some(m);
+                        ft
                     }
-                } else {
-                    let meta = if self.dereference && meta.file_type().is_symlink() {
-                        std::fs::metadata(name)?
-                    } else {
-                        meta
-                    };
-
-                    let entry = results
-                        .entry(name.parent().unwrap().to_path_buf())
-                        .or_insert_with(Vec::new);
-
-                    entry.push(Data {
-                        name: name.to_path_buf(),
-                        meta: Ok(meta.clone()),
-                        modified: if self.sort_by_time {
-                            meta.modified().ok()
-                        } else {
-                            None
-                        },
-                    });
+                    Err(err) => {
+                        error = Some(err.to_string());
+                        // We don't know the type, but consider it to
+                        // be a regular file
+                        FileType::File
+                    }
                 }
             }
-            Err(err) => {
-                let entry = results.entry(name.to_path_buf()).or_insert_with(Vec::new);
+        };
+
+        match file_type {
+            FileType::Directory if !self.directory && (top_level || self.recursive) => {
+                if let Ok(dir) = std::fs::read_dir(name) {
+                    for entry in dir {
+                        cancel.check_cancel()?;
+                        if let Ok(entry) = entry {
+                            self.consider(
+                                &entry.path(),
+                                false,
+                                results,
+                                cancel,
+                                entry.file_type().ok().map(Into::into),
+                            )?;
+                        }
+                    }
+                }
+            }
+            FileType::Symlink if self.dereference => {
+                let meta = std::fs::metadata(name)?;
+                let file_type: FileType = meta.file_type().into();
+
+                let entry = results
+                    .entry(name.parent().unwrap().to_path_buf())
+                    .or_insert_with(Vec::new);
+
                 entry.push(Data {
                     name: name.to_path_buf(),
-                    meta: Err(err),
-                    modified: None,
+                    file_type,
+                    meta: Some(meta.clone()),
+                    modified: if self.sort_by_time {
+                        meta.modified().ok()
+                    } else {
+                        None
+                    },
+                    error,
+                });
+            }
+            _ => {
+                let entry = results
+                    .entry(name.parent().unwrap().to_path_buf())
+                    .or_insert_with(Vec::new);
+
+                let meta = match (self.sort_by_time, meta) {
+                    (true, None) => std::fs::symlink_metadata(name).ok(),
+                    (_, meta) => meta,
+                };
+                let modified = meta.as_ref().and_then(|m| m.modified().ok());
+
+                entry.push(Data {
+                    name: name.to_path_buf(),
+                    file_type,
+                    meta: meta.clone(),
+                    modified,
+                    error,
                 });
             }
         }
@@ -191,7 +244,11 @@ impl LsCommand {
             cancel.check_cancel()?;
             let name = self.relative_to_dir(&entry.name, dir, current_directory);
             let classification = if self.classify { entry.classify() } else { "" };
-            values.push(format!("{}{}", name.display(), classification));
+
+            let display = format!("{}{}", name.display(), classification);
+            let width = unicode_column_width(&display);
+
+            values.push((display, width));
         }
 
         if !self.single_column && !self.long_format && terminal.is_some() {
@@ -203,12 +260,13 @@ impl LsCommand {
 
             for i in 1..values.len() + 1 {
                 let num_cols = (values.len() as f32 / i as f32).ceil() as usize;
-                let columns: Vec<&[String]> = values.chunks(values.len() / num_cols).collect();
+                let columns: Vec<&[(String, usize)]> =
+                    values.chunks(values.len() / num_cols).collect();
                 let widths: Vec<usize> = columns
                     .iter()
                     .map(|rows| {
                         rows.iter()
-                            .map(|s| unicode_column_width(s) + spacing)
+                            .map(|(_display, width)| width + spacing)
                             .max()
                             .unwrap_or(0)
                     })
@@ -220,12 +278,12 @@ impl LsCommand {
                     for row_number in 0..columns[0].len() {
                         for (column, width) in columns.iter().zip(widths.iter()) {
                             if column.len() > row_number {
-                                let item = &column[row_number];
+                                let (display, item_width) = &column[row_number];
                                 let mut pad = String::new();
-                                for _ in unicode_column_width(item)..*width {
+                                for _ in *item_width..*width {
                                     pad.push(' ');
                                 }
-                                write!(io_env.stdout(), "{}{}", item, pad)?;
+                                write!(io_env.stdout(), "{}{}", display, pad)?;
                             }
                         }
                         writeln!(io_env.stdout())?;
@@ -234,11 +292,16 @@ impl LsCommand {
                 }
             }
         } else {
-            for value in values {
+            for (display, _width) in values {
                 cancel.check_cancel()?;
-                writeln!(io_env.stdout(), "{}", value)?;
+                writeln!(io_env.stdout(), "{}", display)?;
             }
         }
+
+        if print_dir_name {
+            writeln!(io_env.stdout())?;
+        }
+
         Ok(())
     }
 }
@@ -261,10 +324,10 @@ impl Builtin for LsCommand {
         let mut results = HashMap::new();
 
         if self.files.is_empty() {
-            self.consider(current_directory, true, &mut results, &cancel)?;
+            self.consider(current_directory, true, &mut results, &cancel, None)?;
         } else {
             for file in &self.files {
-                self.consider(file, true, &mut results, &cancel)?;
+                self.consider(file, true, &mut results, &cancel, None)?;
             }
         }
 
