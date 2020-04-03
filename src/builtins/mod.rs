@@ -13,6 +13,7 @@ mod colon;
 mod echo;
 mod env;
 mod jobcontrol;
+mod ls;
 mod truefalse;
 mod which;
 mod workingdir;
@@ -100,6 +101,7 @@ lazy_static! {
             env::UnsetCommand,
             jobcontrol::FgCommand,
             jobcontrol::JobsCommand,
+            ls::LsCommand,
             truefalse::FalseCommand,
             truefalse::TrueCommand,
             which::WhichCommand,
