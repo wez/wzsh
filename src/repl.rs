@@ -2,6 +2,7 @@ use crate::errorprint::print_error;
 use crate::job::{put_shell_in_foreground, Job, JOB_LIST};
 use crate::shellhost::{FunctionRegistry, Host};
 use anyhow::{anyhow, Error};
+use filenamegen::Glob;
 use shell_compiler::Compiler;
 use shell_lexer::{LexError, LexErrorKind};
 use shell_parser::{ParseErrorKind, Parser};
@@ -128,6 +129,60 @@ impl LineEditorHost for EditHost {
 
     fn history(&mut self) -> &mut dyn History {
         &mut self.history
+    }
+
+    fn complete(&self, line: &str, cursor_position: usize) -> Vec<CompletionCandidate> {
+        let mut candidates = vec![];
+        if let Some((range, word)) = word_at_cursor(line, cursor_position) {
+            if let Ok(glob) = Glob::new(&format!("{}*", word)) {
+                for p in glob.walk(".") {
+                    if let Some(text) = p.to_str() {
+                        candidates.push(CompletionCandidate {
+                            range: range.clone(),
+                            text: text.to_owned(),
+                        });
+                    }
+                }
+            }
+        }
+        candidates
+    }
+}
+
+fn word_at_cursor(line: &str, cursor_position: usize) -> Option<(std::ops::Range<usize>, &str)> {
+    let char_indices: Vec<(usize, char)> = line.char_indices().collect();
+    if char_indices.is_empty() {
+        return None;
+    }
+    let char_position = char_indices
+        .iter()
+        .position(|(idx, _)| *idx == cursor_position)
+        .unwrap_or(char_indices.len());
+
+    // Look back until we find whitespace
+    let mut start_position = char_position;
+    while start_position > 0
+        && start_position <= char_indices.len()
+        && !char_indices[start_position - 1].1.is_whitespace()
+    {
+        start_position -= 1;
+    }
+
+    // Look forwards until we find whitespace
+    let mut end_position = char_position;
+    while end_position < char_indices.len() && !char_indices[end_position].1.is_whitespace() {
+        end_position += 1;
+    }
+
+    if end_position > start_position {
+        let range = char_indices[start_position].0
+            ..char_indices
+                .get(end_position)
+                .map(|c| c.0 + 1)
+                .unwrap_or(line.len());
+        Some((range.clone(), &line[range]))
+    } else {
+        None
     }
 }
 
