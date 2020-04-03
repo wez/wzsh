@@ -112,6 +112,7 @@ fn compile_and_run(prog: &str, env_bits: &mut EnvBits) -> anyhow::Result<Status>
 #[derive(Default)]
 struct EditHost {
     history: BasicHistory,
+    cwd: PathBuf,
 }
 
 impl LineEditorHost for EditHost {
@@ -135,7 +136,7 @@ impl LineEditorHost for EditHost {
         let mut candidates = vec![];
         if let Some((range, word)) = word_at_cursor(line, cursor_position) {
             if let Ok(glob) = Glob::new(&format!("{}*", word)) {
-                for p in glob.walk(".") {
+                for p in glob.walk(&self.cwd) {
                     if let Some(text) = p.to_str() {
                         candidates.push(CompletionCandidate {
                             range: range.clone(),
@@ -210,6 +211,7 @@ pub fn repl(cwd: PathBuf, env: Environment, funcs: &Arc<FunctionRegistry>) -> an
 
         JOB_LIST.check_and_print_status();
 
+        host.cwd = env.cwd.clone();
         match editor.read_line(&mut host) {
             Ok(Some(line)) => {
                 host.history().add(&line);
