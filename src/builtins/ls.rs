@@ -1,12 +1,14 @@
 use crate::builtins::Builtin;
 use crate::shellhost::FunctionRegistry;
 use cancel::Token;
+use chrono::prelude::*;
 use shell_vm::{Environment, IoEnvironment, Status, WaitableStatus};
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use structopt::*;
+use tabout::{tabulate_output, Alignment, Column};
 use termwiz::cell::unicode_column_width;
 use termwiz::terminal::{SystemTerminal, Terminal};
 
@@ -100,6 +102,143 @@ impl Data {
     }
 }
 
+/// Given a size in bytes, return a human friendly string that makes
+/// it easier to understand the magnitude
+fn byte_format(size: u64) -> String {
+    const KB: u64 = 1_024;
+    static UNITS: &'static str = "KMGTPE";
+
+    if size < KB {
+        size.to_string()
+    } else {
+        let size = size as f64;
+        let exp = match (size.ln() / (KB as f64).ln()) as usize {
+            e if e == 0 => 1,
+            e => e,
+        };
+
+        format!(
+            "{:.1}{}",
+            (size / KB.pow(exp as u32) as f64),
+            UNITS.as_bytes()[exp - 1] as char,
+        )
+    }
+}
+
+#[cfg(not(unix))]
+fn permission_mode(perms: std::fs::Permissions) -> String {
+    let mode = if perms.readonly() {
+        "r--r--r--."
+    } else {
+        "rw-rw-rw-."
+    };
+
+    mode.to_string()
+}
+
+#[cfg(unix)]
+fn permission_mode(perms: std::fs::Permissions) -> String {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mode = perms.mode() as libc::mode_t;
+
+    let u_r = if mode & libc::S_IRUSR != 0 { 'r' } else { '-' };
+    let u_w = if mode & libc::S_IWUSR != 0 { 'w' } else { '-' };
+    let u_x = if mode & libc::S_IXUSR != 0 { 'x' } else { '-' };
+
+    let g_r = if mode & libc::S_IRGRP != 0 { 'r' } else { '-' };
+    let g_w = if mode & libc::S_IWGRP != 0 { 'w' } else { '-' };
+    let g_x = if mode & libc::S_IXGRP != 0 { 'x' } else { '-' };
+
+    let o_r = if mode & libc::S_IROTH != 0 { 'r' } else { '-' };
+    let o_w = if mode & libc::S_IWOTH != 0 { 'w' } else { '-' };
+    let o_x = if mode & libc::S_IXOTH != 0 { 'x' } else { '-' };
+
+    // FIXME: setuid, setgid and sticky bits
+
+    format!(
+        "{}{}{}{}{}{}{}{}{}.",
+        u_r, u_w, u_x, g_r, g_w, g_x, o_r, o_w, o_x
+    )
+}
+
+fn permission_format(file_type: FileType, perms: std::fs::Permissions) -> String {
+    let first_char = match file_type {
+        FileType::File => '-',
+        FileType::Symlink => 'l',
+        FileType::Directory => 'd',
+    };
+
+    let mode = permission_mode(perms);
+
+    format!("{}{}", first_char, mode)
+}
+
+#[cfg(not(unix))]
+fn owner_from_metadata(meta: &std::fs::Metadata) -> String {
+    "me".to_string()
+}
+
+#[cfg(not(unix))]
+fn group_from_metadata(meta: &std::fs::Metadata) -> String {
+    "".to_string()
+}
+
+#[cfg(not(unix))]
+fn nlink_from_metadata(meta: &std::fs::Metadata) -> String {
+    "1".to_string()
+}
+
+#[cfg(unix)]
+fn nlink_from_metadata(meta: &std::fs::Metadata) -> String {
+    use std::os::unix::fs::MetadataExt;
+    meta.nlink().to_string()
+}
+
+#[cfg(unix)]
+fn owner_from_metadata(meta: &std::fs::Metadata) -> String {
+    use std::os::unix::fs::MetadataExt;
+
+    unsafe {
+        let mut buf = [0i8; 2048];
+        let mut pwbuf: libc::passwd = std::mem::zeroed();
+        let mut pw = std::ptr::null_mut();
+        libc::getpwuid_r(meta.uid(), &mut pwbuf, buf.as_mut_ptr(), buf.len(), &mut pw);
+
+        if pw.is_null() {
+            meta.uid().to_string()
+        } else {
+            let name = std::ffi::CStr::from_ptr((*pw).pw_name);
+            name.to_string_lossy().to_string()
+        }
+    }
+}
+
+#[cfg(unix)]
+fn group_from_metadata(meta: &std::fs::Metadata) -> String {
+    use std::os::unix::fs::MetadataExt;
+
+    unsafe {
+        let mut buf = [0i8; 2048];
+        let mut grbuf: libc::group = std::mem::zeroed();
+        let mut group = std::ptr::null_mut();
+        libc::getgrgid_r(
+            meta.gid(),
+            &mut grbuf,
+            buf.as_mut_ptr(),
+            buf.len(),
+            &mut group,
+        );
+
+        if group.is_null() {
+            meta.gid().to_string()
+        } else {
+            let name = std::ffi::CStr::from_ptr((*group).gr_name);
+            name.to_string_lossy().to_string()
+        }
+    }
+}
+
 impl LsCommand {
     fn consider(
         &self,
@@ -168,7 +307,7 @@ impl LsCommand {
                     name: name.to_path_buf(),
                     file_type,
                     meta: Some(meta.clone()),
-                    modified: if self.sort_by_time {
+                    modified: if self.sort_by_time || self.long_format {
                         meta.modified().ok()
                     } else {
                         None
@@ -181,7 +320,7 @@ impl LsCommand {
                     .entry(name.parent().unwrap().to_path_buf())
                     .or_insert_with(Vec::new);
 
-                let meta = match (self.sort_by_time, meta) {
+                let meta = match (self.sort_by_time || self.long_format, meta) {
                     (true, None) => std::fs::symlink_metadata(name).ok(),
                     (_, meta) => meta,
                 };
@@ -240,7 +379,7 @@ impl LsCommand {
         }
 
         let mut values = vec![];
-        for entry in entries {
+        for entry in &entries {
             cancel.check_cancel()?;
             let name = self.relative_to_dir(&entry.name, dir, current_directory);
             let classification = if self.classify { entry.classify() } else { "" };
@@ -291,6 +430,77 @@ impl LsCommand {
                     break;
                 }
             }
+        } else if self.long_format {
+            let columns = [
+                Column {
+                    name: "PERMS".to_string(),
+                    alignment: Alignment::Left,
+                },
+                Column {
+                    name: "NL".to_string(),
+                    alignment: Alignment::Right,
+                },
+                Column {
+                    name: "OWNER".to_string(),
+                    alignment: Alignment::Left,
+                },
+                Column {
+                    name: "GROUP".to_string(),
+                    alignment: Alignment::Left,
+                },
+                Column {
+                    name: "SIZE".to_string(),
+                    alignment: Alignment::Right,
+                },
+                Column {
+                    name: "MODIFIED".to_string(),
+                    alignment: Alignment::Left,
+                },
+                Column {
+                    name: "NAME".to_string(),
+                    alignment: Alignment::Left,
+                },
+            ];
+
+            let mut rows = vec![];
+
+            for ((display, _width), entry) in values.iter().zip(entries.iter()) {
+                cancel.check_cancel()?;
+                if entry.meta.is_some() {
+                    let meta = entry.meta.as_ref().unwrap();
+
+                    let file_size = meta.len();
+                    let file_size = if self.human_readable {
+                        byte_format(file_size)
+                    } else {
+                        file_size.to_string()
+                    };
+
+                    let perms = permission_format(entry.file_type, meta.permissions());
+
+                    let owner = owner_from_metadata(&meta);
+                    let group = group_from_metadata(&meta);
+
+                    let modified: DateTime<Local> = entry.modified.unwrap().into();
+                    let modified = modified.format("%b %e %Y %H:%M").to_string();
+
+                    let nlink = nlink_from_metadata(&meta);
+
+                    rows.push(vec![
+                        perms,
+                        nlink,
+                        owner,
+                        group,
+                        file_size,
+                        modified,
+                        display.to_string(),
+                    ]);
+                } else {
+                    writeln!(io_env.stdout(), "{}", display)?;
+                }
+            }
+
+            tabulate_output(&columns, &rows, &mut io_env.stdout())?;
         } else {
             for (display, _width) in values {
                 cancel.check_cancel()?;

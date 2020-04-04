@@ -22,7 +22,9 @@ shell_lexer = { path = "shell_lexer" }
 shell_parser = { path = "shell_parser" }
 shell_vm = { path = "shell_vm" }
 structopt = "0.2"
+tabout = { path = "../wezterm/tabout", version="0.1" }
 pathsearch = { path = "pathsearch" }
+chrono = "0.4"
 
 [target."cfg(windows)".dependencies]
 winapi = { version = "0.3", features = [
