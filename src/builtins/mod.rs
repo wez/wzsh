@@ -7,33 +7,15 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use structopt::*;
-use termwiz::caps::{Capabilities, ProbeHints};
-use termwiz::terminal::SystemTerminal;
 
 mod builtins;
 mod colon;
 mod echo;
 mod env;
 mod jobcontrol;
-mod ls;
 mod truefalse;
 mod which;
 mod workingdir;
-
-pub fn terminal_from_ioenv(
-    io_env: &IoEnvironment,
-    caps: Option<Capabilities>,
-) -> anyhow::Result<SystemTerminal> {
-    let caps = match caps {
-        Some(caps) => caps,
-        None => {
-            let hints = ProbeHints::new_from_env().mouse_reporting(Some(false));
-            Capabilities::new_with_hints(hints)?
-        }
-    };
-
-    SystemTerminal::new_with(caps, &io_env.stdin().dup()?, &io_env.stdout().dup()?)
-}
 
 /// The `Builtin` trait extends `StructOpt` by adding `name` and `run`
 /// methods that allow registering a command with the shell.
@@ -118,7 +100,6 @@ lazy_static! {
             env::UnsetCommand,
             jobcontrol::FgCommand,
             jobcontrol::JobsCommand,
-            ls::LsCommand,
             truefalse::FalseCommand,
             truefalse::TrueCommand,
             which::WhichCommand,

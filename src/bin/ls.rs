@@ -1,16 +1,11 @@
-use crate::builtins::Builtin;
-use crate::shellhost::FunctionRegistry;
-use cancel::Token;
 use chrono::prelude::*;
-use shell_vm::{Environment, IoEnvironment, Status, WaitableStatus};
 use std::collections::HashMap;
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use structopt::*;
 use tabout::{tabulate_output, Alignment, Column};
+use termwiz::caps::{Capabilities, ProbeHints};
 use termwiz::cell::unicode_column_width;
-use termwiz::terminal::{SystemTerminal, Terminal};
+use termwiz::terminal::{new_terminal, Terminal};
 
 #[derive(StructOpt)]
 /// List directory contents
@@ -245,11 +240,8 @@ impl LsCommand {
         name: &Path,
         top_level: bool,
         results: &mut HashMap<PathBuf, Vec<Data>>,
-        cancel: &Arc<Token>,
         opt_file_type: Option<FileType>,
     ) -> anyhow::Result<()> {
-        cancel.check_cancel()?;
-
         if let Some(base_name) = name.file_name().map(|n| n.to_string_lossy()) {
             if base_name.starts_with(".") && !self.all {
                 return Ok(());
@@ -282,13 +274,11 @@ impl LsCommand {
             FileType::Directory if !self.directory && (top_level || self.recursive) => {
                 if let Ok(dir) = std::fs::read_dir(name) {
                     for entry in dir {
-                        cancel.check_cancel()?;
                         if let Ok(entry) = entry {
                             self.consider(
                                 &entry.path(),
                                 false,
                                 results,
-                                cancel,
                                 entry.file_type().ok().map(Into::into),
                             )?;
                         }
@@ -359,14 +349,12 @@ impl LsCommand {
         dir: &Path,
         print_dir_name: bool,
         mut entries: Vec<Data>,
-        io_env: &IoEnvironment,
         current_directory: &Path,
-        cancel: &Arc<Token>,
-        terminal: &mut Option<SystemTerminal>,
+        terminal: &mut Option<impl Terminal>,
     ) -> anyhow::Result<()> {
         let display_dir = self.relative_to_dir(dir, current_directory, current_directory);
         if print_dir_name {
-            writeln!(io_env.stdout(), "{}:", display_dir.display())?;
+            println!("{}:", display_dir.display());
         }
 
         if self.sort_by_time {
@@ -380,7 +368,6 @@ impl LsCommand {
 
         let mut values = vec![];
         for entry in &entries {
-            cancel.check_cancel()?;
             let name = self.relative_to_dir(&entry.name, dir, current_directory);
             let classification = if self.classify { entry.classify() } else { "" };
 
@@ -422,10 +409,10 @@ impl LsCommand {
                                 for _ in *item_width..*width {
                                     pad.push(' ');
                                 }
-                                write!(io_env.stdout(), "{}{}", display, pad)?;
+                                print!("{}{}", display, pad);
                             }
                         }
-                        writeln!(io_env.stdout())?;
+                        println!();
                     }
                     break;
                 }
@@ -465,7 +452,6 @@ impl LsCommand {
             let mut rows = vec![];
 
             for ((display, _width), entry) in values.iter().zip(entries.iter()) {
-                cancel.check_cancel()?;
                 if entry.meta.is_some() {
                     let meta = entry.meta.as_ref().unwrap();
 
@@ -496,48 +482,37 @@ impl LsCommand {
                         display.to_string(),
                     ]);
                 } else {
-                    writeln!(io_env.stdout(), "{}", display)?;
+                    println!("{}", display);
                 }
             }
 
-            tabulate_output(&columns, &rows, &mut io_env.stdout())?;
+            tabulate_output(&columns, &rows, &mut std::io::stdout())?;
         } else {
             for (display, _width) in values {
-                cancel.check_cancel()?;
-                writeln!(io_env.stdout(), "{}", display)?;
+                println!("{}", display);
             }
         }
 
         if print_dir_name {
-            writeln!(io_env.stdout())?;
+            println!();
         }
 
         Ok(())
     }
-}
 
-impl Builtin for LsCommand {
-    fn name() -> &'static str {
-        "ls"
-    }
-
-    fn run(
-        &mut self,
-        _environment: &mut Environment,
-        current_directory: &mut PathBuf,
-        io_env: &IoEnvironment,
-        cancel: Arc<Token>,
-        _functions: &Arc<FunctionRegistry>,
-    ) -> anyhow::Result<WaitableStatus> {
-        let mut terminal = super::terminal_from_ioenv(io_env, None).ok();
+    fn run(&self) -> anyhow::Result<()> {
+        let hints = ProbeHints::new_from_env().mouse_reporting(Some(false));
+        let caps = Capabilities::new_with_hints(hints)?;
+        let mut terminal = new_terminal(caps).ok();
+        let current_directory = std::env::current_dir()?;
 
         let mut results = HashMap::new();
 
         if self.files.is_empty() {
-            self.consider(current_directory, true, &mut results, &cancel, None)?;
+            self.consider(&current_directory, true, &mut results, None)?;
         } else {
             for file in &self.files {
-                self.consider(file, true, &mut results, &cancel, None)?;
+                self.consider(file, true, &mut results, None)?;
             }
         }
 
@@ -554,13 +529,16 @@ impl Builtin for LsCommand {
                 &name,
                 print_dir_name,
                 entries,
-                io_env,
                 &current_directory.clone(),
-                &cancel,
                 &mut terminal,
             )?;
         }
 
-        Ok(Status::Complete(0.into()).into())
+        Ok(())
     }
+}
+
+fn main() -> anyhow::Result<()> {
+    let ls = LsCommand::from_args();
+    ls.run()
 }

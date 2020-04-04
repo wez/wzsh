@@ -212,6 +212,40 @@ impl Environment {
         self.map.set(key.into(), value.into());
     }
 
+    pub fn append_path<K: Into<OsString> + ?Sized, V: Into<OsString> + ?Sized>(
+        &mut self,
+        key: K,
+        value: V,
+    ) -> Result<(), std::env::JoinPathsError> {
+        let key = key.into();
+        let mut current_path: Vec<_> = self
+            .get(&key)
+            .map(|p| std::env::split_paths(p).collect())
+            .unwrap_or_else(Vec::new);
+
+        current_path.push(value.into().into());
+        let new_path = std::env::join_paths(current_path.iter())?;
+        self.set(key, new_path);
+        Ok(())
+    }
+
+    pub fn prepend_path<K: Into<OsString> + ?Sized, V: Into<OsString> + ?Sized>(
+        &mut self,
+        key: K,
+        value: V,
+    ) -> Result<(), std::env::JoinPathsError> {
+        let key = key.into();
+        let mut current_path: Vec<_> = self
+            .get(&key)
+            .map(|p| std::env::split_paths(p).collect())
+            .unwrap_or_else(Vec::new);
+
+        current_path.insert(0, value.into().into());
+        let new_path = std::env::join_paths(current_path.iter())?;
+        self.set(key, new_path);
+        Ok(())
+    }
+
     pub fn get<K: AsRef<OsStr>>(&self, key: K) -> Option<&OsStr> {
         self.map.get(key.as_ref())
     }

@@ -40,6 +40,23 @@ fn config_dir() -> PathBuf {
 fn main() -> anyhow::Result<()> {
     let mut cwd = std::env::current_dir()?;
     let mut env = Environment::new();
+
+    // We want to pick up our shell utility executables.
+    // In the source tree they are emitted alongside the wzsh
+    // executable. In a deployed package they will also be
+    // located alongside the executable, so resolve the executable
+    // path and add it to the current environment.
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(bindir) = exe.parent() {
+            // Allow startup scripts to explicitly reference this
+            // location so that they can set up aliases if they
+            // prefer to use these utilities over others that
+            // might be in their path
+            env.set("WZSH_BIN_DIR", bindir);
+            env.append_path("PATH", bindir)?;
+        }
+    }
+
     let funcs = Arc::new(FunctionRegistry::new());
 
     let opts = Opt::from_args();

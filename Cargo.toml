@@ -3,6 +3,7 @@ name = "wzsh"
 version = "0.1.0"
 authors = ["Wez Furlong"]
 edition = "2018"
+default-run = "wzsh"
 
 [build-dependencies]
 vergen = "3"

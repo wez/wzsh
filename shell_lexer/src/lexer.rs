@@ -792,7 +792,7 @@ fn split_first_word_by_unquoted_colons(words: &mut Vec<WordComponent>) -> usize 
                 start.col += 1;
             }
             let mut end = start;
-            end.col += element.len() - 1;
+            end.col += element.len().saturating_sub(1);
             words.insert(
                 result,
                 WordComponent {
