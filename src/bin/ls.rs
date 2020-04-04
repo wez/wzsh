@@ -57,7 +57,7 @@ pub struct LsCommand {
     sort_by_time: bool,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FileType {
     File,
     Directory,
@@ -75,6 +75,12 @@ impl From<std::fs::FileType> for FileType {
         } else {
             unreachable!();
         }
+    }
+}
+
+impl FileType {
+    pub fn is_symlink(self) -> bool {
+        FileType::Symlink == self
     }
 }
 
@@ -345,7 +351,7 @@ impl LsCommand {
         opt_file_type: Option<FileType>,
     ) -> anyhow::Result<()> {
         if let Some(base_name) = name.file_name().map(|n| n.to_string_lossy()) {
-            if base_name.starts_with(".") && !self.all {
+            if base_name.starts_with(".") && !self.all && !top_level {
                 return Ok(());
             }
         }
@@ -470,7 +476,17 @@ impl LsCommand {
 
         let mut values = vec![];
         for entry in &entries {
-            let name = self.relative_to_dir(&entry.name, dir, current_directory);
+            let name = if print_dir_name {
+                self.relative_to_dir(&entry.name, dir, current_directory)
+            } else {
+                // Avoid relativizing the path when the user explicitly referenced
+                // it via the command line
+                if dir != current_directory {
+                    &entry.name
+                } else {
+                    self.relative_to_dir(&entry.name, dir, current_directory)
+                }
+            };
             let classification = if self.classify { entry.classify() } else { "" };
 
             let display = format!("{}{}", name.display(), classification);
@@ -573,14 +589,22 @@ impl LsCommand {
 
                     let nlink = nlink_from_metadata(&meta);
 
+                    let display = if entry.file_type.is_symlink() {
+                        format!(
+                            "{} -> {}",
+                            display,
+                            entry
+                                .name
+                                .read_link()
+                                .map(|p| p.to_string_lossy().to_owned().to_string())
+                                .unwrap_or("".to_string())
+                        )
+                    } else {
+                        display.to_string()
+                    };
+
                     rows.push(vec![
-                        perms,
-                        nlink,
-                        owner,
-                        group,
-                        file_size,
-                        modified,
-                        display.to_string(),
+                        perms, nlink, owner, group, file_size, modified, display,
                     ]);
                 } else {
                     println!("{}", display);
