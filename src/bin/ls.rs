@@ -78,6 +78,46 @@ impl From<std::fs::FileType> for FileType {
     }
 }
 
+/// Resolve a sid to a string of the form `DOMAIN\name`
+#[cfg(windows)]
+fn lookup_account_sid(sid: winapi::um::winnt::PSID) -> anyhow::Result<String> {
+    use anyhow::Context as _;
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt;
+    unsafe {
+        let mut name = vec![0u16; 1024];
+        let mut name_len = name.len() as _;
+        let mut domain_name = vec![0u16; 1024];
+        let mut domain_name_len = domain_name.len() as _;
+        let mut sid_use = 0;
+
+        let res = winapi::um::winbase::LookupAccountSidW(
+            std::ptr::null_mut(),
+            sid,
+            name.as_mut_ptr(),
+            &mut name_len,
+            domain_name.as_mut_ptr(),
+            &mut domain_name_len,
+            &mut sid_use,
+        );
+
+        if res == 0 {
+            return Err(std::io::Error::last_os_error()).context("LookupAccountSidW");
+        }
+
+        name.resize(name_len as usize, 0u16);
+        domain_name.resize(domain_name_len as usize, 0u16);
+
+        let name = OsString::from_wide(&name);
+        let domain_name = OsString::from_wide(&domain_name);
+        Ok(format!(
+            "{}\\{}",
+            domain_name.to_string_lossy(),
+            name.to_string_lossy()
+        ))
+    }
+}
+
 #[derive(Debug)]
 struct Data {
     name: PathBuf,
@@ -93,6 +133,118 @@ impl Data {
             FileType::File => "",
             FileType::Symlink => "@",
             FileType::Directory => "/",
+        }
+    }
+
+    #[cfg(not(unix))]
+    pub fn owner_and_group(&self) -> anyhow::Result<(String, String)> {
+        use anyhow::Context as _;
+        use std::fs::OpenOptions;
+        use std::os::windows::prelude::*;
+
+        let file = OpenOptions::new()
+            .access_mode(winapi::um::winnt::READ_CONTROL)
+            .custom_flags(
+                winapi::um::winbase::FILE_FLAG_POSIX_SEMANTICS
+                    | winapi::um::winbase::FILE_FLAG_BACKUP_SEMANTICS,
+            )
+            .open(&self.name)?;
+
+        unsafe {
+            let mut sid_owner = std::ptr::null_mut();
+            let mut sid_group = std::ptr::null_mut();
+            let mut sd = std::ptr::null_mut();
+            let res = winapi::um::aclapi::GetSecurityInfo(
+                file.as_raw_handle(),
+                winapi::um::accctrl::SE_FILE_OBJECT,
+                winapi::um::winnt::OWNER_SECURITY_INFORMATION
+                    | winapi::um::winnt::GROUP_SECURITY_INFORMATION,
+                &mut sid_owner,
+                &mut sid_group,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &mut sd,
+            );
+
+            if res != winapi::shared::winerror::ERROR_SUCCESS {
+                return Err(std::io::Error::last_os_error()).context("GetSecurityInfo");
+            }
+
+            // Some guff to ensure that we free the descriptor
+            struct DropLocalFree(*mut std::ffi::c_void);
+            impl Drop for DropLocalFree {
+                fn drop(&mut self) {
+                    unsafe {
+                        winapi::um::winbase::LocalFree(self.0);
+                    }
+                }
+            }
+            let _security_descriptor = DropLocalFree(sd);
+
+            anyhow::ensure!(
+                !sid_owner.is_null(),
+                "GetSecurityInfo succeeded but didn't return sid_owner"
+            );
+            anyhow::ensure!(
+                !sid_group.is_null(),
+                "GetSecurityInfo succeeded but didn't return sid_group"
+            );
+
+            let owner = lookup_account_sid(sid_owner)?;
+            let group = lookup_account_sid(sid_group)?;
+
+            Ok((owner, group))
+        }
+    }
+
+    #[cfg(unix)]
+    pub fn owner_and_group(&self) -> anyhow::Result<(String, String)> {
+        Ok((self.owner(), self.group()))
+    }
+
+    #[cfg(unix)]
+    fn owner(&self) -> String {
+        use std::os::unix::fs::MetadataExt;
+        let meta = self.meta.as_ref().unwrap();
+
+        unsafe {
+            let mut buf = [0i8; 2048];
+            let mut pwbuf: libc::passwd = std::mem::zeroed();
+            let mut pw = std::ptr::null_mut();
+            libc::getpwuid_r(meta.uid(), &mut pwbuf, buf.as_mut_ptr(), buf.len(), &mut pw);
+
+            if pw.is_null() {
+                meta.uid().to_string()
+            } else {
+                let name = std::ffi::CStr::from_ptr((*pw).pw_name);
+                name.to_string_lossy().to_string()
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    fn group(&self) -> String {
+        use std::os::unix::fs::MetadataExt;
+        let meta = self.meta.as_ref().unwrap();
+
+        unsafe {
+            let mut buf = [0i8; 2048];
+            let mut grbuf: libc::group = std::mem::zeroed();
+            let mut group = std::ptr::null_mut();
+            libc::getgrgid_r(
+                meta.gid(),
+                &mut grbuf,
+                buf.as_mut_ptr(),
+                buf.len(),
+                &mut group,
+            );
+
+            if group.is_null() {
+                meta.gid().to_string()
+            } else {
+                let name = std::ffi::CStr::from_ptr((*group).gr_name);
+                name.to_string_lossy().to_string()
+            }
         }
     }
 }
@@ -123,9 +275,9 @@ fn byte_format(size: u64) -> String {
 #[cfg(not(unix))]
 fn permission_mode(perms: std::fs::Permissions) -> String {
     let mode = if perms.readonly() {
-        "r--r--r--."
+        "r-xr-xr-x."
     } else {
-        "rw-rw-rw-."
+        "rwxrwxrwx."
     };
 
     mode.to_string()
@@ -170,17 +322,11 @@ fn permission_format(file_type: FileType, perms: std::fs::Permissions) -> String
 }
 
 #[cfg(not(unix))]
-fn owner_from_metadata(meta: &std::fs::Metadata) -> String {
-    "me".to_string()
-}
-
-#[cfg(not(unix))]
-fn group_from_metadata(meta: &std::fs::Metadata) -> String {
-    "".to_string()
-}
-
-#[cfg(not(unix))]
-fn nlink_from_metadata(meta: &std::fs::Metadata) -> String {
+fn nlink_from_metadata(_meta: &std::fs::Metadata) -> String {
+    /* TODO: this is nightly only, we'll need to go direct.
+    use std::os::windows::fs::MetadataExt;
+    meta.number_of_links().unwrap_or(1).to_string()
+    */
     "1".to_string()
 }
 
@@ -188,50 +334,6 @@ fn nlink_from_metadata(meta: &std::fs::Metadata) -> String {
 fn nlink_from_metadata(meta: &std::fs::Metadata) -> String {
     use std::os::unix::fs::MetadataExt;
     meta.nlink().to_string()
-}
-
-#[cfg(unix)]
-fn owner_from_metadata(meta: &std::fs::Metadata) -> String {
-    use std::os::unix::fs::MetadataExt;
-
-    unsafe {
-        let mut buf = [0i8; 2048];
-        let mut pwbuf: libc::passwd = std::mem::zeroed();
-        let mut pw = std::ptr::null_mut();
-        libc::getpwuid_r(meta.uid(), &mut pwbuf, buf.as_mut_ptr(), buf.len(), &mut pw);
-
-        if pw.is_null() {
-            meta.uid().to_string()
-        } else {
-            let name = std::ffi::CStr::from_ptr((*pw).pw_name);
-            name.to_string_lossy().to_string()
-        }
-    }
-}
-
-#[cfg(unix)]
-fn group_from_metadata(meta: &std::fs::Metadata) -> String {
-    use std::os::unix::fs::MetadataExt;
-
-    unsafe {
-        let mut buf = [0i8; 2048];
-        let mut grbuf: libc::group = std::mem::zeroed();
-        let mut group = std::ptr::null_mut();
-        libc::getgrgid_r(
-            meta.gid(),
-            &mut grbuf,
-            buf.as_mut_ptr(),
-            buf.len(),
-            &mut group,
-        );
-
-        if group.is_null() {
-            meta.gid().to_string()
-        } else {
-            let name = std::ffi::CStr::from_ptr((*group).gr_name);
-            name.to_string_lossy().to_string()
-        }
-    }
 }
 
 impl LsCommand {
@@ -464,8 +566,7 @@ impl LsCommand {
 
                     let perms = permission_format(entry.file_type, meta.permissions());
 
-                    let owner = owner_from_metadata(&meta);
-                    let group = group_from_metadata(&meta);
+                    let (owner, group) = entry.owner_and_group()?;
 
                     let modified: DateTime<Local> = entry.modified.unwrap().into();
                     let modified = modified.format("%b %e %Y %H:%M").to_string();
