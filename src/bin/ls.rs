@@ -2,9 +2,11 @@ use chrono::prelude::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use structopt::*;
-use tabout::{tabulate_output, Alignment, Column};
+use tabout::{tabulate_for_terminal, unicode_column_width_of_change_slice, Alignment, Column};
 use termwiz::caps::{Capabilities, ProbeHints};
-use termwiz::cell::unicode_column_width;
+use termwiz::cell::{CellAttributes, Intensity};
+use termwiz::color::AnsiColor;
+use termwiz::surface::Change;
 use termwiz::terminal::{new_terminal, Terminal};
 
 #[derive(StructOpt)]
@@ -81,6 +83,19 @@ impl From<std::fs::FileType> for FileType {
 impl FileType {
     pub fn is_symlink(self) -> bool {
         FileType::Symlink == self
+    }
+
+    pub fn render_attributes(self) -> CellAttributes {
+        match self {
+            FileType::File => CellAttributes::default(),
+            FileType::Directory => CellAttributes::default()
+                .set_foreground(AnsiColor::Blue)
+                .set_intensity(Intensity::Bold)
+                .clone(),
+            FileType::Symlink => CellAttributes::default()
+                .set_foreground(AnsiColor::Aqua)
+                .clone(),
+        }
     }
 }
 
@@ -460,9 +475,11 @@ impl LsCommand {
         current_directory: &Path,
         terminal: &mut Option<impl Terminal>,
     ) -> anyhow::Result<()> {
+        let mut output = vec![];
+
         let display_dir = self.relative_to_dir(dir, current_directory, current_directory);
         if print_dir_name {
-            println!("{}:", display_dir.display());
+            output.push(format!("{}:\r\n", display_dir.display()).into());
         }
 
         if self.sort_by_time {
@@ -476,21 +493,16 @@ impl LsCommand {
 
         let mut values = vec![];
         for entry in &entries {
-            let name = if print_dir_name {
-                self.relative_to_dir(&entry.name, dir, current_directory)
-            } else {
-                // Avoid relativizing the path when the user explicitly referenced
-                // it via the command line
-                if dir != current_directory {
-                    &entry.name
-                } else {
-                    self.relative_to_dir(&entry.name, dir, current_directory)
-                }
-            };
+            let name = self.relative_to_dir(&entry.name, dir, current_directory);
             let classification = if self.classify { entry.classify() } else { "" };
 
-            let display = format!("{}{}", name.display(), classification);
-            let width = unicode_column_width(&display);
+            let display = vec![
+                Change::AllAttributes(entry.file_type.render_attributes()),
+                name.display().to_string().into(),
+                Change::AllAttributes(CellAttributes::default()),
+                classification.into(),
+            ];
+            let width = unicode_column_width_of_change_slice(&display);
 
             values.push((display, width));
         }
@@ -504,7 +516,7 @@ impl LsCommand {
 
             for i in 1..values.len() + 1 {
                 let num_cols = (values.len() as f32 / i as f32).ceil() as usize;
-                let columns: Vec<&[(String, usize)]> =
+                let columns: Vec<&[(Vec<Change>, usize)]> =
                     values.chunks(values.len() / num_cols).collect();
                 let widths: Vec<usize> = columns
                     .iter()
@@ -523,14 +535,16 @@ impl LsCommand {
                         for (column, width) in columns.iter().zip(widths.iter()) {
                             if column.len() > row_number {
                                 let (display, item_width) = &column[row_number];
+
                                 let mut pad = String::new();
                                 for _ in *item_width..*width {
                                     pad.push(' ');
                                 }
-                                print!("{}{}", display, pad);
+                                output.extend_from_slice(&display);
+                                output.push(pad.into());
                             }
                         }
-                        println!();
+                        output.push("\r\n".into());
                     }
                     break;
                 }
@@ -567,7 +581,7 @@ impl LsCommand {
                 },
             ];
 
-            let mut rows = vec![];
+            let mut rows: Vec<Vec<Vec<Change>>> = vec![];
 
             for ((display, _width), entry) in values.iter().zip(entries.iter()) {
                 if entry.meta.is_some() {
@@ -589,37 +603,56 @@ impl LsCommand {
 
                     let nlink = nlink_from_metadata(&meta);
 
-                    let display = if entry.file_type.is_symlink() {
-                        format!(
-                            "{} -> {}",
-                            display,
+                    let mut display = display.clone();
+
+                    if entry.file_type.is_symlink() {
+                        display.push(" -> ".into());
+                        display.push(
                             entry
                                 .name
                                 .read_link()
                                 .map(|p| p.to_string_lossy().to_owned().to_string())
                                 .unwrap_or("".to_string())
-                        )
-                    } else {
-                        display.to_string()
-                    };
+                                .into(),
+                        );
+                    }
 
                     rows.push(vec![
-                        perms, nlink, owner, group, file_size, modified, display,
+                        vec![perms.into()],
+                        vec![nlink.into()],
+                        vec![owner.into()],
+                        vec![group.into()],
+                        vec![file_size.into()],
+                        vec![modified.into()],
+                        display,
                     ]);
                 } else {
-                    println!("{}", display);
+                    output.extend_from_slice(&display);
+                    output.push("\r\n".into());
                 }
             }
 
-            tabulate_output(&columns, &rows, &mut std::io::stdout())?;
+            tabulate_for_terminal(&columns, &rows, CellAttributes::default(), &mut output);
         } else {
             for (display, _width) in values {
-                println!("{}", display);
+                output.extend_from_slice(&display);
+                output.push("\r\n".into());
             }
         }
 
         if print_dir_name {
-            println!();
+            output.push("\r\n".into());
+        }
+
+        match terminal {
+            Some(t) => t.render(&output)?,
+            None => {
+                for c in output {
+                    if c.is_text() {
+                        print!("{}", c.text());
+                    }
+                }
+            }
         }
 
         Ok(())

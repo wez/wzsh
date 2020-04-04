@@ -16,7 +16,6 @@ anyhow = "1.0"
 filedescriptor = "0.7"
 lazy_static = "1.3"
 libc = "0.2"
-termwiz = "0.7"
 filenamegen = { path = "filenamegen" }
 shell_compiler = { path = "shell_compiler" }
 shell_lexer = { path = "shell_lexer" }
@@ -27,8 +26,12 @@ pathsearch = { path = "pathsearch" }
 chrono = "0.4"
 
 [dependencies.tabout]
-version="0.1"
-# path = "../wezterm/tabout"
+version="0.2"
+#path = "../wezterm/tabout"
+
+[dependencies.termwiz]
+version="0.7"
+#path = "../wezterm/termwiz"
 
 [target."cfg(windows)".dependencies]
 winapi = { version = "0.3", features = [
