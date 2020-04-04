@@ -403,6 +403,8 @@ impl<R: Read> Lexer<R> {
                             return Ok(token);
                         }
                         return Ok(Token::EndParamSubst(c.pos));
+                    } else if c.c == '#' {
+                        self.comment()?;
                     } else {
                         self.add_char_to_word(c);
                     }
@@ -446,6 +448,22 @@ impl<R: Read> Lexer<R> {
         let quoted = self.next_char_or_err(LexErrorKind::EofDuringBackslash)?;
         self.add_char_to_word(backslash);
         self.add_char_to_word(quoted);
+        Ok(())
+    }
+
+    fn comment(&mut self) -> anyhow::Result<()> {
+        loop {
+            match self.reader.next_char() {
+                Next::Char(c) => {
+                    if c.c == '\n' {
+                        //self.reader.unget(c);
+                        break;
+                    }
+                }
+                Next::Error(err, pos) => return Err(err.context(pos).into()),
+                Next::Eof(_pos) => break,
+            }
+        }
         Ok(())
     }
 
