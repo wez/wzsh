@@ -430,7 +430,17 @@ impl Compiler {
                     });
                     self.frame()?.free(expanded);
                 }
-                WordComponentKind::CommandSubstitution(_) => bail!("command subst not implemented"),
+                WordComponentKind::CommandSubstitution(_) => {
+                    // For command substitution we want to:
+                    // - Evaluate the arguments as a command
+                    // - Spawn the command and capture its output into
+                    //   a pipe.
+                    // - consume the output from the pipe and append it
+                    //   to expanded_word so that it can be split by
+                    //   the ListAppend op at the bottom of this word_expand
+                    //   function.
+                    bail!("command subst not implemented");
+                }
             }
         }
 
