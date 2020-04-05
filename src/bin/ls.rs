@@ -1,6 +1,7 @@
 use chrono::prelude::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use structopt::*;
 use tabout::{tabulate_for_terminal, unicode_column_width_of_change_slice, Alignment, Column};
 use termwiz::caps::{Capabilities, ProbeHints};
@@ -8,6 +9,12 @@ use termwiz::cell::{CellAttributes, Intensity};
 use termwiz::color::AnsiColor;
 use termwiz::surface::Change;
 use termwiz::terminal::{new_terminal, Terminal};
+
+#[cfg(unix)]
+lazy_static::lazy_static! {
+    pub static ref UID_TO_NAME: Mutex<HashMap<u32, String>> = Mutex::new(HashMap::new());
+    pub static ref GID_TO_NAME: Mutex<HashMap<u32, String>> = Mutex::new(HashMap::new());
+}
 
 #[derive(StructOpt)]
 /// List directory contents
@@ -228,7 +235,11 @@ impl Data {
         use std::os::unix::fs::MetadataExt;
         let meta = self.meta.as_ref().unwrap();
 
-        unsafe {
+        if let Some(name) = UID_TO_NAME.lock().unwrap().get(&meta.uid()) {
+            return name.clone();
+        }
+
+        let name = unsafe {
             let mut buf = [0i8; 2048];
             let mut pwbuf: libc::passwd = std::mem::zeroed();
             let mut pw = std::ptr::null_mut();
@@ -240,7 +251,10 @@ impl Data {
                 let name = std::ffi::CStr::from_ptr((*pw).pw_name);
                 name.to_string_lossy().to_string()
             }
-        }
+        };
+
+        UID_TO_NAME.lock().unwrap().insert(meta.uid(), name.clone());
+        name
     }
 
     #[cfg(unix)]
@@ -248,7 +262,11 @@ impl Data {
         use std::os::unix::fs::MetadataExt;
         let meta = self.meta.as_ref().unwrap();
 
-        unsafe {
+        if let Some(name) = GID_TO_NAME.lock().unwrap().get(&meta.gid()) {
+            return name.clone();
+        }
+
+        let name = unsafe {
             let mut buf = [0i8; 2048];
             let mut grbuf: libc::group = std::mem::zeroed();
             let mut group = std::ptr::null_mut();
@@ -266,7 +284,10 @@ impl Data {
                 let name = std::ffi::CStr::from_ptr((*group).gr_name);
                 name.to_string_lossy().to_string()
             }
-        }
+        };
+
+        GID_TO_NAME.lock().unwrap().insert(meta.gid(), name.clone());
+        name
     }
 }
 
