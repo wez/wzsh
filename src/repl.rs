@@ -140,7 +140,10 @@ impl LineEditorHost for EditHost {
                     if let Some(text) = p.to_str() {
                         candidates.push(CompletionCandidate {
                             range: range.clone(),
-                            text: text.to_owned(),
+                            // It is convenient when tabbing to complet dirs
+                            // for the directory separator to be included in
+                            // the completion text, so we do that here.
+                            text: format!("{}{}", text, if p.is_dir() { "/" } else { "" }),
                         });
                     }
                 }
