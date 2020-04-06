@@ -571,6 +571,14 @@ impl LsCommand {
                     break;
                 }
             }
+
+            // We shouldn't get here, but we can if one or more file names
+            // are wider than the available terminal width.
+            // Fall back to single column output.
+            for (display, _width) in values {
+                output.extend_from_slice(&display);
+                output.push("\r\n".into());
+            }
         } else if self.long_format {
             let columns = [
                 Column {
