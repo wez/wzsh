@@ -1,6 +1,7 @@
 use chrono::prelude::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
 use std::sync::Mutex;
 use structopt::*;
 use tabout::{tabulate_for_terminal, unicode_column_width_of_change_slice, Alignment, Column};
