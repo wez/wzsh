@@ -26,12 +26,14 @@ pathsearch = { path = "pathsearch" }
 chrono = "0.4"
 
 [dependencies.tabout]
-version="0.2"
+#version="0.2"
 #path = "../wezterm/tabout"
+git = "https://github.com/wez/wezterm.git"
 
 [dependencies.termwiz]
-version="0.7"
+#version="0.8"
 #path = "../wezterm/termwiz"
+git = "https://github.com/wez/wezterm.git"
 
 [target."cfg(windows)".dependencies]
 winapi = { version = "0.3", features = [
