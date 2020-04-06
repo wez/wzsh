@@ -535,6 +535,7 @@ impl LsCommand {
             let max_width = terminal.get_screen_size()?.cols;
 
             let spacing = 2;
+            let mut printed = false;
 
             for i in 1..values.len() + 1 {
                 let num_cols = (values.len() as f32 / i as f32).ceil() as usize;
@@ -568,16 +569,19 @@ impl LsCommand {
                         }
                         output.push("\r\n".into());
                     }
+                    printed = true;
                     break;
                 }
             }
 
-            // We shouldn't get here, but we can if one or more file names
-            // are wider than the available terminal width.
-            // Fall back to single column output.
-            for (display, _width) in values {
-                output.extend_from_slice(&display);
-                output.push("\r\n".into());
+            if !printed {
+                // We shouldn't get here, but we can if one or more file names
+                // are wider than the available terminal width.
+                // Fall back to single column output.
+                for (display, _width) in values {
+                    output.extend_from_slice(&display);
+                    output.push("\r\n".into());
+                }
             }
         } else if self.long_format {
             let columns = [
