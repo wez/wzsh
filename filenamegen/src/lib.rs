@@ -245,6 +245,13 @@ mod test {
     #[cfg(all(unix, not(target_os = "macos")))]
     fn test_non_utf8_on_disk() -> anyhow::Result<()> {
         use bstr::B;
+
+        if nix::sys::utsname::uname().release().contains("Microsoft") {
+            // If we're running on WSL the filesystem has
+            // tigher restrictions
+            return Ok(());
+        }
+
         let root = make_fixture()?;
         let pound = B(b"\xa3.rs").to_path()?;
         // on macos, the system won't allow us to create invalid utf8 names
