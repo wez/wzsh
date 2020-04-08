@@ -113,18 +113,26 @@ fn compile_and_run(prog: &str, env_bits: &mut EnvBits) -> anyhow::Result<Status>
 struct EditHost {
     history: BasicHistory,
     cwd: PathBuf,
+    is_continuation: bool,
 }
 
 impl LineEditorHost for EditHost {
-    fn render_prompt(&self, prompt: &str) -> Vec<OutputElement> {
+    fn render_prompt(&self, _prompt: &str) -> Vec<OutputElement> {
         vec![
+            OutputElement::Attribute(AttributeChange::Foreground(AnsiColor::Purple.into())),
+            OutputElement::Text(self.cwd.display().to_string()),
+            OutputElement::Text("\r\n".into()),
             OutputElement::Attribute(AttributeChange::Foreground(
                 ColorAttribute::TrueColorWithPaletteFallback(
-                    RgbColor::from_named("plum").unwrap(),
+                    RgbColor::from_named("skyblue").unwrap(),
                     AnsiColor::Navy.into(),
                 ),
             )),
-            OutputElement::Text(prompt.to_owned()),
+            OutputElement::Text(if self.is_continuation {
+                "..> ".to_owned()
+            } else {
+                "$ ".to_owned()
+            }),
         ]
     }
 
@@ -206,15 +214,14 @@ pub fn repl(cwd: PathBuf, env: Environment, funcs: &Arc<FunctionRegistry>) -> an
     let mut input = String::new();
 
     loop {
-        let prompt = match input.is_empty() {
-            true => "$ ",
-            false => "..> ",
-        };
-        editor.set_prompt(prompt);
+        // We handle all the prompt rendering in render_prompt.
+        editor.set_prompt("");
 
         JOB_LIST.check_and_print_status();
 
         host.cwd = env.cwd.clone();
+        host.is_continuation = !input.is_empty();
+
         match editor.read_line(&mut host) {
             Ok(Some(line)) => {
                 host.history().add(&line);
