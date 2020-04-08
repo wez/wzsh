@@ -98,6 +98,7 @@ lazy_static! {
             echo::EchoCommand,
             env::ExportCommand,
             env::UnsetCommand,
+            env::PathCommand,
             jobcontrol::FgCommand,
             jobcontrol::JobsCommand,
             truefalse::FalseCommand,
