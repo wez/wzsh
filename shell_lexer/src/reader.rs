@@ -205,8 +205,13 @@ impl<R: Read> CharReader<R> {
     pub fn unget(&mut self, c: PositionedChar) {
         let len = c.c.len_utf8();
         assert!(self.line_idx > 0);
-        assert!(len < self.line_idx);
-        self.line_idx -= len;
+        let (new_idx, overflow) = self.line_idx.overflowing_sub(len);
+        assert!(
+            !overflow,
+            "overflowed while putting back a token: len={} line_idx={} c={:?} line_buffer={:?}",
+            len, self.line_idx, c, self.line_buffer
+        );
+        self.line_idx = new_idx;
         self.position.col -= 1;
         assert_eq!(
             self.line_buffer[self.line_idx..].chars().next().unwrap(),

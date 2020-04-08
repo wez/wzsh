@@ -446,8 +446,10 @@ impl<R: Read> Lexer<R> {
 
     fn backslash(&mut self, backslash: PositionedChar) -> anyhow::Result<()> {
         let quoted = self.next_char_or_err(LexErrorKind::EofDuringBackslash)?;
-        self.add_char_to_word(backslash);
-        self.add_char_to_word(quoted);
+        if quoted.c != '\n' {
+            self.add_char_to_word(backslash);
+            self.add_char_to_word(quoted);
+        }
         Ok(())
     }
 
@@ -937,6 +939,34 @@ mod test {
                 splittable: true,
                 remove_backslash: true
             },]),]
+        );
+
+        assert_eq!(
+            tokens("fo\\\no"),
+            vec![Token::Word(vec![WordComponent {
+                kind: WordComponentKind::literal("foo"),
+                span: Span::new(Pos::new(0, 0), Pos::new(1, 0)),
+                splittable: true,
+                remove_backslash: true
+            },]),]
+        );
+
+        assert_eq!(
+            tokens("fo\\\n o"),
+            vec![
+                Token::Word(vec![WordComponent {
+                    kind: WordComponentKind::literal("fo"),
+                    span: Span::new_to(0, 0, 1),
+                    splittable: true,
+                    remove_backslash: true
+                },]),
+                Token::Word(vec![WordComponent {
+                    kind: WordComponentKind::literal("o"),
+                    span: Span::new(Pos::new(1, 1), Pos::new(1, 1)),
+                    splittable: true,
+                    remove_backslash: true
+                },]),
+            ]
         );
     }
 
