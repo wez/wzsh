@@ -64,8 +64,21 @@ impl Host {
 }
 
 impl ShellHost for Host {
-    fn lookup_homedir(&self, _user: Option<&str>) -> anyhow::Result<OsString> {
-        bail!("lookup_homedir not implemented");
+    fn lookup_homedir(&self, user: Option<&str>) -> anyhow::Result<OsString> {
+        if user.is_none() {
+            if let Some(home) = dirs::home_dir() {
+                if let Some(s) = home.to_str() {
+                    // Urgh for windows.
+                    Ok(s.replace("\\", "/").into())
+                } else {
+                    Ok(home.into())
+                }
+            } else {
+                bail!("failed to resolve own home dir");
+            }
+        } else {
+            bail!("lookup_homedir for specific user not implemented");
+        }
     }
 
     fn spawn_command(

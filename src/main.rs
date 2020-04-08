@@ -40,6 +40,7 @@ fn config_dir() -> PathBuf {
 fn main() -> anyhow::Result<()> {
     let mut cwd = std::env::current_dir()?;
     let mut env = Environment::new();
+    let mut exe_dir = None;
 
     // We want to pick up our shell utility executables.
     // In the source tree they are emitted alongside the wzsh
@@ -54,6 +55,8 @@ fn main() -> anyhow::Result<()> {
             // might be in their path
             env.set("WZSH_BIN_DIR", bindir);
             env.append_path("PATH", bindir)?;
+
+            exe_dir.replace(bindir.to_path_buf());
         }
     }
 
@@ -61,13 +64,22 @@ fn main() -> anyhow::Result<()> {
 
     let opts = Opt::from_args();
     if !opts.skip_startup {
-        let startup_script = config_dir().join("startup.wzsh");
-        if startup_script.exists() {
-            if let Err(err) =
-                script::compile_and_run_script_file(&startup_script, &mut cwd, &mut env, &funcs)
-            {
-                print_error_path(&err, &startup_script);
-                eprintln!("wzsh: ignoring error during startup processing.");
+        let startup_paths = &[
+            #[cfg(windows)]
+            exe_dir.as_ref().unwrap().join(".wzshrc"),
+            config_dir().join("startup.wzsh"),
+            dirs::home_dir().unwrap().join(".wzshrc"),
+        ];
+
+        for startup_script in startup_paths {
+            if startup_script.exists() {
+                if let Err(err) =
+                    script::compile_and_run_script_file(&startup_script, &mut cwd, &mut env, &funcs)
+                {
+                    print_error_path(&err, &startup_script);
+                    eprintln!("wzsh: ignoring error during startup processing.");
+                }
+                break;
             }
         }
     }
