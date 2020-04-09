@@ -1,12 +1,15 @@
 use crate::errorprint::print_error;
 use crate::job::{put_shell_in_foreground, Job, JOB_LIST};
 use crate::shellhost::{FunctionRegistry, Host};
-use anyhow::{anyhow, Error};
+use anyhow::{anyhow, Context, Error};
 use filenamegen::Glob;
 use shell_compiler::Compiler;
 use shell_lexer::{LexError, LexErrorKind};
 use shell_parser::{ParseErrorKind, Parser};
 use shell_vm::{Environment, Machine, Program, Status};
+use sqlite::Value;
+use std::borrow::Cow;
+use std::convert::TryInto;
 use std::path::PathBuf;
 use std::sync::Arc;
 use termwiz::cell::AttributeChange;
@@ -39,8 +42,6 @@ fn is_recoverable_parse_error(e: &Error) -> bool {
 
 #[cfg(unix)]
 fn init_job_control() -> anyhow::Result<()> {
-    use anyhow::Context;
-
     let pty_fd = 0;
     unsafe {
         // Loop until we are in the foreground.
@@ -109,11 +110,89 @@ fn compile_and_run(prog: &str, env_bits: &mut EnvBits) -> anyhow::Result<Status>
     status
 }
 
-#[derive(Default)]
+struct SqliteHistory {
+    connection: sqlite::Connection,
+}
+
+impl SqliteHistory {
+    fn new() -> Self {
+        let path = dirs::home_dir()
+            .expect("can't find HOME dir")
+            .join(".wzsh-history.db");
+        let connection = sqlite::open(&path)
+            .with_context(|| format!("initializing history file {}", path.display()))
+            .unwrap();
+        connection
+            .execute("CREATE TABLE if not exists history (cmd TEXT, ts INTEGER)")
+            .unwrap();
+        Self { connection }
+    }
+}
+
+impl History for SqliteHistory {
+    fn get(&self, idx: HistoryIndex) -> Option<Cow<str>> {
+        let mut cursor = self
+            .connection
+            .prepare("select cmd from history where rowid=?")
+            .unwrap()
+            .cursor();
+        cursor
+            .bind(&[Value::Integer(idx.try_into().unwrap())])
+            .unwrap();
+        if let Some(row) = cursor.next().unwrap() {
+            Some(Cow::Owned(row[0].as_string().unwrap().to_string()))
+        } else {
+            None
+        }
+    }
+
+    fn last(&self) -> Option<HistoryIndex> {
+        let mut cursor = self
+            .connection
+            .prepare("select rowid from history order by rowid desc limit 1")
+            .unwrap()
+            .cursor();
+        if let Some(row) = cursor.next().unwrap() {
+            Some(row[0].as_integer().unwrap().try_into().unwrap())
+        } else {
+            None
+        }
+    }
+
+    fn add(&mut self, line: &str) {
+        if let Some(last_idx) = self.last() {
+            if let Some(last_line) = self.get(last_idx) {
+                if last_line == line {
+                    // Ignore duplicates
+                    return;
+                }
+            }
+        }
+
+        let mut cursor = self
+            .connection
+            .prepare("insert into history values (?, strftime('%s','now'))")
+            .unwrap()
+            .cursor();
+        cursor.bind(&[Value::String(line.to_string())]).unwrap();
+        cursor.next().ok();
+    }
+}
+
 struct EditHost {
-    history: BasicHistory,
+    history: SqliteHistory,
     cwd: PathBuf,
     is_continuation: bool,
+}
+
+impl EditHost {
+    pub fn new() -> Self {
+        Self {
+            history: SqliteHistory::new(),
+            cwd: Default::default(),
+            is_continuation: false,
+        }
+    }
 }
 
 impl LineEditorHost for EditHost {
@@ -209,7 +288,7 @@ pub fn repl(cwd: PathBuf, env: Environment, funcs: &Arc<FunctionRegistry>) -> an
     init_job_control()?;
 
     let mut editor = line_editor().map_err(Error::msg)?;
-    let mut host = EditHost::default();
+    let mut host = EditHost::new();
 
     let mut input = String::new();
 
