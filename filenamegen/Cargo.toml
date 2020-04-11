@@ -1,11 +1,12 @@
 [package]
 name = "filenamegen"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["Wez Furlong"]
 edition = "2018"
 description = "Shell-style filename generation aka globbing"
 license = "MIT"
 documentation = "https://docs.rs/filenamegen"
+repository = "https://github.com/wez/wzsh"
 keywords = ["glob", "wildmatch", "filenamegen", "fnmatch"]
 readme = "README.md"
 
