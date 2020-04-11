@@ -28,9 +28,9 @@ In no particular order, except that completed items bubble up to the top:
 * [x] - Basic job control (ctrl-z to background, `bg` and `fg` to manage a backgrounded job)
 * [x] - Define and execute functions
 * [x] - Conditionals of the form `true && echo yes` and `if`/`then`/`else`/`elif`/`fi`
+* [x] - line editor functions that can search and match history (ctrl-R!)
 * [ ] - looping constructs such as `for`, `while`, `until`
 * [ ] - `case`/`esac` matching construct
 * [ ] - persistent history and builtins for examining history
 * [ ] - tab completion of commands, filesystem entries
-* [ ] - line editor functions that can search and match history (ctrl-R!)
 * [ ] - command substitution `$(date)`

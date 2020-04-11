@@ -177,6 +177,48 @@ impl History for SqliteHistory {
         cursor.bind(&[Value::String(line.to_string())]).unwrap();
         cursor.next().ok();
     }
+
+    fn search(
+        &self,
+        idx: HistoryIndex,
+        style: SearchStyle,
+        direction: SearchDirection,
+        pattern: &str,
+    ) -> Option<SearchResult> {
+        let query = match (style, direction) {
+            (SearchStyle::Substring, SearchDirection::Backwards) => {
+                "select rowid, cmd from history where rowid <= ? and cmd like ? order by rowid desc limit 1"
+            }
+            (SearchStyle::Substring, SearchDirection::Forwards) => {
+                "select rowid, cmd from history where rowid >= ? and cmd like ? order by rowid limit 1"
+            }
+        };
+
+        let mut cursor = self.connection.prepare(query).unwrap().cursor();
+        let params = &[
+            Value::Integer(idx.try_into().unwrap()),
+            Value::String(format!("%{}%", pattern)),
+        ];
+        // print!("{} {:?}\r\n", query, params);
+
+        cursor.bind(params).unwrap();
+        if let Some(Some(row)) = cursor.next().ok() {
+            // print!("row: {:?}\r\n\r\n", row);
+            let line = Cow::Owned(row[1].as_string().unwrap().to_string());
+            let idx = row[0].as_integer().unwrap();
+            if let Some(cursor) = style.match_against(pattern, &line) {
+                Some(SearchResult {
+                    line,
+                    idx: idx.try_into().unwrap(),
+                    cursor,
+                })
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
 }
 
 struct EditHost {
@@ -287,7 +329,8 @@ pub fn repl(cwd: PathBuf, env: Environment, funcs: &Arc<FunctionRegistry>) -> an
     #[cfg(unix)]
     init_job_control()?;
 
-    let mut editor = line_editor().map_err(Error::msg)?;
+    let mut terminal = line_editor_terminal()?;
+    let mut editor = LineEditor::new(&mut terminal);
     let mut host = EditHost::new();
 
     let mut input = String::new();
