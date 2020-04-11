@@ -1,3 +1,4 @@
+use crate::builtins::history::SqliteHistory;
 use crate::errorprint::print_error;
 use crate::job::{put_shell_in_foreground, Job, JOB_LIST};
 use crate::shellhost::{FunctionRegistry, Host};
@@ -7,9 +8,6 @@ use shell_compiler::Compiler;
 use shell_lexer::{LexError, LexErrorKind};
 use shell_parser::{ParseErrorKind, Parser};
 use shell_vm::{Environment, Machine, Program, Status};
-use sqlite::Value;
-use std::borrow::Cow;
-use std::convert::TryInto;
 use std::path::PathBuf;
 use std::sync::Arc;
 use termwiz::cell::AttributeChange;
@@ -108,117 +106,6 @@ fn compile_and_run(prog: &str, env_bits: &mut EnvBits) -> anyhow::Result<Status>
     env_bits.env = env;
 
     status
-}
-
-struct SqliteHistory {
-    connection: sqlite::Connection,
-}
-
-impl SqliteHistory {
-    fn new() -> Self {
-        let path = dirs::home_dir()
-            .expect("can't find HOME dir")
-            .join(".wzsh-history.db");
-        let connection = sqlite::open(&path)
-            .with_context(|| format!("initializing history file {}", path.display()))
-            .unwrap();
-        connection
-            .execute("CREATE TABLE if not exists history (cmd TEXT, ts INTEGER)")
-            .unwrap();
-        Self { connection }
-    }
-}
-
-impl History for SqliteHistory {
-    fn get(&self, idx: HistoryIndex) -> Option<Cow<str>> {
-        let mut cursor = self
-            .connection
-            .prepare("select cmd from history where rowid=?")
-            .unwrap()
-            .cursor();
-        cursor
-            .bind(&[Value::Integer(idx.try_into().unwrap())])
-            .unwrap();
-        if let Some(row) = cursor.next().unwrap() {
-            Some(Cow::Owned(row[0].as_string().unwrap().to_string()))
-        } else {
-            None
-        }
-    }
-
-    fn last(&self) -> Option<HistoryIndex> {
-        let mut cursor = self
-            .connection
-            .prepare("select rowid from history order by rowid desc limit 1")
-            .unwrap()
-            .cursor();
-        if let Some(row) = cursor.next().unwrap() {
-            Some(row[0].as_integer().unwrap().try_into().unwrap())
-        } else {
-            None
-        }
-    }
-
-    fn add(&mut self, line: &str) {
-        if let Some(last_idx) = self.last() {
-            if let Some(last_line) = self.get(last_idx) {
-                if last_line == line {
-                    // Ignore duplicates
-                    return;
-                }
-            }
-        }
-
-        let mut cursor = self
-            .connection
-            .prepare("insert into history values (?, strftime('%s','now'))")
-            .unwrap()
-            .cursor();
-        cursor.bind(&[Value::String(line.to_string())]).unwrap();
-        cursor.next().ok();
-    }
-
-    fn search(
-        &self,
-        idx: HistoryIndex,
-        style: SearchStyle,
-        direction: SearchDirection,
-        pattern: &str,
-    ) -> Option<SearchResult> {
-        let query = match (style, direction) {
-            (SearchStyle::Substring, SearchDirection::Backwards) => {
-                "select rowid, cmd from history where rowid <= ? and cmd like ? order by rowid desc limit 1"
-            }
-            (SearchStyle::Substring, SearchDirection::Forwards) => {
-                "select rowid, cmd from history where rowid >= ? and cmd like ? order by rowid limit 1"
-            }
-        };
-
-        let mut cursor = self.connection.prepare(query).unwrap().cursor();
-        let params = &[
-            Value::Integer(idx.try_into().unwrap()),
-            Value::String(format!("%{}%", pattern)),
-        ];
-        // print!("{} {:?}\r\n", query, params);
-
-        cursor.bind(params).unwrap();
-        if let Some(Some(row)) = cursor.next().ok() {
-            // print!("row: {:?}\r\n\r\n", row);
-            let line = Cow::Owned(row[1].as_string().unwrap().to_string());
-            let idx = row[0].as_integer().unwrap();
-            if let Some(cursor) = style.match_against(pattern, &line) {
-                Some(SearchResult {
-                    line,
-                    idx: idx.try_into().unwrap(),
-                    cursor,
-                })
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
 }
 
 struct EditHost {

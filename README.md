@@ -29,8 +29,8 @@ In no particular order, except that completed items bubble up to the top:
 * [x] - Define and execute functions
 * [x] - Conditionals of the form `true && echo yes` and `if`/`then`/`else`/`elif`/`fi`
 * [x] - line editor functions that can search and match history (ctrl-R!)
+* [x] - persistent history and builtins for examining history
 * [ ] - looping constructs such as `for`, `while`, `until`
 * [ ] - `case`/`esac` matching construct
-* [ ] - persistent history and builtins for examining history
 * [ ] - tab completion of commands, filesystem entries
 * [ ] - command substitution `$(date)`

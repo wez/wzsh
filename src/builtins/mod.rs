@@ -12,6 +12,7 @@ mod builtins;
 mod colon;
 mod echo;
 mod env;
+pub mod history;
 mod jobcontrol;
 mod truefalse;
 mod which;
@@ -99,6 +100,7 @@ lazy_static! {
             env::ExportCommand,
             env::UnsetCommand,
             env::PathCommand,
+            history::HistoryCommand,
             jobcontrol::FgCommand,
             jobcontrol::JobsCommand,
             truefalse::FalseCommand,
