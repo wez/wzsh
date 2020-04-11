@@ -129,6 +129,13 @@ impl PathSpec {
                     }
                 }
                 PathOp::Prepend => {
+                    // We want to ensure that we move this to the
+                    // front of the path, so take it out now
+                    if self.dedup && set.contains(entry) {
+                        set.remove(entry);
+                        pathvec.retain(|p| p != entry);
+                    }
+
                     if !self.dedup || !set.contains(entry) {
                         let entry = entry.to_path_buf();
                         set.insert(entry.clone());
