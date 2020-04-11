@@ -103,11 +103,10 @@ impl ShellHost for Host {
         if let Some(name) = argv[0].as_str() {
             if let Some(prog) = self.funcs.lookup_function(name) {
                 // Execute the function.
-                // This is blocking and not subjectable to job control.
                 let job = Job::new_empty(name.to_string());
                 let mut machine =
                     Machine::new(&prog, Some(environment.clone()), &current_directory)?;
-                machine.set_host(Arc::new(Host::new(job, &self.funcs)));
+                machine.set_host(Arc::new(Host::with_job_control(job, &self.funcs)));
 
                 machine.set_positional(argv.to_vec());
 
