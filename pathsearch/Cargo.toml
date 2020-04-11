@@ -7,6 +7,7 @@ repository = "https://github.com/wez/wzsh"
 description = "Search for files in PATH"
 license = "MIT"
 documentation = "https://docs.rs/pathsearch"
+readme = "README.md"
 
 [dependencies]
 anyhow = "1.0"
