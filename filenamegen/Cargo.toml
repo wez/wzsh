@@ -3,12 +3,17 @@ name = "filenamegen"
 version = "0.2.0"
 authors = ["Wez Furlong"]
 edition = "2018"
+description = "Shell-style filename generation aka globbing"
+license = "MIT"
+documentation = "https://docs.rs/filenamegen"
+keywords = ["glob", "wildmatch", "filenamegen", "fnmatch"]
+readme = "README.md"
 
 [dependencies]
 bstr = "0.1"
 anyhow = "1.0"
 regex = "1.1"
-walkdir = "2.2"
+walkdir = "2.3"
 
 [dev-dependencies]
 pretty_assertions = "0.6"
