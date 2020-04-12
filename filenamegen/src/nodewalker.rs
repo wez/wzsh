@@ -82,8 +82,8 @@ impl<'a> NodeWalker<'a> {
                                     entry
                                         .path()
                                         .strip_prefix(&walker.root)
-                                        .expect("entry path always has walker.root as a prefix")
-                                        .to_path_buf(),
+                                        .map(|p| p.to_path_buf())
+                                        .unwrap_or_else(|_| entry.path()),
                                 ));
                             } else if entry_may_be_dir(&entry) {
                                 // We can only really match if this non-leaf node

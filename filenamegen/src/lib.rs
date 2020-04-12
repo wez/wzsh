@@ -235,6 +235,15 @@ mod test {
     }
 
     #[test]
+    fn test_non_relative() -> anyhow::Result<()> {
+        let root = make_fixture()?;
+        touch_files_in(&root, &["src/lib.rs"])?;
+        let glob = Glob::new(&format!("{}/src/*.rs", root.path().display()))?;
+        assert_eq!(glob.walk("/tmp"), vec![root.path().join("src/lib.rs")]);
+        Ok(())
+    }
+
+    #[test]
     fn non_utf8_node_match() -> anyhow::Result<()> {
         let node = parse("*.rs")?;
         use bstr::B;
