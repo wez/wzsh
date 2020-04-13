@@ -1,6 +1,6 @@
 [package]
 name = "filenamegen"
-version = "0.2.2"
+version = "0.2.3"
 authors = ["Wez Furlong"]
 edition = "2018"
 description = "Shell-style filename generation aka globbing"

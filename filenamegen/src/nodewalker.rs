@@ -13,6 +13,7 @@ pub struct NodeWalker<'a> {
     node_to_match: Option<&'a Node>,
     current_dir: PathBuf,
     dir: Option<std::fs::ReadDir>,
+    current_dir_has_literals: bool,
 }
 
 fn entry_may_be_dir(entry: &std::fs::DirEntry) -> bool {
@@ -40,6 +41,7 @@ impl<'a> NodeWalker<'a> {
             node_to_match: None,
             current_dir: PathBuf::new(),
             dir: None,
+            current_dir_has_literals: false,
         }
     }
 
@@ -50,6 +52,7 @@ impl<'a> NodeWalker<'a> {
             node_to_match: None,
             current_dir: self.current_dir.join(child_dir),
             dir: None,
+            current_dir_has_literals: false,
         }
     }
 
@@ -59,6 +62,11 @@ impl<'a> NodeWalker<'a> {
             match node {
                 Node::LiteralComponents(literal) => {
                     self.current_dir = self.current_dir.join(literal);
+                    // Since we're combining a run of LiteralComponents
+                    // together without returning a corresponding Node,
+                    // we need to set a flag to remind ourselves to
+                    // check the resultant path later.
+                    self.current_dir_has_literals = true;
                 }
                 _ => return Some(node),
             }
@@ -108,6 +116,16 @@ impl<'a> NodeWalker<'a> {
             // Advance to the next directory component
             self.node_to_match = match self.next_candidate_path() {
                 None => {
+                    // If we walked a sequence of LiteralComponents at the end
+                    // of the pattern we'll end up here without yielding a node.
+                    // In this case current_dir is the candidate path to match.
+                    if self.current_dir_has_literals {
+                        self.current_dir_has_literals = false;
+                        let candidate = walker.root.join(&self.current_dir);
+                        if candidate.exists() {
+                            return Some(candidate);
+                        }
+                    }
                     return None;
                 }
                 node => node,

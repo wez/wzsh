@@ -239,7 +239,10 @@ mod test {
         let root = make_fixture()?;
         touch_files_in(&root, &["src/lib.rs"])?;
         let glob = Glob::new(&format!("{}/src/*.rs", root.path().display()))?;
-        assert_eq!(glob.walk("/tmp"), vec![root.path().join("src/lib.rs")]);
+        assert_eq!(
+            glob.walk(&std::env::current_dir()?),
+            vec![root.path().join("src/lib.rs")]
+        );
         Ok(())
     }
 
@@ -253,6 +256,40 @@ mod test {
         eprintln!("node is {:?}", node);
         assert_eq!(node.is_match(&pound), true);
 
+        Ok(())
+    }
+
+    #[test]
+    fn spaces_and_parens() -> anyhow::Result<()> {
+        let root = make_fixture()?;
+        touch_files_in(&root, &["Program Files (x86)/Foo Bar/baz.exe"])?;
+
+        let glob = Glob::new("Program Files (x86)/*")?;
+        assert_eq!(
+            glob.walk(&root),
+            vec![PathBuf::from("Program Files (x86)/Foo Bar")]
+        );
+
+        let glob = Glob::new(root.path().join("Program Files (x86)/*").to_str().unwrap())?;
+        assert_eq!(
+            glob.walk(&root),
+            vec![PathBuf::from("Program Files (x86)/Foo Bar")]
+        );
+        assert_eq!(
+            glob.walk(&std::env::current_dir()?),
+            vec![root.path().join("Program Files (x86)/Foo Bar")]
+        );
+
+        let glob = Glob::new(
+            root.path()
+                .join("Program Files (x86)/*/baz.exe")
+                .to_str()
+                .unwrap(),
+        )?;
+        assert_eq!(
+            glob.walk(&std::env::current_dir()?),
+            vec![root.path().join("Program Files (x86)/Foo Bar/baz.exe")]
+        );
         Ok(())
     }
 
