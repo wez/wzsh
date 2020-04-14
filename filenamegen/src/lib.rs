@@ -270,7 +270,11 @@ mod test {
             vec![PathBuf::from("Program Files (x86)/Foo Bar")]
         );
 
-        let glob = Glob::new(root.path().join("Program Files (x86)/*").to_str().unwrap())?;
+        let glob = Glob::new(
+            normalize_slashes(root.path().join("Program Files (x86)/*"))
+                .to_str()
+                .unwrap(),
+        )?;
         assert_eq!(
             glob.walk(&root),
             vec![PathBuf::from("Program Files (x86)/Foo Bar")]
@@ -281,8 +285,7 @@ mod test {
         );
 
         let glob = Glob::new(
-            root.path()
-                .join("Program Files (x86)/*/baz.exe")
+            normalize_slashes(root.path().join("Program Files (x86)/*/baz.exe"))
                 .to_str()
                 .unwrap(),
         )?;
