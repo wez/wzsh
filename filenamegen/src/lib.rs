@@ -128,11 +128,19 @@ fn normalize_slashes(path: PathBuf) -> PathBuf {
     use std::ffi::OsString;
     use std::os::windows::ffi::{OsStrExt, OsStringExt};
 
-    let normalized: Vec<u16> = path
+    let mut normalized: Vec<u16> = path
         .into_os_string()
         .encode_wide()
         .map(|c| if c == b'\\' as u16 { b'/' as u16 } else { c })
         .collect();
+
+    // Strip off the normalized long filename prefix.
+    const LONG_FILE_NAME_PREFIX: [u16; 4] = [b'/' as u16, b'/' as u16, b'?' as u16, b'/' as u16];
+    if normalized.starts_with(&LONG_FILE_NAME_PREFIX) {
+        for _ in 0..LONG_FILE_NAME_PREFIX.len() {
+            normalized.remove(0);
+        }
+    }
 
     OsString::from_wide(&normalized).into()
 }
