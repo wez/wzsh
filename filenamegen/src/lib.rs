@@ -271,7 +271,7 @@ mod test {
         );
 
         let glob = Glob::new(
-            normalize_slashes(root.path().join("Program Files (x86)/*"))
+            normalize_slashes(root.path().canonicalize()?.join("Program Files (x86)/*"))
                 .to_str()
                 .unwrap(),
         )?;
@@ -285,9 +285,13 @@ mod test {
         );
 
         let glob = Glob::new(
-            normalize_slashes(root.path().join("Program Files (x86)/*/baz.exe"))
-                .to_str()
-                .unwrap(),
+            normalize_slashes(
+                root.path()
+                    .canonicalize()?
+                    .join("Program Files (x86)/*/baz.exe"),
+            )
+            .to_str()
+            .unwrap(),
         )?;
         assert_eq!(
             glob.walk(&std::env::current_dir()?),
