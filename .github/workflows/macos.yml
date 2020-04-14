@@ -1,4 +1,4 @@
-name: windows
+name: macos
 
 on:
   push:
@@ -12,7 +12,7 @@ jobs:
   build:
     strategy:
       fail-fast: false
-    runs-on: "vs2017-win2016"
+    runs-on: "macos-latest"
     steps:
     - uses: actions/checkout@v1
     - name: "Install Rust"
@@ -22,22 +22,21 @@ jobs:
          toolchain: "stable"
          override: true
          components: "rustfmt"
-         target: "x86_64-pc-windows-msvc"
     - name: "Cache cargo registry"
       uses: actions/cache@v1
       with:
          path: "~/.cargo/registry"
-         key: "windows-x86_64-pc-windows-msvc-${{ hashFiles('Cargo.lock') }}-cargo-registry"
+         key: "macos-${{ hashFiles('Cargo.lock') }}-cargo-registry"
     - name: "Cache cargo index"
       uses: actions/cache@v1
       with:
          path: "~/.cargo/git"
-         key: "windows-x86_64-pc-windows-msvc-${{ hashFiles('Cargo.lock') }}-cargo-index"
+         key: "macos-${{ hashFiles('Cargo.lock') }}-cargo-index"
     - name: "Cache cargo build"
       uses: actions/cache@v1
       with:
          path: "target"
-         key: "windows-x86_64-pc-windows-msvc-${{ hashFiles('Cargo.lock') }}-cargo-build-target"
+         key: "macos-${{ hashFiles('Cargo.lock') }}-cargo-build-target"
     - name: Check formatting
       run: cargo fmt --all -- --check
     - name: Build
@@ -51,5 +50,6 @@ jobs:
         mv target/release/*.exe pkg_
     - uses: actions/upload-artifact@master
       with:
-        name: windows
+        name: macos
         path: pkg_
+
