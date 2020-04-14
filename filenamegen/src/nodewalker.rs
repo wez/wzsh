@@ -89,7 +89,7 @@ impl<'a> NodeWalker<'a> {
                                 return Some(normalize_slashes(
                                     entry
                                         .path()
-                                        .strip_prefix(&walker.root)
+                                        .strip_prefix(&normalize_slashes(walker.root.to_path_buf()))
                                         .map(|p| p.to_path_buf())
                                         .unwrap_or_else(|_| entry.path()),
                                 ));
