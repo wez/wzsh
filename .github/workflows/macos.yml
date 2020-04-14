@@ -43,13 +43,3 @@ jobs:
       run: cargo build --all --release
     - name: Test
       run: cargo test --all
-    - name: Move Windows Package
-      shell: bash
-      run: |
-        mkdir pkg_
-        mv target/release/*.exe pkg_
-    - uses: actions/upload-artifact@master
-      with:
-        name: macos
-        path: pkg_
-

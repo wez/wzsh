@@ -66,7 +66,7 @@ impl Glob {
     /// `{foo,bar}.rs` matches both `foo.rs` and `bar.rs`.  The curly braces
     ///    define an alternation regex.
     pub fn new(pattern: &str) -> anyhow::Result<Glob> {
-        let mut nodes = vec![];
+        let mut nodes: Vec<Node> = vec![];
         for comp in Path::new(pattern).components() {
             let token = match comp {
                 Component::Prefix(s) => {
@@ -74,7 +74,12 @@ impl Glob {
                     Node::LiteralComponents(PathBuf::from(s.as_os_str()))
                 }
                 Component::RootDir => {
-                    nodes.clear();
+                    if nodes.len() == 1 && nodes[0].is_literal_prefix_component() {
+                        // Retain any prefix component; it it logically part
+                        // of this new RootDir
+                    } else {
+                        nodes.clear();
+                    }
                     Node::LiteralComponents(PathBuf::from("/"))
                 }
                 Component::CurDir => continue,
@@ -252,10 +257,13 @@ mod test {
     fn test_non_relative() -> anyhow::Result<()> {
         let root = make_fixture()?;
         touch_files_in(&root, &["src/lib.rs"])?;
-        let glob = Glob::new(&format!("{}/src/*.rs", root.path().display()))?;
+        let glob = Glob::new(&format!(
+            "{}/src/*.rs",
+            normalize_slashes(root.path().to_path_buf()).display()
+        ))?;
         assert_eq!(
             glob.walk(&std::env::current_dir()?),
-            vec![root.path().join("src/lib.rs")]
+            vec![normalize_slashes(root.path().join("src/lib.rs"))]
         );
         Ok(())
     }
@@ -280,18 +288,19 @@ mod test {
 
         let glob = Glob::new("Program Files (x86)/*")?;
         assert_eq!(
-            glob.walk(&root),
+            glob.walk(&root.path()),
             vec![PathBuf::from("Program Files (x86)/Foo Bar")]
         );
 
         let glob = Glob::new(
-            normalize_slashes(root.path().canonicalize()?.join("Program Files (x86)/*"))
+            normalize_slashes(root.path().join("Program Files (x86)/*"))
                 .to_str()
                 .unwrap(),
         )?;
+
         assert_eq!(
             glob.walk(&root),
-            vec![PathBuf::from("Program Files (x86)/Foo Bar")]
+            vec![root.path().join("Program Files (x86)/Foo Bar")]
         );
         assert_eq!(
             glob.walk(&std::env::current_dir()?),
@@ -299,13 +308,9 @@ mod test {
         );
 
         let glob = Glob::new(
-            normalize_slashes(
-                root.path()
-                    .canonicalize()?
-                    .join("Program Files (x86)/*/baz.exe"),
-            )
-            .to_str()
-            .unwrap(),
+            normalize_slashes(root.path().join("Program Files (x86)/*/baz.exe"))
+                .to_str()
+                .unwrap(),
         )?;
         assert_eq!(
             glob.walk(&std::env::current_dir()?),

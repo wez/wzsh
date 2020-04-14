@@ -59,6 +59,17 @@ impl Node {
         }
     }
 
+    pub fn is_literal_prefix_component(&self) -> bool {
+        match self {
+            Node::LiteralComponents(p) => match p.components().next() {
+                Some(std::path::Component::Prefix(_)) => true,
+                _ => false,
+            },
+
+            _ => false,
+        }
+    }
+
     /// Convenience for testing whether Node is RecursiveMatch
     pub fn is_recursive(&self) -> bool {
         match self {

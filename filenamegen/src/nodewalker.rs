@@ -86,13 +86,8 @@ impl<'a> NodeWalker<'a> {
                         if self.node_to_match.as_ref().unwrap().is_match(&bstr) {
                             let is_leaf = self.node.peek().is_none();
                             if is_leaf {
-                                return Some(normalize_slashes(
-                                    entry
-                                        .path()
-                                        .strip_prefix(&normalize_slashes(walker.root.to_path_buf()))
-                                        .map(|p| p.to_path_buf())
-                                        .unwrap_or_else(|_| entry.path()),
-                                ));
+                                let rel_path = self.current_dir.join(base_name);
+                                return Some(normalize_slashes(rel_path));
                             } else if entry_may_be_dir(&entry) {
                                 // We can only really match if this non-leaf node
                                 // is a directory
@@ -123,7 +118,7 @@ impl<'a> NodeWalker<'a> {
                         self.current_dir_has_literals = false;
                         let candidate = walker.root.join(&self.current_dir);
                         if candidate.exists() {
-                            return Some(candidate);
+                            return Some(normalize_slashes(self.current_dir.clone()));
                         }
                     }
                     return None;
