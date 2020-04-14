@@ -230,6 +230,12 @@ mod test {
     }
 
     fn make_fixture() -> anyhow::Result<TempDir> {
+        #[cfg(unix)]
+        {
+            // Canonicalize the temp dir; on macos this location
+            // is a symlink and that messes with some test assertions
+            std::env::set_var("TMPDIR", std::env::temp_dir().canonicalize()?);
+        }
         Ok(TempDir::new("filenamegen")?)
     }
 
