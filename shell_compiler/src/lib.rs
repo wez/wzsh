@@ -116,7 +116,7 @@ impl Compiler {
     /// `if (condition) { THEN } else { ELSE }`
     /// Emit a sequence like:
     ///
-    /// ```norun
+    /// ```text
     ///   JumpIfZero .ELSE
     ///   {THEN}
     ///   Jump .DONE
