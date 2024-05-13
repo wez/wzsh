@@ -5,10 +5,10 @@ authors = ["Wez Furlong"]
 edition = "2018"
 
 [dependencies]
-bstr = "0.1"
+bstr = "1.9"
 caseless = "0.2"
 anyhow = "1.0"
-filedescriptor = "0.7"
+filedescriptor = "0.8"
 filenamegen = { path = "../filenamegen" }
 lazy_static = "1.3"
 
