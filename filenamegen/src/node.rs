@@ -47,8 +47,8 @@ impl Node {
             Node::LiteralComponents(p) => p.as_path() == s.to_path_lossy(),
             #[cfg(windows)]
             Node::LiteralComponents(p) => {
-                if let Some(p) = BStr::from_path(p.as_path()) {
-                    normalize_and_lower_case(p) == normalize_and_lower_case(s)
+                if let Some(bytes) = <[u8]>::from_path(p.as_path()) {
+                    normalize_and_lower_case(BStr::new(bytes)) == normalize_and_lower_case(s)
                 } else {
                     // If we couldn't convert ourselves to a bstr, then it
                     // cannot possibly be compared to a bstr
