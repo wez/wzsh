@@ -1,0 +1,46 @@
+name: linux
+
+on:
+  push:
+    branches:
+    - master
+  pull_request:
+    branches:
+    - master
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+    runs-on: "ubuntu-latest"
+    steps:
+    - uses: actions/checkout@v1
+    - name: "Install Rust"
+      uses: actions-rs/toolchain@v1
+      with:
+         profile: "minimal"
+         toolchain: "stable"
+         override: true
+         components: "rustfmt"
+    - name: "Cache cargo registry"
+      uses: actions/cache@v1
+      with:
+         path: "~/.cargo/registry"
+         key: "ubuntu-${{ hashFiles('Cargo.toml') }}-cargo-registry"
+    - name: "Cache cargo index"
+      uses: actions/cache@v1
+      with:
+         path: "~/.cargo/git"
+         key: "ubuntu-${{ hashFiles('Cargo.toml') }}-cargo-index"
+    - name: "Cache cargo build"
+      uses: actions/cache@v1
+      with:
+         path: "target"
+         key: "ubuntu-${{ hashFiles('Cargo.toml') }}-cargo-build-target"
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+    - name: Build
+      run: cargo build --all --release
+    - name: Test
+      run: cargo test --all
+
