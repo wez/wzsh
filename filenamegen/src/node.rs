@@ -1,8 +1,8 @@
 use crate::token::Token;
 use bstr::BStr;
-#[cfg(windows)]
 use bstr::BString;
 use bstr::ByteSlice;
+use bstr::ByteVec;
 use regex::bytes::Regex;
 use std::path::PathBuf;
 
@@ -25,9 +25,9 @@ impl RegexAndTokens {
     }
 }
 
-#[cfg(windows)]
+#[allow(unused)]
 fn normalize_and_lower_case(s: &BStr) -> BString {
-    let mut norm = BString::new();
+    let mut norm = BString::new(vec![]);
     for c in s.chars() {
         if c == '/' {
             norm.push_char('\\');
