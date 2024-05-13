@@ -18,9 +18,7 @@ jobs:
     - name: "Install Rust"
       uses: dtolnay/rust-toolchain@stable
       with:
-         profile: "minimal"
          toolchain: "stable"
-         override: true
          components: "rustfmt"
          target: "x86_64-pc-windows-msvc"
     - name: "Cache cargo registry"
