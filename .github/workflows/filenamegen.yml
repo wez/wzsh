@@ -39,9 +39,9 @@ jobs:
       with:
          path: "target"
          key: "filenamegen-${{ matrix.os }}-${{ hashFiles('Cargo.toml') }}-cargo-build-target"
-    - name: Build
-      run: cargo build -p filenamegen --release
     - name: Test
       run: cargo test -p filenamegen
+    - name: Build
+      run: cargo build -p filenamegen --release
 
 

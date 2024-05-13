@@ -325,9 +325,10 @@ mod test {
     fn case_insensitive() -> anyhow::Result<()> {
         let node = parse("foo/bar.rs")?;
         use bstr::B;
+        use bstr::BStr;
         let upper = B(b"FOO/bAr.rs");
 
-        assert_eq!(node.is_match(&upper), true);
+        assert_eq!(node.is_match(BStr::new(&upper)), true);
         Ok(())
     }
 
