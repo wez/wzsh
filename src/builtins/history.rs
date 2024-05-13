@@ -23,7 +23,7 @@ pub struct HistoryEntry {
 
 impl SqliteHistory {
     pub fn new() -> Self {
-        let path = dirs::home_dir()
+        let path = dirs_next::home_dir()
             .expect("can't find HOME dir")
             .join(".wzsh-history.db");
         let connection = sqlite::open(&path)

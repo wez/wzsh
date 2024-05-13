@@ -31,7 +31,7 @@ struct Opt {
 }
 
 fn config_dir() -> PathBuf {
-    dirs::home_dir()
+    dirs_next::home_dir()
         .expect("can't find HOME dir")
         .join(".config")
         .join("wzsh")
@@ -68,7 +68,7 @@ fn main() -> anyhow::Result<()> {
             #[cfg(windows)]
             exe_dir.as_ref().unwrap().join(".wzshrc"),
             config_dir().join("startup.wzsh"),
-            dirs::home_dir().unwrap().join(".wzshrc"),
+            dirs_next::home_dir().unwrap().join(".wzshrc"),
         ];
 
         for startup_script in startup_paths {

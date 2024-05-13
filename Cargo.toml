@@ -11,7 +11,7 @@ vergen = "3"
 [dependencies]
 atty = "0.2"
 cancel = "0.1"
-dirs = "2.0"
+dirs-next = "2.0"
 anyhow = "1.0"
 filedescriptor = "0.8"
 lazy_static = "1.3"

@@ -66,7 +66,7 @@ impl Host {
 impl ShellHost for Host {
     fn lookup_homedir(&self, user: Option<&str>) -> anyhow::Result<OsString> {
         if user.is_none() {
-            if let Some(home) = dirs::home_dir() {
+            if let Some(home) = dirs_next::home_dir() {
                 if let Some(s) = home.to_str() {
                     // Urgh for windows.
                     Ok(s.replace("\\", "/").into())
