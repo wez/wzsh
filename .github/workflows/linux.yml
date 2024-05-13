@@ -23,17 +23,17 @@ jobs:
          override: true
          components: "rustfmt"
     - name: "Cache cargo registry"
-      uses: actions/cache@v1
+      uses: actions/cache@v4
       with:
          path: "~/.cargo/registry"
          key: "ubuntu-${{ hashFiles('Cargo.toml') }}-cargo-registry"
     - name: "Cache cargo index"
-      uses: actions/cache@v1
+      uses: actions/cache@v4
       with:
          path: "~/.cargo/git"
          key: "ubuntu-${{ hashFiles('Cargo.toml') }}-cargo-index"
     - name: "Cache cargo build"
-      uses: actions/cache@v1
+      uses: actions/cache@v4
       with:
          path: "target"
          key: "ubuntu-${{ hashFiles('Cargo.toml') }}-cargo-build-target"
