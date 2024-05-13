@@ -1,6 +1,6 @@
 use crate::node::Node;
 use crate::{new_binary_pattern_string, normalize_slashes, Walker};
-use bstr::BStr;
+use bstr::ByteSlice;
 use regex::bytes::Regex;
 use std::path::{Path, PathBuf};
 
@@ -66,8 +66,8 @@ impl RecursiveWalker {
     }
 
     fn is_match(&self, path: &Path) -> bool {
-        let matched = if let Some(bstr) = BStr::from_path(path) {
-            self.regex.is_match(bstr.as_bytes())
+        let matched = if let Some(bytes) = <[u8]>::from_path(path) {
+            self.regex.is_match(bytes)
         } else {
             false
         };

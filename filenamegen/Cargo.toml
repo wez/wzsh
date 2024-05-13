@@ -1,8 +1,8 @@
 [package]
 name = "filenamegen"
-version = "0.2.4"
+version = "0.2.5"
 authors = ["Wez Furlong"]
-edition = "2018"
+edition = "2021"
 description = "Shell-style filename generation aka globbing"
 license = "MIT"
 documentation = "https://docs.rs/filenamegen"
@@ -11,14 +11,14 @@ keywords = ["glob", "wildmatch", "filenamegen", "fnmatch"]
 readme = "README.md"
 
 [dependencies]
-bstr = "0.1"
+bstr = "1.0"
 anyhow = "1.0"
-regex = "1.1"
-walkdir = "2.3"
+regex = "1.10"
+walkdir = "2.5"
 
 [dev-dependencies]
-pretty_assertions = "0.6"
-tempdir = "0.3"
+pretty_assertions = "1.4"
+tempfile = "3.10"
 
 [target.'cfg(unix)'.dev-dependencies]
-nix = "0.17"
+nix = {version="0.28", features=["feature"]}

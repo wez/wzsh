@@ -3,6 +3,7 @@ use crate::normalize_slashes;
 use crate::recursivewalker::RecursiveWalker;
 use crate::Walker;
 use bstr::BStr;
+use bstr::ByteSlice;
 use std::ffi::OsStr;
 use std::path::PathBuf;
 
@@ -82,8 +83,13 @@ impl<'a> NodeWalker<'a> {
                 Ok(entry) => {
                     let file_name = entry.path();
                     let base_name = file_name.file_name().unwrap();
-                    if let Some(bstr) = BStr::from_os_str(base_name) {
-                        if self.node_to_match.as_ref().unwrap().is_match(&bstr) {
+                    if let Some(bstr) = <[u8]>::from_os_str(base_name) {
+                        if self
+                            .node_to_match
+                            .as_ref()
+                            .unwrap()
+                            .is_match(BStr::new(bstr))
+                        {
                             let is_leaf = self.node.peek().is_none();
                             if is_leaf {
                                 let rel_path = self.current_dir.join(base_name);

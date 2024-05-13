@@ -204,7 +204,7 @@ impl<'a> Iterator for Walker<'a> {
 mod test {
     use super::*;
     use pretty_assertions::assert_eq;
-    use tempdir::TempDir;
+    use tempfile::TempDir;
 
     #[allow(unused)]
     fn make_dirs_in(root: &TempDir, dirs: &[&str]) -> anyhow::Result<()> {
@@ -241,7 +241,7 @@ mod test {
             // is a symlink and that messes with some test assertions
             std::env::set_var("TMPDIR", std::env::temp_dir().canonicalize()?);
         }
-        Ok(TempDir::new("filenamegen")?)
+        Ok(TempDir::new()?)
     }
 
     #[test]
@@ -271,8 +271,9 @@ mod test {
     #[test]
     fn non_utf8_node_match() -> anyhow::Result<()> {
         let node = parse("*.rs")?;
+        use bstr::BStr;
         use bstr::B;
-        let pound = B(b"\xa3.rs");
+        let pound = BStr::new(B(b"\xa3.rs"));
 
         eprintln!("pound is {:?}", pound);
         eprintln!("node is {:?}", node);
@@ -333,9 +334,16 @@ mod test {
     #[test]
     #[cfg(all(unix, not(target_os = "macos")))]
     fn test_non_utf8_on_disk() -> anyhow::Result<()> {
+        use bstr::ByteSlice;
         use bstr::B;
 
-        if nix::sys::utsname::uname().release().contains("Microsoft") {
+        if nix::sys::utsname::uname()
+            .unwrap()
+            .release()
+            .to_str()
+            .unwrap()
+            .contains("Microsoft")
+        {
             // If we're running on WSL the filesystem has
             // tigher restrictions
             return Ok(());
@@ -343,10 +351,11 @@ mod test {
 
         let root = make_fixture()?;
         let pound = B(b"\xa3.rs").to_path()?;
-        // on macos, the system won't allow us to create invalid utf8 names
-        touch_file(root.path().join(&pound))?;
-        let glob = Glob::new("*.rs")?;
-        assert_eq!(glob.walk(root), vec![pound.to_path_buf()]);
+        // Some operating systems/filesystems won't allow us to create invalid utf8 names
+        if touch_file(root.path().join(&pound)).is_ok() {
+            let glob = Glob::new("*.rs")?;
+            assert_eq!(glob.walk(root), vec![pound.to_path_buf()]);
+        }
         Ok(())
     }
 

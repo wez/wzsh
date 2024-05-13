@@ -2,6 +2,7 @@ use crate::token::Token;
 use bstr::BStr;
 #[cfg(windows)]
 use bstr::BString;
+use bstr::ByteSlice;
 use regex::bytes::Regex;
 use std::path::PathBuf;
 
