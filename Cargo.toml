@@ -6,7 +6,7 @@ edition = "2018"
 default-run = "wzsh"
 
 [build-dependencies]
-vergen = "3"
+vergen = "8"
 
 [dependencies]
 atty = "0.2"
@@ -21,10 +21,10 @@ shell_compiler = { path = "shell_compiler" }
 shell_lexer = { path = "shell_lexer" }
 shell_parser = { path = "shell_parser" }
 shell_vm = { path = "shell_vm" }
-structopt = "0.2"
+structopt = "0.3"
 pathsearch = { path = "pathsearch" }
 chrono = "0.4"
-sqlite = "0.25"
+sqlite = "0.36"
 
 [dependencies.tabout]
 version="0.3"
@@ -32,7 +32,7 @@ version="0.3"
 #git = "https://github.com/wez/wezterm.git"
 
 [dependencies.termwiz]
-version="0.8"
+version="0.22"
 #path = "../wezterm/termwiz"
 #git = "https://github.com/wez/wezterm.git"
 
