@@ -361,6 +361,26 @@ mod test {
     }
 
     #[test]
+    fn test_lua_toml() -> anyhow::Result<()> {
+        let root = make_fixture()?;
+        touch_files_in(
+            &root,
+            &["simple.lua", "assets/policy-extras/bar.lua", "assets/policy-extras/shaping.toml"],
+        )?;
+        let glob = Glob::new("**/*.{lua,toml}")?;
+        assert_eq!(
+            glob.walk(&root),
+            vec![
+                PathBuf::from("assets/policy-extras/bar.lua"),
+                PathBuf::from("assets/policy-extras/shaping.toml"),
+                PathBuf::from("simple.lua"),
+            ]
+        );
+
+        Ok(())
+    }
+
+    #[test]
     fn test_more() -> anyhow::Result<()> {
         let root = make_fixture()?;
         touch_files_in(

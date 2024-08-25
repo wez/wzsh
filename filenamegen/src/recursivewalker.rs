@@ -20,9 +20,9 @@ impl RecursiveWalker {
         Node::RecursiveMatch.append_regex(&mut pattern);
         for node in nodes {
             #[cfg(not(windows))]
-            pattern.push('/');
+            pattern.push_str("/?");
             #[cfg(windows)]
-            pattern.push_str("[/\\\\]");
+            pattern.push_str("[/\\\\]?");
             node.append_regex(&mut pattern);
         }
         pattern.push('$');
