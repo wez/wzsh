@@ -21,4 +21,4 @@ pretty_assertions = "1.4"
 tempfile = "3.10"
 
 [target.'cfg(unix)'.dev-dependencies]
-nix = {version="0.28", features=["feature"]}
+nix = {version="0.29", features=["feature"]}
