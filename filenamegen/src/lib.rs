@@ -324,8 +324,8 @@ mod test {
     #[cfg(windows)]
     fn case_insensitive() -> anyhow::Result<()> {
         let node = parse("foo/bar.rs")?;
-        use bstr::B;
         use bstr::BStr;
+        use bstr::B;
         let upper = B(b"FOO/bAr.rs");
 
         assert_eq!(node.is_match(BStr::new(&upper)), true);
@@ -365,7 +365,11 @@ mod test {
         let root = make_fixture()?;
         touch_files_in(
             &root,
-            &["simple.lua", "assets/policy-extras/bar.lua", "assets/policy-extras/shaping.toml"],
+            &[
+                "simple.lua",
+                "assets/policy-extras/bar.lua",
+                "assets/policy-extras/shaping.toml",
+            ],
         )?;
         let glob = Glob::new("**/*.{lua,toml}")?;
         assert_eq!(

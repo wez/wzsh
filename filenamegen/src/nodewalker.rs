@@ -132,15 +132,14 @@ impl<'a> NodeWalker<'a> {
                 node => node,
             };
 
-            if self.node_to_match.as_ref().unwrap().is_recursive()
-                && self.node.peek().is_some() {
-                    walker.recursive.push_back(RecursiveWalker::new(
-                        self.node.clone(),
-                        walker.root.join(&self.current_dir),
-                    ));
-                    return None;
-                }
-                // Otherwise: a leaf recursive match is equivalent to ZeroOrMore
+            if self.node_to_match.as_ref().unwrap().is_recursive() && self.node.peek().is_some() {
+                walker.recursive.push_back(RecursiveWalker::new(
+                    self.node.clone(),
+                    walker.root.join(&self.current_dir),
+                ));
+                return None;
+            }
+            // Otherwise: a leaf recursive match is equivalent to ZeroOrMore
 
             let name = walker.root.join(&self.current_dir);
             match std::fs::read_dir(&name) {

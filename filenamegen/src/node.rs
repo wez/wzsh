@@ -62,10 +62,9 @@ impl Node {
 
     pub fn is_literal_prefix_component(&self) -> bool {
         match self {
-            Node::LiteralComponents(p) => matches!(
-                p.components().next(),
-                Some(std::path::Component::Prefix(_))
-            ),
+            Node::LiteralComponents(p) => {
+                matches!(p.components().next(), Some(std::path::Component::Prefix(_)))
+            }
 
             _ => false,
         }
