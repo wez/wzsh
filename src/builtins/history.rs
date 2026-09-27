@@ -58,7 +58,7 @@ impl SqliteHistory {
 }
 
 impl History for SqliteHistory {
-    fn get(&self, idx: HistoryIndex) -> Option<Cow<str>> {
+    fn get(&self, idx: HistoryIndex) -> Option<Cow<'_, str>> {
         let mut cursor = self
             .connection
             .prepare("select cmd from history where rowid=?")
@@ -112,7 +112,7 @@ impl History for SqliteHistory {
         style: SearchStyle,
         direction: SearchDirection,
         pattern: &str,
-    ) -> Option<SearchResult> {
+    ) -> Option<SearchResult<'_>> {
         let query = match (style, direction) {
             (SearchStyle::Substring, SearchDirection::Backwards) => {
                 "select rowid, cmd from history where rowid <= ? and cmd like ? order by rowid desc limit 1"

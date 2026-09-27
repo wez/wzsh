@@ -79,7 +79,7 @@ impl<R: Read> CharReader<R> {
         }
     }
 
-    pub fn matches_regex(&mut self, regex: &Regex) -> anyhow::Result<Option<(Captures, Pos)>> {
+    pub fn matches_regex(&mut self, regex: &Regex) -> anyhow::Result<Option<(Captures<'_>, Pos)>> {
         match self.check_and_fill_buffer() {
             Next::Eof(_) => Ok(None),
             Next::Error(err, pos) => return Err(err.context(pos).into()),
