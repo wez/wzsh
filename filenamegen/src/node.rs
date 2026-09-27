@@ -62,10 +62,10 @@ impl Node {
 
     pub fn is_literal_prefix_component(&self) -> bool {
         match self {
-            Node::LiteralComponents(p) => match p.components().next() {
-                Some(std::path::Component::Prefix(_)) => true,
-                _ => false,
-            },
+            Node::LiteralComponents(p) => matches!(
+                p.components().next(),
+                Some(std::path::Component::Prefix(_))
+            ),
 
             _ => false,
         }
@@ -73,10 +73,7 @@ impl Node {
 
     /// Convenience for testing whether Node is RecursiveMatch
     pub fn is_recursive(&self) -> bool {
-        match self {
-            Node::RecursiveMatch => true,
-            _ => false,
-        }
+        matches!(self, Node::RecursiveMatch)
     }
 
     /// Append a regex representation of Node to the supplied pattern string

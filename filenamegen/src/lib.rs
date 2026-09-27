@@ -277,7 +277,7 @@ mod test {
 
         eprintln!("pound is {:?}", pound);
         eprintln!("node is {:?}", node);
-        assert_eq!(node.is_match(&pound), true);
+        assert_eq!(node.is_match(pound), true);
 
         Ok(())
     }
@@ -289,7 +289,7 @@ mod test {
 
         let glob = Glob::new("Program Files (x86)/*")?;
         assert_eq!(
-            glob.walk(&root.path()),
+            glob.walk(root.path()),
             vec![PathBuf::from("Program Files (x86)/Foo Bar")]
         );
 
@@ -353,7 +353,7 @@ mod test {
         let root = make_fixture()?;
         let pound = B(b"\xa3.rs").to_path()?;
         // Some operating systems/filesystems won't allow us to create invalid utf8 names
-        if touch_file(root.path().join(&pound)).is_ok() {
+        if touch_file(root.path().join(pound)).is_ok() {
             let glob = Glob::new("*.rs")?;
             assert_eq!(glob.walk(root), vec![pound.to_path_buf()]);
         }

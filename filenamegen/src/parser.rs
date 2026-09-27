@@ -95,7 +95,7 @@ impl<'a> Parser<'a> {
 
     #[allow(unused)]
     fn peek(&mut self) -> Option<char> {
-        self.chars.peek().map(|&ch| ch)
+        self.chars.peek().copied()
     }
 }
 

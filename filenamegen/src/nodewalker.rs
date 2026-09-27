@@ -59,7 +59,7 @@ impl<'a> NodeWalker<'a> {
 
     // Advance to the next directory component
     fn next_candidate_path(&mut self) -> Option<&'a Node> {
-        while let Some(node) = self.node.next() {
+        for node in self.node.by_ref() {
             match node {
                 Node::LiteralComponents(literal) => {
                     self.current_dir = self.current_dir.join(literal);
@@ -105,7 +105,7 @@ impl<'a> NodeWalker<'a> {
                 }
             }
         }
-        return None;
+        None
     }
 
     pub(crate) fn next(&mut self, walker: &mut Walker<'a>) -> Option<PathBuf> {
@@ -132,8 +132,8 @@ impl<'a> NodeWalker<'a> {
                 node => node,
             };
 
-            if self.node_to_match.as_ref().unwrap().is_recursive() {
-                if self.node.peek().is_some() {
+            if self.node_to_match.as_ref().unwrap().is_recursive()
+                && self.node.peek().is_some() {
                     walker.recursive.push_back(RecursiveWalker::new(
                         self.node.clone(),
                         walker.root.join(&self.current_dir),
@@ -141,7 +141,6 @@ impl<'a> NodeWalker<'a> {
                     return None;
                 }
                 // Otherwise: a leaf recursive match is equivalent to ZeroOrMore
-            }
 
             let name = walker.root.join(&self.current_dir);
             match std::fs::read_dir(&name) {

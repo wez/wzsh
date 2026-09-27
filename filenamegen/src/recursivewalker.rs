@@ -54,7 +54,7 @@ impl RecursiveWalker {
                     return Some(normalize_slashes(
                         entry
                             .path()
-                            .strip_prefix(&walker.root)
+                            .strip_prefix(walker.root)
                             .expect("walk is always relative to walker.root")
                             .to_path_buf(),
                     ));
