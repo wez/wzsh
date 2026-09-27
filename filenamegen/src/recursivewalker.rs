@@ -1,11 +1,14 @@
 use crate::node::Node;
-use crate::{new_binary_pattern_string, normalize_slashes, Walker};
+use crate::{new_binary_pattern_string, normalize_slashes};
 use bstr::ByteSlice;
 use regex::bytes::Regex;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
 pub struct RecursiveWalker {
+    /// The literal path components consumed before reaching the `**`,
+    /// relative to the walk root of the glob.
+    prefix: PathBuf,
     walk_root: PathBuf,
     walk: Option<walkdir::IntoIter>,
     regex: Regex,
@@ -14,8 +17,12 @@ pub struct RecursiveWalker {
 impl RecursiveWalker {
     pub fn new<'a>(
         nodes: std::iter::Peekable<std::slice::Iter<'a, Node>>,
-        walk_root: PathBuf,
+        root: &Path,
+        prefix: PathBuf,
     ) -> Self {
+        // `join` discards `root` when `prefix` is absolute, matching how an
+        // absolute pattern resolves in the non-recursive walker.
+        let walk_root = root.join(&prefix);
         let mut pattern = new_binary_pattern_string();
         Node::RecursiveMatch.append_regex(&mut pattern);
         for node in nodes {
@@ -30,12 +37,13 @@ impl RecursiveWalker {
 
         Self {
             regex,
+            prefix,
             walk_root,
             walk: None,
         }
     }
 
-    pub(crate) fn next<'a>(&mut self, walker: &mut Walker<'a>) -> Option<PathBuf> {
+    pub(crate) fn next(&mut self) -> Option<PathBuf> {
         if self.walk.is_none() {
             self.walk = Some(
                 walkdir::WalkDir::new(&self.walk_root)
@@ -51,13 +59,10 @@ impl RecursiveWalker {
                     .strip_prefix(&self.walk_root)
                     .expect("walk is always relative to self.walk_root");
                 if self.is_match(path) {
-                    return Some(normalize_slashes(
-                        entry
-                            .path()
-                            .strip_prefix(walker.root)
-                            .expect("walk is always relative to walker.root")
-                            .to_path_buf(),
-                    ));
+                    // `path` is relative to `walk_root`. Rejoining `prefix`
+                    // yields a result in the same shape the non-recursive
+                    // walker produces, relative to the walk root of the glob.
+                    return Some(normalize_slashes(self.prefix.join(path)));
                 }
             }
         }

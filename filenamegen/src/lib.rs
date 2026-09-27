@@ -190,7 +190,7 @@ impl<'a> Iterator for Walker<'a> {
         }
 
         while let Some(mut route) = self.recursive.pop_front() {
-            if let Some(path) = route.next(self) {
+            if let Some(path) = route.next() {
                 self.recursive.push_front(route);
                 return Some(path);
             }
@@ -264,6 +264,27 @@ mod test {
         assert_eq!(
             glob.walk(&std::env::current_dir()?),
             vec![normalize_slashes(root.path().join("src/lib.rs"))]
+        );
+        Ok(())
+    }
+
+    // An absolute pattern with a `**` component walked from an unrelated
+    // root once panicked when stripping the absolute entry path against the
+    // walk root: https://github.com/KumoCorp/kumomta/issues/578
+    #[test]
+    fn test_non_relative_recursive() -> anyhow::Result<()> {
+        let root = make_fixture()?;
+        touch_files_in(&root, &["vmtas/a/one.toml", "vmtas/b/two.toml"])?;
+        let glob = Glob::new(&format!(
+            "{}/vmtas/**/*.toml",
+            normalize_slashes(root.path().to_path_buf()).display()
+        ))?;
+        assert_eq!(
+            glob.walk(&std::env::current_dir()?),
+            vec![
+                normalize_slashes(root.path().join("vmtas/a/one.toml")),
+                normalize_slashes(root.path().join("vmtas/b/two.toml")),
+            ]
         );
         Ok(())
     }
@@ -445,6 +466,10 @@ mod test {
                 PathBuf::from("woot")
             ]
         );
+
+        // A literal prefix ahead of `**` is retained in the results.
+        let glob = Glob::new("foo/**/*.rs")?;
+        assert_eq!(glob.walk(&root), vec![PathBuf::from("foo/src/foo.rs")]);
         Ok(())
     }
 

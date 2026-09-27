@@ -135,11 +135,13 @@ impl<'a> NodeWalker<'a> {
             if self.node_to_match.as_ref().unwrap().is_recursive() && self.node.peek().is_some() {
                 walker.recursive.push_back(RecursiveWalker::new(
                     self.node.clone(),
-                    walker.root.join(&self.current_dir),
+                    walker.root,
+                    self.current_dir.clone(),
                 ));
                 return None;
             }
-            // Otherwise: a leaf recursive match is equivalent to ZeroOrMore
+            // A `**` in the leaf position falls through to the same directory
+            // read below as `*`, matching one entry instead of recursing.
 
             let name = walker.root.join(&self.current_dir);
             match std::fs::read_dir(&name) {
